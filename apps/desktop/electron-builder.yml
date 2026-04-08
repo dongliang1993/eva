@@ -1,0 +1,42 @@
+appId: com.eva.desktop
+productName: Eva
+directories:
+  output: release
+files:
+  - dist-electron/**/*
+  - "!node_modules"
+  - "!electron"
+  - "!scripts"
+  - "!build"
+  - "!release"
+  - "!.server-deploy"
+extraResources:
+  - from: ../../apps/server/dist/
+    to: server/dist/
+    filter:
+      - "**/*"
+  - from: .server-deploy/node_modules/
+    to: server/node_modules/
+    filter:
+      - "**/*"
+  - from: ../../apps/server/package.json
+    to: server/package.json
+  - from: ../../apps/server/SOUL.md
+    to: server/SOUL.md
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  target:
+    - target: dmg
+      arch:
+        - arm64
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

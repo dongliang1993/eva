@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ */
+/* Theme tokens — Light mode (GitHub-style, from CodePilot)           */
+/* Override @theme block to switch themes.                            */
+/* ------------------------------------------------------------------ */
+
+@theme {
+  /* Base */
+  --color-background: oklch(1 0 0);
+  --color-foreground: oklch(0.254 0.011 254);
+
+  /* Surfaces */
+  --color-card: oklch(1 0 0);
+  --color-sidebar: oklch(0.985 0.001 106.423);
+  --color-popover: oklch(1 0 0);
+
+  /* Primary (blue-purple) */
+  --color-primary: oklch(0.540 0.191 257.5);
+  --color-primary-foreground: oklch(0.985 0.001 106.423);
+
+  /* Secondary */
+  --color-secondary: oklch(0.97 0.001 106.424);
+  --color-secondary-foreground: oklch(0.216 0.006 56.043);
+
+  /* Muted */
+  --color-muted: oklch(0.97 0.001 106.424);
+  --color-muted-foreground: oklch(0.553 0.013 58.071);
+
+  /* Accent */
+  --color-accent: oklch(0.97 0.001 106.424);
+  --color-accent-foreground: oklch(0.216 0.006 56.043);
+
+  /* Borders */
+  --color-border: oklch(0.923 0.003 48.717);
+  --color-input: oklch(0.923 0.003 48.717);
+  --color-ring: oklch(0.540 0.191 257.5);
+
+  /* Semantic */
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-success: oklch(0.527 0.154 150.069);
+  --color-warning: oklch(0.705 0.213 47.604);
+
+  /* User bubble (dark teal, like CodePilot screenshot) */
+  --color-user-bubble: oklch(0.45 0.08 220);
+  --color-user-bubble-foreground: oklch(0.985 0.001 106.423);
+
+  /* Sidebar active item */
+  --color-sidebar-active: oklch(0.540 0.191 257.5 / 10%);
+  --color-sidebar-active-foreground: oklch(0.540 0.191 257.5);
+
+  /* Terminal / code */
+  --color-terminal: oklch(0.97 0.001 106.424);
+  --color-terminal-foreground: oklch(0.254 0.011 254);
+
+  /* Radius */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Electron titlebar drag region                                      */
+/* ------------------------------------------------------------------ */
+
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+
+.titlebar-drag button,
+.titlebar-drag a,
+.titlebar-drag input,
+.titlebar-drag [role="button"] {
+  -webkit-app-region: no-drag;
+}
+
+/* ------------------------------------------------------------------ */
+/* Base styles                                                        */
+/* ------------------------------------------------------------------ */
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+}
+
+/* Global scrollbar — thin, transparent by default */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.553 0.013 58.071 / 25%);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.553 0.013 58.071 / 40%);
+}
+
+/*
+ * Message list scroll: hide scrollbar by default, show on hover.
+ * This prevents the scrollbar from consuming layout width.
+ */
+.message-list-scroll {
+  scrollbar-width: none; /* Firefox */
+}
+.message-list-scroll::-webkit-scrollbar {
+  width: 0; /* Hidden by default — no layout shift */
+}
+.message-list-scroll:hover {
+  scrollbar-width: thin; /* Firefox: show on hover */
+}
+.message-list-scroll:hover::-webkit-scrollbar {
+  width: 6px; /* Webkit: show on hover */
+}
+
+/* Text selection */
+::selection {
+  background: oklch(0.540 0.191 257.5 / 20%);
+}

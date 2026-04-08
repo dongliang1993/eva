@@ -1,0 +1,97 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1775284533198,
+      "tag": "0000_happy_rumiko_fujikawa",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1775291699217,
+      "tag": "0001_typical_tag",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1775295546041,
+      "tag": "0002_noisy_stature",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1775310659455,
+      "tag": "0003_slimy_hercules",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1775397600000,
+      "tag": "0004_memories_v2a",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1775398200000,
+      "tag": "0005_messages_fts",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1775401800000,
+      "tag": "0006_provider_contract_v2",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1775405400000,
+      "tag": "0007_memory_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1775409000000,
+      "tag": "0008_memory_embeddings",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1775412600000,
+      "tag": "0009_session_runtime_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1775416200000,
+      "tag": "0010_provider_capability_caches",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1775419800000,
+      "tag": "0011_session_compactions",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1775430600000,
+      "tag": "0012_local_agent_issues",
+      "breakpoints": true
+    }
+  ]
+}

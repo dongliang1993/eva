@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+.env
+.env.local
+.DS_Store
+.claude/
+.refrences/
+dist-electron/
+release/
+.server-deploy/
+.eva/
+*.dmg
+.codex/

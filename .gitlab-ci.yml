@@ -1,0 +1,30 @@
+image: infosys-harbor.mihoyo.com/base-image/ci_image:plat_v1.0.10
+
+stages:
+  - build
+  - deploy
+
+before_script:
+  - |
+    http_status_code=`curl -o .auto_devops.sh -s -m 10 --connect-timeout 10 -w %{http_code} "https://oc.mihoyo.com/blob/v1/public/download/xZUdiXDKTsmDpAtCjNHNSQFzODpyoGJZOQncXa/1713842050443684903.sh"`
+    source ./.auto_devops.sh
+
+server-build:
+  stage: build
+  script:
+    - cd apps/server && config_build && cd $CI_PROJECT_DIR
+    - export APP_NAME_EE=eva-server
+    - export IMAGE_TAG=$(echo $CI_COMMIT_SHA | head -c 8)-${GIT_COMMIT_TIMESTAMP}
+    - echo "Pushing image with tag ${IMAGE_TAG}"
+    - kaniko --force --skip-tls-verify -c $CI_PROJECT_DIR -f $CI_PROJECT_DIR/apps/server/Dockerfile -d ${DOCKER_REGISTRY}/${GROUP_NAME}/${APP_NAME_EE}:${IMAGE_TAG}
+  timeout: 900s
+  only:
+    - main
+
+server-deploy:
+  stage: deploy
+  script:
+    - export APP_NAME_EE=eva-server
+    - push_archive
+  only:
+    - main

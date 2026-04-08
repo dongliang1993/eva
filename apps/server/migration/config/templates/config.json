@@ -1,0 +1,7 @@
+{
+  "LLM_API_KEY": "{{.biz.llm.apiKey}}",
+  "LLM_BASE_URL": "{{.biz.llm.baseUrl}}",
+  "LLM_MODEL": "{{.biz.llm.model}}",
+  "WEB_FETCH_MODEL": "{{.biz.llm.webFetchModel}}",
+  "INTERNAL_IM_SIGNING_SECRET": "{{.biz.im.signingSecret}}"
+}
