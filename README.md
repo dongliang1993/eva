@@ -16,6 +16,8 @@ In-depth architecture research + landing plan live in [`docs/architecture/`](./d
 - **11**: one-by-one landing plan (S0–S17, Phase A–E) with fixed decisions (local-first / Vercel AI SDK + Anthropic / macOS arm64).
 - **13**: work-mi→eva reuse assessment (the base this repo was built from).
 
+Per-task implementation plans live in [`docs/plans/`](./docs/plans/): S1 harness→Vercel AI SDK migration, Claude-Code-style compaction design.
+
 Active task tracking: see the **Roadmap** section below and `docs/architecture/11-landing-plan.md`.
 
 ## Workspace Layout
