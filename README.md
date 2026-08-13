@@ -6,6 +6,10 @@ Local-first AI agent desktop assistant (Electron + Fastify + SQLite). Built as a
 - Vercel-AI-SDK-style agent harness with tool calling, subagents, skills, memory, and compaction.
 - better-sqlite3 + drizzle + sqlite-vec + FTS5 storage.
 
+## Architecture Docs
+
+In-depth architecture research + landing plan live in [`docs/architecture/`](./docs/architecture/README.md) — a 14-doc series (00–13) covering: Alma/WeaveLynx teardown (process model, frontend, Electron, backend, agent harness, memory, multi-agent), extension slot host design, frontend conventions, the one-by-one landing plan (S0–S17), and the work-mi→eva reuse assessment.
+
 ## Workspace Layout
 
 ```text
