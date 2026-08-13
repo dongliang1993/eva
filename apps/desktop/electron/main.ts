@@ -276,7 +276,9 @@ function killServer(): void {
       console.log("[server] Force killing...");
 
       try {
-        process.kill(serverProcess.pid, "SIGKILL");
+        if (serverProcess.pid !== undefined) {
+          process.kill(serverProcess.pid, "SIGKILL");
+        }
       } catch {
         // Process may have already exited
       }
