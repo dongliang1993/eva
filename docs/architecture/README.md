@@ -22,6 +22,8 @@
 | 11 | [落地计划](./11-landing-plan.md) | one-by-one 任务拆分（S0–S17 / Phase A–E）、决策固化（本地优先/Claude/mac-only）、验收标准、依赖图 | ✅ |
 | 12 | [SDK 选型调研] | Claude Agent SDK vs Vercel AI SDK 调研（结论并入 11 §1.1，未单列文档） | ✅ |
 | 13 | [work-mi 复用评估](./13-work-mi-reuse-assessment.md) | work-mi monorepo 可复用性评估：技术栈对位、切片覆盖度、harness 改造、复用决策 | ✅ |
+| 14 | [Eva 技术架构](./14-eva-architecture.md) | 基于 Alma × WeaveLynx 取舍的目标架构：12 条设计原则、Session/Run 领域模型、流式协议、数据架构、不做清单 | ✅ |
+| 15 | [Eva 执行手册](./15-eva-execution-playbook.md) | 按当前进度校准的施工手册：每阶段做什么/怎么做/验收/坑、文档→任务地图、依赖图 | ✅ |
 
 ## 你问的 5 个方面 → 对应文档
 
