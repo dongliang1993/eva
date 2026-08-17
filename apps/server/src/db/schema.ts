@@ -181,3 +181,24 @@ export const sessionCompactions = sqliteTable(
     uniqueIndex("idx_session_compactions_session_id").on(table.sessionId)
   ]
 );
+
+export const approvalRequests = sqliteTable(
+  "approval_requests",
+  {
+    id: text("id").primaryKey(), // tool callId
+    sessionId: text("session_id").notNull(),
+    tool: text("tool").notNull(),
+    args: text("args").notNull(), // JSON
+    status: text("status", { enum: ["pending", "granted", "denied"] })
+      .notNull()
+      .default("pending"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    decidedAt: text("decided_at")
+  },
+  (table) => [
+    index("idx_approval_requests_session").on(table.sessionId),
+    index("idx_approval_requests_status").on(table.status)
+  ]
+);

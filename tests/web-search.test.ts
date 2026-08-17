@@ -31,10 +31,17 @@ describe("createWebSearchTool", () => {
     } satisfies WebSearchResponse);
     const tool = createWebSearchTool({ search });
 
-    const raw = await tool.invoke({
-      query: "latest work mi release",
-      maxResults: 3
-    });
+    const raw = await tool.tool.execute!(
+      {
+        query: "latest work mi release",
+        maxResults: 3
+      },
+      {
+        messages: [],
+        toolCallId: "test",
+        context: {}
+      }
+    );
 
     expect(search).toHaveBeenCalledWith({
       query: "latest work mi release",

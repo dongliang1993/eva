@@ -44,13 +44,13 @@ export type AgentTelemetryEvent =
       readonly hasToolCalls: boolean;
     }
   | {
-      readonly type: "tool_call_start";
+      readonly type: "tool_call_initiated";
       readonly step: number;
       readonly toolName: string;
       readonly toolCallId: string;
     }
   | {
-      readonly type: "tool_call_end";
+      readonly type: "tool_call_completed";
       readonly step: number;
       readonly toolName: string;
       readonly toolCallId: string;

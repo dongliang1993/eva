@@ -1,11 +1,11 @@
-import {
-  AIMessage,
-  HumanMessage,
-  SystemMessage,
-  ToolMessage,
-  type BaseMessage,
-  type MessageContent
-} from "@langchain/core/messages";
+import type {
+  AssistantModelMessage,
+  ModelMessage,
+  SystemModelMessage,
+  ToolModelMessage,
+  ToolResultPart,
+  ToolCallPart
+} from "ai";
 
 import type { ContextWindowPolicy } from "./policy.js";
 
@@ -17,7 +17,7 @@ const PRESERVED_RECENT_RUNTIME_MESSAGES = 4;
 const PRESERVED_RECENT_REACTIVE_MESSAGES = 2;
 
 export interface RuntimeCompactResult {
-  readonly messages: BaseMessage[];
+  readonly messages: ModelMessage[];
   readonly changed: boolean;
   readonly messageCountBefore: number;
   readonly messageCountAfter: number;
@@ -25,7 +25,8 @@ export interface RuntimeCompactResult {
   readonly estimatedTokensAfter: number;
 }
 
-const stringifyContent = (content: MessageContent): string => {
+// 把任意 message content(string | Array<part>)拍平成纯文本。
+const stringifyContent = (content: unknown): string => {
   if (content === undefined || content === null) {
     return "";
   }
@@ -41,13 +42,18 @@ const stringifyContent = (content: MessageContent): string => {
           return item;
         }
 
-        if (
-          typeof item === "object" &&
-          item !== null &&
-          "text" in item &&
-          typeof item.text === "string"
-        ) {
-          return item.text;
+        if (typeof item === "object" && item !== null) {
+          const part = item as Record<string, unknown>;
+          if (typeof part.text === "string") return part.text;
+          if (part.type === "tool-call") {
+            const tc = part as unknown as ToolCallPart;
+            return JSON.stringify({ name: tc.toolName, args: tc.input });
+          }
+          if (part.type === "tool-result") {
+            const tr = part as unknown as ToolResultPart;
+            return stringifyToolOutput(tr.output);
+          }
+          return JSON.stringify(part);
         }
 
         return JSON.stringify(item);
@@ -58,6 +64,19 @@ const stringifyContent = (content: MessageContent): string => {
   return JSON.stringify(content) ?? "";
 };
 
+const stringifyToolOutput = (output: ToolResultPart["output"]): string => {
+  switch (output.type) {
+    case "text":
+      return output.value;
+    case "json":
+      return typeof output.value === "string" ? output.value : JSON.stringify(output.value);
+    case "execution-denied":
+      return `Execution denied${output.reason ? `: ${output.reason}` : ""}`;
+    default:
+      return JSON.stringify(output);
+  }
+};
+
 const normalizeSummaryText = (text: string): string => {
   const compact = text.replace(/\s+/g, " ").trim();
 
@@ -66,72 +85,100 @@ const normalizeSummaryText = (text: string): string => {
     : `${compact.slice(0, MAX_SUMMARY_TEXT_LENGTH - 3)}...`;
 };
 
-const estimateMessageTokens = (message: BaseMessage): number => {
+// 从 assistant message content 里抽 tool-call part。
+const readToolCalls = (message: AssistantModelMessage): ToolCallPart[] => {
+  if (typeof message.content === "string") {
+    return [];
+  }
+  return message.content.filter(
+    (p): p is ToolCallPart =>
+      typeof p === "object" && p !== null && "type" in p && p.type === "tool-call"
+  );
+};
+
+// 从 tool message content 里取第一个 tool-result part。
+const readToolResult = (message: ToolModelMessage): ToolResultPart | undefined =>
+  message.content.find(
+    (p): p is ToolResultPart =>
+      typeof p === "object" && p !== null && "type" in p && p.type === "tool-result"
+  );
+
+const estimateMessageTokens = (message: ModelMessage): number => {
   let text = stringifyContent(message.content);
 
-  if (message instanceof AIMessage && message.tool_calls && message.tool_calls.length > 0) {
-    text = [
-      text,
-      ...message.tool_calls.map((toolCall) =>
-        JSON.stringify({
-          name: toolCall.name,
-          args: toolCall.args
-        })
-      )
-    ].filter(Boolean).join("\n");
+  if (message.role === "assistant") {
+    const toolCalls = readToolCalls(message);
+    if (toolCalls.length > 0) {
+      text = [
+        text,
+        ...toolCalls.map((tc) => JSON.stringify({ name: tc.toolName, args: tc.input }))
+      ].filter(Boolean).join("\n");
+    }
   }
 
   return Math.max(1, Math.ceil(text.length / ESTIMATED_CHARS_PER_TOKEN));
 };
 
-export const estimateMessagesTokens = (messages: readonly BaseMessage[]): number =>
+export const estimateMessagesTokens = (messages: readonly ModelMessage[]): number =>
   messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
 
-const isRuntimeSummaryMessage = (message: BaseMessage | undefined): message is SystemMessage =>
-  message instanceof SystemMessage
+const isRuntimeSummaryMessage = (
+  message: ModelMessage | undefined
+): message is SystemModelMessage =>
+  message !== undefined
+  && message.role === "system"
   && typeof message.content === "string"
   && message.content.startsWith(RUNTIME_SUMMARY_PREFIX);
 
 const buildToolNameByCallId = (
-  messages: readonly BaseMessage[]
+  messages: readonly ModelMessage[]
 ): Map<string, string> => {
   const toolNameByCallId = new Map<string, string>();
 
   for (const message of messages) {
-    if (!(message instanceof AIMessage) || !message.tool_calls) {
+    if (message.role !== "assistant") {
       continue;
     }
-
-    for (const toolCall of message.tool_calls) {
-      if (toolCall.id && toolCall.name) {
-        toolNameByCallId.set(toolCall.id, toolCall.name);
-      }
+    for (const toolCall of readToolCalls(message)) {
+      toolNameByCallId.set(toolCall.toolCallId, toolCall.toolName);
     }
   }
 
   return toolNameByCallId;
 };
 
+// 从 tool result 的 output 文本判断状态(eva 的 buildTool 把错误包成 "[Tool Error] ..." 文本)。
+const readToolStatus = (message: ToolModelMessage): "success" | "error" => {
+  const result = readToolResult(message);
+  if (!result) return "success";
+  const text = stringifyToolOutput(result.output);
+  return text.startsWith("[Tool Error]") ? "error" : "success";
+};
+
 const summarizeMessage = (
-  message: BaseMessage,
+  message: ModelMessage,
   toolNameByCallId: ReadonlyMap<string, string>
 ): string | undefined => {
-  if (message instanceof ToolMessage) {
-    const toolName = toolNameByCallId.get(message.tool_call_id) ?? "unknown";
-    const content = normalizeSummaryText(stringifyContent(message.content));
+  if (message.role === "tool") {
+    const result = readToolResult(message);
+    const toolCallId = result?.toolCallId;
+    const toolName = (toolCallId && toolNameByCallId.get(toolCallId)) ?? "unknown";
+    const content = result ? normalizeSummaryText(stringifyToolOutput(result.output)) : "";
+    const status = readToolStatus(message);
 
     if (!content) {
-      return `Tool ${toolName} returned ${message.status ?? "success"} with empty output.`;
+      return `Tool ${toolName} returned ${status} with empty output.`;
     }
 
-    return `Tool ${toolName} returned (${message.status ?? "success"}): ${content}`;
+    return `Tool ${toolName} returned (${status}): ${content}`;
   }
 
-  if (message instanceof AIMessage) {
+  if (message.role === "assistant") {
     const text = normalizeSummaryText(stringifyContent(message.content));
+    const toolCalls = readToolCalls(message);
 
-    if (message.tool_calls && message.tool_calls.length > 0) {
-      const tools = message.tool_calls.map((toolCall) => toolCall.name).filter(Boolean);
+    if (toolCalls.length > 0) {
+      const tools = toolCalls.map((tc) => tc.toolName).filter(Boolean);
 
       if (text) {
         return `Assistant: ${text} Tools requested: ${tools.join(", ") || "unknown"}.`;
@@ -143,7 +190,7 @@ const summarizeMessage = (
     return text ? `Assistant: ${text}` : undefined;
   }
 
-  if (message instanceof HumanMessage) {
+  if (message.role === "user") {
     const text = normalizeSummaryText(stringifyContent(message.content));
     return text ? `User: ${text}` : undefined;
   }
@@ -152,7 +199,7 @@ const summarizeMessage = (
 };
 
 const buildRuntimeSummary = (
-  compactedMessages: readonly BaseMessage[],
+  compactedMessages: readonly ModelMessage[],
   previousSummary: string | undefined
 ): string => {
   const toolNameByCallId = buildToolNameByCallId(compactedMessages);
@@ -187,8 +234,8 @@ const buildRuntimeSummary = (
 };
 
 const buildRuntimeCompactResult = (
-  beforeMessages: readonly BaseMessage[],
-  nextMessages: BaseMessage[],
+  beforeMessages: readonly ModelMessage[],
+  nextMessages: ModelMessage[],
   changed: boolean,
   estimatedTokensBefore = estimateMessagesTokens(beforeMessages)
 ): RuntimeCompactResult => ({
@@ -203,7 +250,7 @@ const buildRuntimeCompactResult = (
 });
 
 export const applyProactiveLoopCompactWithStats = (
-  messages: readonly BaseMessage[],
+  messages: readonly ModelMessage[],
   prefixMessageCount: number,
   policy: ContextWindowPolicy
 ): RuntimeCompactResult => {
@@ -233,10 +280,10 @@ export const applyProactiveLoopCompactWithStats = (
 };
 
 export const applyProactiveLoopCompact = (
-  messages: readonly BaseMessage[],
+  messages: readonly ModelMessage[],
   prefixMessageCount: number,
   policy: ContextWindowPolicy
-): BaseMessage[] =>
+): ModelMessage[] =>
   applyProactiveLoopCompactWithStats(
     messages,
     prefixMessageCount,
@@ -244,7 +291,7 @@ export const applyProactiveLoopCompact = (
   ).messages;
 
 export const applyReactiveLoopCompactWithStats = (
-  messages: readonly BaseMessage[],
+  messages: readonly ModelMessage[],
   prefixMessageCount: number
 ): RuntimeCompactResult =>
   compactRuntimeMessages(
@@ -254,13 +301,13 @@ export const applyReactiveLoopCompactWithStats = (
   );
 
 export const applyReactiveLoopCompact = (
-  messages: readonly BaseMessage[],
+  messages: readonly ModelMessage[],
   prefixMessageCount: number
-): BaseMessage[] =>
+): ModelMessage[] =>
   applyReactiveLoopCompactWithStats(messages, prefixMessageCount).messages;
 
 const compactRuntimeMessages = (
-  messages: readonly BaseMessage[],
+  messages: readonly ModelMessage[],
   prefixMessageCount: number,
   preservedRecentRuntimeMessages: number,
   estimatedTokensBefore = estimateMessagesTokens(messages)
@@ -307,16 +354,19 @@ const compactRuntimeMessages = (
     );
   }
 
+  const summaryMessage: SystemModelMessage = {
+    role: "system",
+    content: buildRuntimeSummary(
+      compactedMessages,
+      existingSummary?.content
+    )
+  };
+
   return buildRuntimeCompactResult(
     messages,
     [
       ...prefix,
-      new SystemMessage(
-        buildRuntimeSummary(
-          compactedMessages,
-          existingSummary?.content as string | undefined
-        )
-      ),
+      summaryMessage,
       ...preservedTail
     ],
     true,

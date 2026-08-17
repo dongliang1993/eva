@@ -1,7 +1,15 @@
-import { tool, type StructuredToolInterface } from "@langchain/core/tools";
+import { tool, type Tool, type ToolSet } from "ai";
 import type { z } from "zod";
 
-export type AgentTool = StructuredToolInterface;
+// ai 的 Tool 不带 name(name 是 ToolSet 的 key),但 eva 的 LeadAgent 要按 name 查工具
+// (toolCall.name → tool)。所以 AgentTool 包一层 name,内部持有 ai Tool。
+export interface AgentTool {
+  readonly name: string;
+  readonly tool: Tool;
+  readonly readOnly?: boolean;
+  /** 危险工具:执行前需用户审批。buildTool 会把它映射成 ai tool 的 needsApproval。 */
+  readonly requiresApproval?: boolean;
+}
 
 export interface ToolDefinition<S extends z.ZodObject<z.ZodRawShape>> {
   name: string;
@@ -9,6 +17,7 @@ export interface ToolDefinition<S extends z.ZodObject<z.ZodRawShape>> {
   schema: S;
   execute: (input: z.infer<S>) => Promise<string>;
   readOnly?: boolean;
+  requiresApproval?: boolean;
 }
 
 const toErrorOutput = (error: unknown): string =>
@@ -22,23 +31,39 @@ export const buildTool = <S extends z.ZodObject<z.ZodRawShape>>(
       ? definition.description()
       : definition.description;
 
-  return tool(
-    async (input: z.infer<S>) => {
+  const built: Tool = tool({
+    description,
+    inputSchema: definition.schema,
+    ...(definition.requiresApproval === true ? { needsApproval: true } : {}),
+    execute: async (input) => {
       try {
-        return await definition.execute(input);
+        // parse 应用 schema 的 .default() 等默认值,再交给业务 execute。
+        const parsed = definition.schema.parse(input);
+        return await definition.execute(parsed);
       } catch (error) {
         return toErrorOutput(error);
       }
-    },
-    {
-      name: definition.name,
-      description,
-      schema: definition.schema
     }
-  );
+  });
+
+  return {
+    name: definition.name,
+    tool: built,
+    ...(definition.readOnly !== undefined ? { readOnly: definition.readOnly } : {}),
+    ...(definition.requiresApproval !== undefined
+      ? { requiresApproval: definition.requiresApproval }
+      : {})
+  };
 };
 
 /**
- * @deprecated Use `buildTool` instead for new tools.
+ * 把 AgentTool 数组转成 streamText 需要的 ToolSet (Record<string, Tool>)。
+ * key 用工具的 name。streamText 内部按 key 派生 toolName。
  */
-export const createTool = tool;
+export const toToolSet = (tools: readonly AgentTool[]): ToolSet => {
+  const set: ToolSet = {};
+  for (const agentTool of tools) {
+    set[agentTool.name] = agentTool.tool;
+  }
+  return set;
+};

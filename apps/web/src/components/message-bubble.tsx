@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Streamdown } from "streamdown";
-import "streamdown/styles.css";
 import { Brain, ChevronDown, ChevronUp } from "lucide-react";
+import "streamdown/styles.css";
 
 import type { DisplayMessage } from "../hooks/use-chat";
+import { StreamMarkdown } from "../shared/markdown/markdown.js";
+import { useSmoothStream } from "../shared/streaming/use-smooth-stream.js";
 import { StreamingIndicator } from "./streaming-indicator";
 import { ToolCallBlock } from "./tool-call-block";
 
@@ -53,13 +54,39 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         <ToolCallBlock key={tc.toolCallId} toolCall={tc} />
       ))}
 
-      {message.content ? (
-        <div className="max-w-none text-foreground text-sm leading-relaxed">
-          <Streamdown>{message.content}</Streamdown>
-        </div>
-      ) : message.isStreaming ? (
-        <StreamingIndicator />
-      ) : null}
+      <AssistantContent content={message.content} isStreaming={message.isStreaming} />
     </div>
   );
+}
+
+/**
+ * 流式的 assistant 文本经 rAF 字符泵平滑输出; 静态文本直接渲染。
+ * 拆两个子组件避免在条件里调用 hook(rules-of-hooks)。
+ */
+function AssistantContent({
+  content,
+  isStreaming
+}: {
+  readonly content: string;
+  readonly isStreaming?: boolean;
+}) {
+  if (isStreaming) {
+    return <SmoothStreamingMarkdown content={content} />;
+  }
+
+  if (!content) {
+    return <StreamingIndicator />;
+  }
+
+  return <StreamMarkdown content={content} />;
+}
+
+function SmoothStreamingMarkdown({ content }: { readonly content: string }) {
+  const { content: smooth } = useSmoothStream(content);
+
+  if (smooth.length === 0) {
+    return <StreamingIndicator />;
+  }
+
+  return <StreamMarkdown content={smooth} isStreaming />;
 }

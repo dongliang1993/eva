@@ -262,7 +262,8 @@ export class SessionService {
     sessionId: string,
     result: AgentRunResult,
     tokenUsage?: string,
-    thinkingDurationMs?: number
+    thinkingDurationMs?: number,
+    metadata?: Record<string, unknown>
   ): Message {
     const blocks = resultToContentBlocks(result, thinkingDurationMs);
     const content = serializeMessageContent(blocks);
@@ -274,7 +275,8 @@ export class SessionService {
       role: "assistant",
       content,
       searchText,
-      ...(tokenUsage !== undefined ? { tokenUsage } : {})
+      ...(tokenUsage !== undefined ? { tokenUsage } : {}),
+      ...(metadata !== undefined ? { metadata: JSON.stringify(metadata) } : {})
     });
 
     this.sessions.updateTimestamp(sessionId);

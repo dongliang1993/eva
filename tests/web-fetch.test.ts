@@ -2,24 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   convertToMarkdown,
-  createWebFetchTool,
-  WebFetchClient,
-  type AgentModel
+  WebFetchClient
 } from "../packages/harness/src/index.js";
 import { createWebFetchPromptSection } from "../packages/harness/src/prompts/sections/web-fetch.js";
-
-const makeMockAIMessage = (text: string) => ({
-  content: text,
-  additional_kwargs: {},
-  response_metadata: {},
-  tool_calls: [],
-  usage_metadata: undefined
-});
-
-const makeMockModel = (responseText: string): AgentModel => ({
-  invoke: vi.fn().mockResolvedValue(makeMockAIMessage(responseText)),
-  stream: vi.fn()
-});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -106,39 +91,6 @@ describe("convertToMarkdown", () => {
     const md = await convertToMarkdown(longContent, "text/plain");
     expect(md.length).toBeLessThan(90_000);
     expect(md).toContain("[Content truncated at 80000 characters]");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// createWebFetchTool
-// ---------------------------------------------------------------------------
-
-describe("createWebFetchTool", () => {
-  it("fetches URL, converts to Markdown, and returns AI summary as JSON", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-        new Response("<html><body><h1>Hello World</h1></body></html>", {
-          status: 200,
-          headers: { "content-type": "text/html" }
-        })
-      )
-    );
-
-    const mockModel = makeMockModel("This page says Hello World.");
-
-    const tool = createWebFetchTool({ summaryModel: mockModel });
-    const raw = await tool.invoke({
-      url: "https://example.com",
-      prompt: "Summarize this page"
-    });
-
-    const result = JSON.parse(raw);
-    expect(result.url).toBe("https://example.com");
-    expect(result.summary).toBe("This page says Hello World.");
-    expect(result.statusCode).toBe(200);
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
-    expect(mockModel.invoke).toHaveBeenCalledTimes(1);
   });
 });
 

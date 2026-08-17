@@ -1,9 +1,8 @@
-import type {
-  MessageContent,
-  MessageContentComplex
-} from "@langchain/core/messages";
 import { z } from "zod";
 
+// Loose role enum: accepts legacy LangChain roles (human/ai/function/generic/remove)
+// from older clients at the API boundary, normalized to Vercel ModelMessage roles
+// in services/runs.ts before reaching the agent.
 export const runMessageRoleSchema = z.enum([
   "user",
   "assistant",
@@ -19,18 +18,20 @@ export const runMessageRoleSchema = z.enum([
 
 export type RunMessageRole = z.infer<typeof runMessageRoleSchema>;
 
-const runMessageContentBlockSchema: z.ZodType<MessageContentComplex> = z
-  .object({})
-  .passthrough();
+// Content block shape compatible with Vercel AI SDK prompt parts.
+// Kept permissive (passthrough) so provider-specific part fields survive.
+const runMessageContentBlockSchema = z.object({}).passthrough();
 
-export const runMessageContentSchema: z.ZodType<MessageContent> = z.union([
+export const runMessageContentSchema = z.union([
   z.string(),
   z.array(runMessageContentBlockSchema)
 ]);
 
+export type RunMessageContent = z.infer<typeof runMessageContentSchema>;
+
 export interface RunInputMessage extends Record<string, unknown> {
   role: RunMessageRole;
-  content: MessageContent;
+  content: RunMessageContent;
   name?: string | undefined;
 }
 
@@ -60,4 +61,5 @@ export interface RunInput {
   maxSteps?: RunSchemaData["maxSteps"];
   modelId?: RunSchemaData["modelId"];
   additionalTools?: AgentTool[];
+  abortSignal?: AbortSignal;
 }

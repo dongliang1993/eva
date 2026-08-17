@@ -205,3 +205,5 @@ export const optionalString = (value: unknown): string | undefined =>
 
 export const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : "Unknown error";
+
+export * from "./stream-events.js";

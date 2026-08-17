@@ -11,7 +11,6 @@ import {
   type AppDatabase
 } from "../apps/server/src/db/index.js";
 import {
-  bootstrapLegacyLlmProviderConfig,
   createProvider,
   loadAppSettings,
   replaceAppSettings,
@@ -47,15 +46,8 @@ afterEach(() => {
 });
 
 describe("agent runtime config", () => {
-  it("prefers persisted settings and provider credentials over env LLM config", () => {
-    const config = loadConfig({
-      env: {
-        LLM_API_KEY: "env-key",
-        LLM_BASE_URL: "https://env.example/v1",
-        LLM_MODEL: "gpt-4.1-mini"
-      },
-      cwd: "/tmp"
-    });
+  it("resolves the persisted provider credentials", () => {
+    const config = loadConfig({ env: {}, cwd: "/tmp" });
 
     updateProvider(db, "openai", {
       enabled: true,
@@ -91,31 +83,28 @@ describe("agent runtime config", () => {
       models: [{ id: "gpt-4.1-mini", name: "gpt-4.1-mini" }],
       availableModels: [{ id: "gpt-4.1-mini", name: "gpt-4.1-mini" }]
     });
-    createProvider(db, {
-      id: "openrouter",
-      name: "OpenRouter",
-      type: "openrouter",
-      apiKey: "openrouter-key",
+    updateProvider(db, "anthropic", {
       enabled: true,
-      models: [{ id: "claude-3.7-sonnet", name: "claude-3.7-sonnet" }],
-      availableModels: [{ id: "claude-3.7-sonnet", name: "claude-3.7-sonnet" }]
+      apiKey: "anthropic-key",
+      models: [{ id: "claude-sonnet-4-6", name: "claude-sonnet-4-6" }],
+      availableModels: [{ id: "claude-sonnet-4-6", name: "claude-sonnet-4-6" }]
     });
     setDefaultModel(config, "openai:gpt-4.1-mini");
 
     const resolved = resolveAgentRuntimeConfig({
       config,
       db,
-      requestedModelId: "openrouter:claude-3.7-sonnet"
+      requestedModelId: "anthropic:claude-sonnet-4-6"
     });
 
     expect(resolved).toMatchObject({
       ok: true,
       value: {
         mainModel: {
-          providerId: "openrouter",
-          modelId: "claude-3.7-sonnet",
-          apiKey: "openrouter-key",
-          baseURL: "https://openrouter.ai/api/v1"
+          providerId: "anthropic",
+          modelId: "claude-sonnet-4-6",
+          apiKey: "anthropic-key",
+          temperature: 0.1
         }
       }
     });
@@ -159,49 +148,25 @@ describe("agent runtime config", () => {
     });
   });
 
-  it("bootstraps legacy env config into provider storage on a blank database", () => {
-    const config = loadConfig({
-      env: {
-        LLM_API_KEY: "env-key",
-        LLM_BASE_URL: "https://openrouter.ai/api/v1",
-        LLM_MODEL: "claude-3.7-sonnet"
-      },
-      cwd: "/tmp"
-    });
-
-    bootstrapLegacyLlmProviderConfig(db, config);
-
-    const resolved = resolveAgentRuntimeConfig({ config, db });
-
-    expect(resolved).toMatchObject({
-      ok: true,
-      value: {
-        mainModel: {
-          providerId: "openai",
-          modelId: "claude-3.7-sonnet",
-          apiKey: "env-key",
-          baseURL: "https://openrouter.ai/api/v1"
-        }
-      }
-    });
-  });
-
   it("surfaces unsupported runtime provider types clearly", () => {
     const config = loadConfig({ env: {}, cwd: "/tmp" });
 
-    updateProvider(db, "anthropic", {
+    createProvider(db, {
+      id: "google",
+      name: "Google",
+      type: "google",
       enabled: true,
-      apiKey: "anthropic-key",
-      models: [{ id: "claude-sonnet-4-6", name: "claude-sonnet-4-6" }],
-      availableModels: [{ id: "claude-sonnet-4-6", name: "claude-sonnet-4-6" }]
+      apiKey: "google-key",
+      models: [{ id: "gemini-2.5-pro", name: "gemini-2.5-pro" }],
+      availableModels: [{ id: "gemini-2.5-pro", name: "gemini-2.5-pro" }]
     });
-    setDefaultModel(config, "anthropic:claude-sonnet-4-6");
+    setDefaultModel(config, "google:gemini-2.5-pro");
 
     const resolved = resolveAgentRuntimeConfig({ config, db });
 
     expect(resolved).toEqual({
       ok: false,
-      reason: 'Provider type "anthropic" is not supported for chat runtime yet.'
+      reason: 'Provider type "google" is not supported for chat runtime yet.'
     });
   });
 });

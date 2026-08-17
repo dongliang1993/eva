@@ -1,7 +1,6 @@
-import { HumanMessage } from "@langchain/core/messages";
+import { generateText, type LanguageModel } from "ai";
 import { z } from "zod";
 
-import type { AgentModel } from "../../models/agent-model.js";
 import { buildTool, type AgentTool } from "../../tools.js";
 import { WebFetchClient, type WebFetchClientOptions } from "./client.js";
 import { convertToMarkdown } from "./markdown.js";
@@ -16,7 +15,7 @@ const webFetchSchema = z.object({
 });
 
 export interface CreateWebFetchToolOptions {
-  readonly summaryModel: AgentModel;
+  readonly summaryModel: LanguageModel;
   readonly clientOptions?: WebFetchClientOptions;
 }
 
@@ -52,15 +51,12 @@ export const createWebFetchTool = (
         "- Include relevant quotes or data points when useful."
       ].join("\n");
 
-      const response = await options.summaryModel.invoke(
-        [new HumanMessage(summaryPrompt)],
-        []
-      );
+      const result = await generateText({
+        model: options.summaryModel,
+        prompt: summaryPrompt
+      });
 
-      const summary =
-        typeof response.content === "string"
-          ? response.content
-          : JSON.stringify(response.content);
+      const summary = result.text;
 
       const durationMs = Math.round(performance.now() - startedAt);
 
@@ -74,3 +70,4 @@ export const createWebFetchTool = (
     }
   });
 };
+

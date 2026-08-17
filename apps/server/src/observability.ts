@@ -40,24 +40,6 @@ export const createPinoObserver = (
           "LLM call completed"
         );
         break;
-      case "tool_call_start":
-        logger.debug(
-          { event: "tool_call_start", step: event.step, tool: event.toolName },
-          `tool ${event.toolName} started`
-        );
-        break;
-      case "tool_call_end":
-        logger.info(
-          {
-            event: "tool_call_end",
-            step: event.step,
-            tool: event.toolName,
-            status: event.status,
-            durationMs: event.durationMs
-          },
-          `tool ${event.toolName} ${event.status}`
-        );
-        break;
       case "loop_transition":
         logger.info(
           {

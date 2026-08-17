@@ -6,6 +6,8 @@ import type {
 
 import type { AppConfig } from "../config.js";
 import type { AppDatabase } from "../db/index.js";
+import type { ApprovalGateway } from "../services/approval-gateway.js";
+import type { RunRegistry } from "../services/run-registry.js";
 import type { RunApiService } from "../services/runs.js";
 import type { SessionService } from "../services/session.js";
 
@@ -20,6 +22,8 @@ export interface AppInfrastructure {
 export interface AppServices {
   runs: RunApiService;
   session: SessionService;
+  approvals: ApprovalGateway;
+  runRegistry: RunRegistry;
 }
 
 declare module "fastify" {

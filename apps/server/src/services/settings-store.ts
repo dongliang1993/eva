@@ -130,16 +130,7 @@ const SEED_PROVIDERS: readonly typeof providers.$inferInsert[] = [
 
 const CHAT_RUNTIME_PROVIDER_TYPES = new Set<ProviderType>([
   "openai",
-  "aihubmix",
-  "openrouter",
-  "deepseek",
-  "copilot",
-  "moonshot",
-  "custom",
-  "acp",
-  "claude-subscription",
-  "zai-coding-plan",
-  "kimi-coding-plan"
+  "anthropic"
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -163,21 +154,6 @@ const normalizeLogLevel = (
   }
 };
 
-const LEGACY_OPENAI_COMPATIBLE_PROVIDER_ID = "openai";
-
-const resolveLegacyEnvProviderId = (config: AppConfig): string => {
-  const baseUrl = config.LLM_BASE_URL.trim().toLowerCase();
-
-  if (baseUrl.includes("anthropic.com")) {
-    return "anthropic";
-  }
-
-  if (baseUrl.includes("generativelanguage.googleapis.com")) {
-    return "google";
-  }
-
-  return LEGACY_OPENAI_COMPATIBLE_PROVIDER_ID;
-};
 
 export const qualifyModelId = (
   value: string,
@@ -196,17 +172,6 @@ export const qualifyModelId = (
   }
 
   return fallbackProviderId ? `${fallbackProviderId}:${value}` : value;
-};
-
-const qualifyLegacyConfiguredModelId = (
-  value: string,
-  config: AppConfig
-): string => {
-  if (!value || value.includes(":")) {
-    return value;
-  }
-
-  return `${resolveLegacyEnvProviderId(config)}:${value}`;
 };
 
 export const splitQualifiedModelId = (
@@ -230,8 +195,8 @@ const createDefaultSettings = (config: AppConfig): AppSettings => ({
     theme: "system"
   },
   chat: {
-    defaultModel: qualifyLegacyConfiguredModelId(config.LLM_MODEL, config),
-    temperature: config.LLM_TEMPERATURE,
+    defaultModel: "openai:gpt-4.1-mini",
+    temperature: 0.1,
     streamResponse: true,
     autoSaveHistory: true,
     historyRetentionDays: 365,
@@ -481,57 +446,6 @@ export const ensureProvidersSeeded = (db: AppDatabase): void => {
   }
 };
 
-export const bootstrapLegacyLlmProviderConfig = (
-  db: AppDatabase,
-  config: AppConfig
-): void => {
-  const apiKey = config.LLM_API_KEY.trim();
-
-  if (!apiKey) {
-    return;
-  }
-
-  ensureProvidersSeeded(db);
-
-  const existingRows = db.select().from(providers).all();
-  const hasConfiguredProvider = existingRows.some((row) =>
-    row.enabled === "true" || row.apiKey.trim().length > 0
-  );
-
-  if (hasConfiguredProvider) {
-    return;
-  }
-
-  const qualifiedModelId = qualifyLegacyConfiguredModelId(config.LLM_MODEL, config);
-  const parsedModelId = splitQualifiedModelId(qualifiedModelId);
-
-  if (!parsedModelId) {
-    return;
-  }
-
-  const provider = findStoredProviderById(db, parsedModelId.providerId);
-
-  if (!provider) {
-    return;
-  }
-
-  const selectedModel: ProviderModel = {
-    id: parsedModelId.modelId,
-    name: parsedModelId.modelId
-  };
-  const ensureModelPresent = (models: readonly ProviderModel[]): readonly ProviderModel[] =>
-    models.some((model) => model.id === selectedModel.id)
-      ? models
-      : [...models, selectedModel];
-
-  updateProvider(db, provider.id, {
-    apiKey,
-    enabled: true,
-    ...(config.LLM_BASE_URL.trim().length > 0 ? { baseURL: config.LLM_BASE_URL.trim() } : {}),
-    models: ensureModelPresent(provider.models),
-    availableModels: ensureModelPresent(provider.availableModels)
-  });
-};
 
 export const loadAppSettings = (
   db: AppDatabase,
@@ -602,7 +516,7 @@ export const loadAppSettings = (
     }
 
     if (row.key === "llm_model") {
-      current.chat.defaultModel = qualifyLegacyConfiguredModelId(row.value, config);
+      current.chat.defaultModel = qualifyModelId(row.value);
       continue;
     }
 
@@ -615,9 +529,9 @@ export const loadAppSettings = (
       const parsed = parseJsonValue(row.value);
 
       if (isRecord(parsed) && typeof parsed.id === "string") {
-        current.chat.defaultModel = qualifyLegacyConfiguredModelId(parsed.id, config);
+        current.chat.defaultModel = qualifyModelId(parsed.id);
       } else if (typeof row.value === "string") {
-        current.chat.defaultModel = qualifyLegacyConfiguredModelId(row.value, config);
+        current.chat.defaultModel = qualifyModelId(row.value);
       }
     }
   }

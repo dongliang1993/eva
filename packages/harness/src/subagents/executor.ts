@@ -59,7 +59,7 @@ export class SubagentExecutor {
 
     try {
       const result = await Promise.race([
-        agent.invoke({ messages: [["human", prompt]] }),
+        agent.invoke({ messages: [{ role: "user", content: prompt }] }),
         new Promise<never>((_, reject) => {
           setTimeout(
             () => reject(new Error(`Subagent timed out after ${timeoutMs}ms`)),

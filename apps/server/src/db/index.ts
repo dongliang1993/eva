@@ -3,11 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { Logger } from "pino";
+
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as sqliteVec from "sqlite-vec";
 
+import type { AppConfig } from "../config.js";
 import * as schema from "./schema.js";
 
 export type AppDatabase = BetterSQLite3Database<typeof schema>;
@@ -36,9 +39,6 @@ export interface InitDbOptions {
 
 export const getDefaultDbPath = (): string =>
   path.join(DEFAULT_DATA_DIR, DB_FILENAME);
-
-export const getWorkspaceDbPath = (workspaceRoot: string): string =>
-  path.join(workspaceRoot, ".eva", DB_FILENAME);
 
 let vecLoaded = false;
 
@@ -129,6 +129,22 @@ export const closeDb = (db: AppDatabase): void => {
   }
 
   sqlite.close();
+};
+
+/**
+ * Open the database at the configured path (or the default path) and run
+ * migrations. Returns a db ready for use. Migration failures propagate —
+ * a startup with a bad schema should crash the process.
+ */
+export const initializeDatabase = (
+  config: AppConfig,
+  logger: Logger
+): AppDatabase => {
+  const dbPath = config.DB_PATH || getDefaultDbPath();
+  const db = initDb({ dbPath });
+  migrateDb(db);
+  logger.info({ dbPath }, "database initialized");
+  return db;
 };
 
 export { schema };

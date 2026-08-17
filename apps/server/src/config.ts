@@ -4,6 +4,8 @@ import path from "node:path";
 import { parse } from "dotenv";
 import { z } from "zod";
 
+import { findWorkspaceRoot } from "./services/workspace/index.js";
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8082),
   HOST: z.string().default("127.0.0.1"),
@@ -11,12 +13,7 @@ const envSchema = z.object({
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
   TARGET_REPO_ROOT: z.string().default(process.cwd()),
-  LLM_API_KEY: z.string().default(""),
-  LLM_BASE_URL: z.string().url().or(z.literal("")).default(""),
-  LLM_MODEL: z.string().default("gpt-4.1-mini"),
-  LLM_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.1),
   INTERNAL_IM_SIGNING_SECRET: z.string().default(""),
-  WEB_FETCH_MODEL: z.string().default(""),
   DB_PATH: z.string().default("")
 });
 
@@ -28,24 +25,6 @@ export interface LoadConfigOptions {
 }
 
 const ENV_FILE_NAMES = [".env", ".env.local"] as const;
-
-const findWorkspaceRoot = (startDir: string): string => {
-  let currentDir = path.resolve(startDir);
-
-  while (true) {
-    if (existsSync(path.join(currentDir, "pnpm-workspace.yaml"))) {
-      return currentDir;
-    }
-
-    const parentDir = path.dirname(currentDir);
-
-    if (parentDir === currentDir) {
-      return path.resolve(startDir);
-    }
-
-    currentDir = parentDir;
-  }
-};
 
 const loadEnvFile = (filePath: string): Record<string, string> => {
   if (!existsSync(filePath)) {
@@ -91,12 +70,6 @@ export const loadConfig = ({
     ...env
   });
 };
-
-export const isLlmConfigured = (config: AppConfig): boolean =>
-  Boolean(config.LLM_API_KEY) && Boolean(config.LLM_BASE_URL);
-
-export const isWebFetchConfigured = (config: AppConfig): boolean =>
-  isLlmConfigured(config) && Boolean(config.WEB_FETCH_MODEL);
 
 export const resolveRepositoryRoot = (
   config: AppConfig,

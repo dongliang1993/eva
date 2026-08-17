@@ -1,8 +1,11 @@
+export * from "./agents/coalesce-stream.js";
 export * from "./agents/create-agent.js";
 export * from "./agents/observer.js";
 export * from "./agents/types.js";
+export * from "./constants.js";
 export * from "./context/policy.js";
 export * from "./models/agent-model.js";
+export * from "./models/anthropic.js";
 export * from "./models/errors.js";
 export * from "./models/openai-compatible.js";
 export * from "./prompts/prompt-builder.js";
@@ -17,3 +20,4 @@ export * from "./prompts/sections/subagents.js";
 export * from "./tools/web-fetch/index.js";
 export * from "./prompts/sections/web-fetch.js";
 export * from "./tools/memory/index.js";
+export * from "./tools/fs/index.js";

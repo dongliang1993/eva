@@ -1,4 +1,4 @@
-import { SystemMessage } from "@langchain/core/messages";
+import type { SystemModelMessage } from "ai";
 
 import { createSubagentPromptSection } from "../prompts/sections/subagents.js";
 import { SubagentRegistry } from "../subagents/registry.js";
@@ -7,12 +7,12 @@ import { LeadAgent } from "./lead-agent.js";
 import type { CreateAgentOptions, Agent } from "./types.js";
 
 const appendPromptSection = (
-  base: string | SystemMessage | undefined,
+  base: string | SystemModelMessage | undefined,
   heading: string,
   body: string
 ): string => {
   const text =
-    base instanceof SystemMessage
+    typeof base === "object" && base !== null && base.role === "system"
       ? (typeof base.content === "string" ? base.content : "")
       : (base ?? "");
 
@@ -51,6 +51,9 @@ export const createAgent = (options: CreateAgentOptions): Agent => {
       systemPrompt: enhancedPrompt,
       ...(rest.maxSteps !== undefined ? { maxSteps: rest.maxSteps } : {}),
       ...(rest.observer !== undefined ? { observer: rest.observer } : {}),
+      ...(rest.requestApproval !== undefined
+        ? { requestApproval: rest.requestApproval }
+        : {}),
       ...(rest.contextPolicy !== undefined
         ? { contextPolicy: rest.contextPolicy }
         : {})
@@ -65,6 +68,9 @@ export const createAgent = (options: CreateAgentOptions): Agent => {
       : {}),
     ...(rest.maxSteps !== undefined ? { maxSteps: rest.maxSteps } : {}),
     ...(rest.observer !== undefined ? { observer: rest.observer } : {}),
+    ...(rest.requestApproval !== undefined
+      ? { requestApproval: rest.requestApproval }
+      : {}),
     ...(rest.contextPolicy !== undefined
       ? { contextPolicy: rest.contextPolicy }
       : {})

@@ -12,8 +12,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@langchain/core": "^0.3.36",
-    "@langchain/openai": "^0.5.14",
+    "@ai-sdk/anthropic": "^4.0.38",
+    "@ai-sdk/openai-compatible": "^3.0.30",
+    "@eva/shared": "workspace:*",
+    "ai": "^7.0.64",
     "turndown": "^7.2.2",
     "zod": "^3.25.76"
   }

@@ -4,7 +4,7 @@ export default defineConfig({
   entry: ["src/index.ts"],
   clean: true,
   dts: false,
-  external: ["better-sqlite3", "fast-glob", "fastify", "zod", /^@langchain\//, /^@fastify\//, /^drizzle-/],
+  external: ["better-sqlite3", "fast-glob", "fastify", "zod", "ai", /^@ai-sdk\//, /^@fastify\//, /^drizzle-/],
   format: ["esm"],
   noExternal: [/^@eva\//],
   outDir: "dist",

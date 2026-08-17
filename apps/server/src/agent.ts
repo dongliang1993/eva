@@ -1,18 +1,28 @@
+import path from "node:path";
+
 import type { ProviderType } from "@eva/shared";
 import {
   buildAgentSystemPrompt,
   createAgent,
+  createAnthropicModel,
+  createBashTool,
   createDuckDuckGoWebSearchTool,
+  createEditTool,
+  createGrepTool,
+  createListDirTool,
+  createOpenAiCompatibleModel,
+  createReadFileTool,
   createReadSkillTool,
   createWebFetchPromptSection,
   createWebFetchTool,
   createWebSearchPromptSection,
+  createWriteTool,
   generalPurposeSubagent,
-  OpenAiCompatibleModel,
   skillsToPromptSection,
   type Agent,
   type AgentObserver,
   type PromptSection,
+  type RequestApproval,
   type Skill
 } from "@eva/harness";
 
@@ -27,25 +37,22 @@ import {
 } from "./services/settings-store.js";
 
 const DEFAULT_OPENAI_COMPATIBLE_BASE_URLS: Partial<Record<ProviderType, string>> = {
-  openai: "https://api.openai.com/v1",
-  openrouter: "https://openrouter.ai/api/v1",
-  deepseek: "https://api.deepseek.com/v1",
-  moonshot: "https://api.moonshot.cn/v1"
+  openai: "https://api.openai.com/v1"
 };
 
+// 只保留最基础的 provider:openai(OpenAI 兼容协议)+ anthropic(原生 SDK)。
+// 与 settings-store.ts 的 CHAT_RUNTIME_PROVIDER_TYPES 保持同步。
 const OPENAI_COMPATIBLE_AGENT_PROVIDER_TYPES = new Set<ProviderType>([
-  "openai",
-  "aihubmix",
-  "openrouter",
-  "deepseek",
-  "copilot",
-  "moonshot",
-  "custom",
-  "acp",
-  "claude-subscription",
-  "zai-coding-plan",
-  "kimi-coding-plan"
+  "openai"
 ]);
+
+const ANTHROPIC_AGENT_PROVIDER_TYPES = new Set<ProviderType>([
+  "anthropic"
+]);
+
+const isSupportedAgentProviderType = (type: ProviderType): boolean =>
+  OPENAI_COMPATIBLE_AGENT_PROVIDER_TYPES.has(type)
+  || ANTHROPIC_AGENT_PROVIDER_TYPES.has(type);
 
 const toNonEmptyString = (value?: string): string | undefined => {
   const normalized = value?.trim();
@@ -84,13 +91,10 @@ export interface BuildAgentOptions {
   readonly soulSection?: PromptSection | undefined;
   readonly observer?: AgentObserver | undefined;
   readonly requestedModelId?: string | undefined;
+  readonly requestApproval?: RequestApproval | undefined;
+  /** fs 工具的工作区根;传入才会注入 fs 工具。 */
+  readonly workRoot?: string | undefined;
 }
-
-export interface AgentResolverInput {
-  readonly modelId?: string;
-}
-
-export type AgentResolver = (input?: AgentResolverInput) => Agent;
 
 export interface ResolvedRuntimeModelBinding {
   readonly providerId: string;
@@ -117,6 +121,19 @@ export type AgentRuntimeResolution =
     reason: string;
   };
 
+// Agent system prompt 的 Memory 板块说明,由 createConfiguredAgent 注入。
+const MEMORY_PROMPT_SECTION: PromptSection = {
+  heading: "Memory",
+  body: [
+    "- Relevant memories are automatically recalled and provided in your context each turn",
+    "- Use `search_memory` when you need to find specific memories not in the current context, or when the user explicitly asks to search past memory",
+    "- Use `save_memory` to store important new facts. ALWAYS call `search_memory` first to check for duplicates before saving",
+    "- Update an existing memory (via updateId) when the underlying fact has changed",
+    "- Never claim that you will remember something later unless you actually called `save_memory` in this turn",
+    "- Assign the correct category: user (personal info), preference (habits/style), project (project facts), decision (decisions made), knowledge (general facts)"
+  ].join("\n")
+};
+
 const resolveModelBinding = (
   provider: StoredProviderConfig | undefined,
   qualifiedModelId: string,
@@ -127,7 +144,7 @@ const resolveModelBinding = (
     return undefined;
   }
 
-  if (!OPENAI_COMPATIBLE_AGENT_PROVIDER_TYPES.has(provider.type)) {
+  if (!isSupportedAgentProviderType(provider.type)) {
     return undefined;
   }
 
@@ -141,10 +158,16 @@ const resolveModelBinding = (
     return undefined;
   }
 
-  const baseURL = toNonEmptyString(provider.baseURL)
-    ?? DEFAULT_OPENAI_COMPATIBLE_BASE_URLS[provider.type];
+  // defaultBaseURL 是 OpenAI 兼容 provider 用的(参数无 baseURL 时由 SDK 用默认端点)。
+  // openai/anthropic 都能用各自 SDK 的默认端点;自定义的 OpenAI 兼容 provider
+  // (custom/deepseek 等)必须显式给 baseURL。
+  const baseURL = toNonEmptyString(provider.baseURL);
 
-  if (!baseURL && provider.type !== "openai") {
+  if (
+    !baseURL
+    && !DEFAULT_OPENAI_COMPATIBLE_BASE_URLS[provider.type]
+    && provider.type !== "anthropic"
+  ) {
     return undefined;
   }
 
@@ -168,23 +191,25 @@ const resolveModelBinding = (
   };
 };
 
-const toAgentModel = (binding: ResolvedRuntimeModelBinding): OpenAiCompatibleModel =>
-  new OpenAiCompatibleModel({
+const toAgentModel = (binding: ResolvedRuntimeModelBinding) => {
+  const options = {
     apiKey: binding.apiKey,
-    ...(binding.baseURL ? { configuration: { baseURL: binding.baseURL } } : {}),
+    ...(binding.baseURL ? { baseURL: binding.baseURL } : {}),
     model: binding.modelId,
     temperature: binding.temperature
-  });
+  };
+
+  if (ANTHROPIC_AGENT_PROVIDER_TYPES.has(binding.providerType)) {
+    return createAnthropicModel(options);
+  }
+
+  return createOpenAiCompatibleModel(options);
+};
 
 const createConfiguredAgent = (
-  options: Omit<BuildAgentOptions, "requestedModelId" | "db">,
+  { skills, soulSection, observer, workRoot, requestApproval }: Omit<BuildAgentOptions, "requestedModelId" | "db">,
   runtime: AgentRuntimeResolution & { ok: true }
 ): Agent => {
-  const {
-    skills,
-    soulSection,
-    observer
-  } = options;
   const { mainModel, toolModel } = runtime.value;
 
   const tools = [
@@ -192,19 +217,22 @@ const createConfiguredAgent = (
     createDuckDuckGoWebSearchTool()
   ];
 
+  // 配置了工作区根 → 注入文件系统工具(subplexly base fs set)。
+  if (workRoot) {
+    const overflowDir = path.join(workRoot, ".eva", "tool-output");
+    tools.push(
+      createReadFileTool({ workRoot, overflowDir }),
+      createListDirTool({ workRoot, overflowDir }),
+      createGrepTool({ workRoot, overflowDir }),
+      createWriteTool({ workRoot, overflowDir }),
+      createEditTool({ workRoot, overflowDir }),
+      createBashTool({ workRoot, overflowDir })
+    );
+  }
+
   const sections: PromptSection[] = [
     ...(soulSection ? [soulSection] : []),
-    {
-      heading: "Memory",
-      body: [
-        "- Relevant memories are automatically recalled and provided in your context each turn",
-        "- Use `search_memory` when you need to find specific memories not in the current context, or when the user explicitly asks to search past memory",
-        "- Use `save_memory` to store important new facts. ALWAYS call `search_memory` first to check for duplicates before saving",
-        "- Update an existing memory (via updateId) when the underlying fact has changed",
-        "- Never claim that you will remember something later unless you actually called `save_memory` in this turn",
-        "- Assign the correct category: user (personal info), preference (habits/style), project (project facts), decision (decisions made), knowledge (general facts)"
-      ].join("\n")
-    },
+    MEMORY_PROMPT_SECTION,
     ...(skills.length > 0 ? [skillsToPromptSection(skills)] : []),
     createWebSearchPromptSection()
   ];
@@ -219,6 +247,7 @@ const createConfiguredAgent = (
     tools,
     systemPrompt: buildAgentSystemPrompt({ sections }),
     maxSteps: 25,
+    ...(requestApproval !== undefined ? { requestApproval } : {}),
     contextPolicy: {
       ...(mainModel.contextWindow !== undefined
         ? { contextWindow: mainModel.contextWindow }
@@ -258,7 +287,7 @@ export const resolveAgentRuntimeConfig = ({
     };
   }
 
-  if (!OPENAI_COMPATIBLE_AGENT_PROVIDER_TYPES.has(mainProvider.type)) {
+  if (!isSupportedAgentProviderType(mainProvider.type)) {
     return {
       ok: false,
       reason: `Provider type "${mainProvider.type}" is not supported for chat runtime yet.`
@@ -279,8 +308,7 @@ export const resolveAgentRuntimeConfig = ({
     };
   }
 
-  const configuredToolModelId = toNonEmptyString(settings.toolModel.model)
-    ?? toNonEmptyString(config.WEB_FETCH_MODEL);
+  const configuredToolModelId = toNonEmptyString(settings.toolModel.model);
   const qualifiedToolModelId = ensureQualifiedModelId(
     configuredToolModelId,
     mainModel.providerId
@@ -309,29 +337,17 @@ export const resolveAgentRuntimeConfig = ({
   };
 };
 
-export const buildAgent = (options: BuildAgentOptions): Agent | undefined => {
+/**
+ * Build the chat Agent from the runtime config. Fails fast (throws) if the
+ * configured provider/model is not usable — a startup with no usable model
+ * should surface loudly rather than fail on the first chat message.
+ */
+export const buildChatAgent = (options: BuildAgentOptions): Agent => {
   const runtime = resolveAgentRuntimeConfig(options);
 
   if (!runtime.ok) {
-    return undefined;
+    throw new AgentUnavailableError(runtime.reason);
   }
 
   return createConfiguredAgent(options, runtime);
 };
-
-export const createAgentResolver = (
-  options: Omit<BuildAgentOptions, "requestedModelId">
-): AgentResolver =>
-  (input) => {
-    const runtime = resolveAgentRuntimeConfig({
-      config: options.config,
-      db: options.db,
-      requestedModelId: input?.modelId
-    });
-
-    if (!runtime.ok) {
-      throw new AgentUnavailableError(runtime.reason);
-    }
-
-    return createConfiguredAgent(options, runtime);
-  };

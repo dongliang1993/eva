@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
+import { registerApprovalRoutes } from "./approvals.js";
 import { registerHealthRoutes } from "./health.js";
 import { registerMemoryRoutes } from "./memories.js";
 import { registerModelRoutes } from "./models.js";
@@ -12,6 +13,7 @@ import { registerStaticRoutes } from "./static.js";
 import { registerThreadRoutes } from "./threads.js";
 
 export const registerRoutes = async (app: FastifyInstance): Promise<void> => {
+  registerApprovalRoutes(app);
   registerHealthRoutes(app);
   registerMemoryRoutes(app);
   registerModelRoutes(app);
