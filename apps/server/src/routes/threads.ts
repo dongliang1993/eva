@@ -6,7 +6,6 @@ import { z } from "zod";
 import type { ThreadMessage, ThreadSummary } from "@eva/shared";
 
 import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
-import { parseMessageContent } from "../db/repositories/types.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
 import { compactSession } from "../services/compact.js";
 import { messages } from "../db/schema.js";
