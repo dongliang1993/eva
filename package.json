@@ -5,10 +5,10 @@
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "build": "pnpm --filter @eva/server --filter eva build",
-    "dev": "pnpm --filter @eva/server dev",
+    "serve:dev": "pnpm --filter @eva/server dev",
     "test": "vitest run",
     "typecheck": "pnpm -r --if-present typecheck",
-    "web:dev": "pnpm --filter @eva/server --filter @eva/web -r dev",
+    "web:dev": "pnpm --filter @eva/web -r dev",
     "web:build": "pnpm --filter @eva/web build",
     "desktop:dev": "pnpm --filter @eva/desktop dev",
     "desktop:build": "pnpm --filter @eva/desktop build",
@@ -17,6 +17,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/turndown": "^5.0.6",
+    "ai": "^7.0.64",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3",

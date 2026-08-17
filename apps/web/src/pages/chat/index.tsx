@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useChat } from "../../hooks/use-chat";
+import { useApprovals } from "../../hooks/use-approvals";
+import { useSettings } from "../../hooks/use-settings";
 import { Sidebar } from "../../components/sidebar";
 import { ChatView } from "../../components/chat-view";
 import { ResizableSidebar } from "../../components/ui/resizable-sidebar";
@@ -11,7 +13,19 @@ export function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const { messages, isStreaming, sessionId, sendMessage, newConversation, loadSession } = useChat();
+  const { messages, isStreaming, sessionId, sendMessage, stopStreaming, newConversation, loadSession } = useChat();
+  const settings = useSettings();
+
+  // 「始终允许」→ 打开工具自动审批, 之后的危险工具不再逐条弹。
+  const enableAutoApprove = (): Promise<void> | void => {
+    const current = settings.data;
+    if (!current) return;
+    settings.saveSettings({
+      ...current,
+      security: { ...current.security, autoApproveToolRequests: true }
+    });
+  };
+  const approvals = useApprovals(enableAutoApprove);
 
   // Load session from URL on mount (once)
   const threadIdFromUrl = searchParams.get("threadId");
@@ -81,7 +95,12 @@ export function ChatPage() {
           isStreaming={isStreaming}
           selectedModel={selectedModel}
           onSend={(text) => sendMessage(text, selectedModel ?? undefined)}
+          onStop={stopStreaming}
           onSelectModel={setSelectedModel}
+          pendingApprovals={approvals.pending}
+          onApproveOnce={(callId) => approvals.decide(callId, true)}
+          onDeny={(callId) => approvals.decide(callId, false)}
+          onAllowAlways={(callId) => approvals.allowAlways(callId)}
         />
       </ResizableSidebar>
     </div>

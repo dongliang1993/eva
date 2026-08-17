@@ -1,3 +1,7 @@
+import type { RunStreamEvent, RunStreamFrame, StreamFinishReason } from "@eva/shared";
+import { DeltaAccumulator } from "../shared/streaming/delta-accumulator.js";
+import type { StreamEvent } from "../shared/streaming/types.js";
+
 export interface ChatMessage {
   readonly role: "user" | "assistant";
   readonly content: string;
@@ -16,9 +20,15 @@ export interface StreamCallbacks {
   readonly onTextChunk: (content: string) => void;
   readonly onToolCallStart: (info: ToolCallInfo) => void;
   readonly onToolCallEnd: (info: ToolCallInfo) => void;
-  readonly onResult: (text: string, toolCalls: ToolCallInfo[], sessionId?: string) => void;
+    readonly onResult: (
+    text: string,
+    toolCalls: ToolCallInfo[],
+    finishReason: StreamFinishReason,
+    returnedSessionId?: string
+  ) => void;
   readonly onError: (message: string) => void;
   readonly onEnd: () => void;
+  readonly onRunStart?: (runId: string, sessionId: string) => void;
 }
 
 interface StreamRequest {
@@ -60,11 +70,45 @@ const parseSSEBuffer = (
   }
 
   // Return unparsed remainder (incomplete frame)
-  const remainder = currentEvent || currentData
-    ? lines.slice(Math.max(0, i - 2)).join("\n")
-    : "";
+  const remainder =
+    currentEvent || currentData
+      ? lines.slice(Math.max(0, i - 2)).join("\n")
+      : "";
 
   return [events, remainder];
+};
+
+const dispatchEvent = (ev: RunStreamEvent, callbacks: StreamCallbacks): void => {
+  switch (ev.type) {
+    case "text-delta":
+      callbacks.onTextChunk(ev.textDelta);
+      break;
+    case "tool-call":
+      callbacks.onToolCallStart({
+        toolName: ev.toolName,
+        toolCallId: ev.toolCallId,
+        args: ev.input ?? {}
+      });
+      break;
+    case "tool-result":
+      callbacks.onToolCallEnd({
+        toolName: ev.toolName,
+        toolCallId: ev.toolCallId,
+        args: {},
+        output: ev.output,
+        status: ev.status,
+        ...(ev.durationMs !== undefined ? { durationMs: ev.durationMs } : {})
+      });
+      break;
+    case "finish":
+      callbacks.onResult(ev.text, ev.toolCalls ?? [], ev.finishReason);
+      break;
+    case "run_start":
+      callbacks.onRunStart?.(ev.runId, ev.sessionId);
+      break;
+    default:
+      break;
+  }
 };
 
 export async function streamChat(
@@ -95,6 +139,8 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = "";
 
+  const accumulator = new DeltaAccumulator();
+
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -109,43 +155,24 @@ export async function streamChat(
 
       for (const { event, data } of events) {
         try {
-          switch (event) {
-            case "text_chunk": {
-              const parsed = JSON.parse(data) as { content: string };
-              callbacks.onTextChunk(parsed.content);
-              break;
-            }
-            case "tool_call_start": {
-              const parsed = JSON.parse(data) as ToolCallInfo;
-              callbacks.onToolCallStart(parsed);
-              break;
-            }
-            case "tool_call_end": {
-              const parsed = JSON.parse(data) as ToolCallInfo;
-              callbacks.onToolCallEnd(parsed);
-              break;
-            }
-            case "result": {
-              const parsed = JSON.parse(data) as {
-                text: string;
-                toolCalls: ToolCallInfo[];
-                sessionId?: string;
-              };
-              callbacks.onResult(parsed.text, parsed.toolCalls, parsed.sessionId);
-              break;
-            }
-            case "error": {
-              const parsed = JSON.parse(data) as { message: string };
-              callbacks.onError(parsed.message);
-              break;
-            }
-            case "end": {
-              callbacks.onEnd();
-              return;
-            }
+          if (event === "end") {
+            callbacks.onEnd();
+            return;
+          }
+
+          if (event === "error") {
+            const parsed = JSON.parse(data) as { message: string };
+            callbacks.onError(parsed.message);
+            continue;
+          }
+
+          const parsed = JSON.parse(data) as RunStreamFrame;
+          const ready = accumulator.push(parsed as StreamEvent);
+
+          for (const ev of ready) {
+            dispatchEvent(ev as unknown as RunStreamEvent, callbacks);
           }
         } catch {
-          // Skip malformed events
         }
       }
     }
@@ -154,4 +181,19 @@ export async function streamChat(
   }
 
   callbacks.onEnd();
+}
+
+export async function abortRun(runId: string): Promise<void> {
+  const response = await fetch(`/api/v1/runs/${runId}/abort`, {
+    method: "POST"
+  });
+
+  if (response.status === 404) {
+    return;
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
 }

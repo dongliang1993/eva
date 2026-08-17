@@ -1,8 +1,10 @@
 import { useState, useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import type { StreamFinishReason } from "@eva/shared";
 import {
   streamChat,
+  abortRun,
   type ChatMessage,
   type ToolCallInfo
 } from "../api/client";
@@ -102,6 +104,7 @@ interface UseChatReturn {
   readonly isStreaming: boolean;
   readonly sessionId: string | null;
   readonly sendMessage: (text: string, modelId?: string) => void;
+  readonly stopStreaming: () => void;
   readonly newConversation: () => void;
   readonly loadSession: (threadId: string) => void;
 }
@@ -114,6 +117,7 @@ export function useChat(): UseChatReturn {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
+  const runIdRef = useRef<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const streamingContentRef = useRef("");
   const toolCallsRef = useRef<ToolCallInfo[]>([]);
@@ -137,6 +141,7 @@ export function useChat(): UseChatReturn {
     setIsStreaming(true);
     streamingContentRef.current = "";
     toolCallsRef.current = [];
+    runIdRef.current = null;
 
     const thinkingStartTime = Date.now();
     let thinkingResolved = false;
@@ -158,6 +163,13 @@ export function useChat(): UseChatReturn {
         ...(modelId ? { modelId } : {})
       },
       {
+        onRunStart(runId, returnedSessionId) {
+          runIdRef.current = runId;
+          sessionIdRef.current = returnedSessionId;
+          setSessionId(returnedSessionId);
+          queryClient.invalidateQueries({ queryKey: ["threads"] });
+        },
+
         onTextChunk(content) {
           streamingContentRef.current += content;
           const snapshot = streamingContentRef.current;
@@ -204,7 +216,12 @@ export function useChat(): UseChatReturn {
           );
         },
 
-        onResult(text, toolCalls, returnedSessionId) {
+        onResult(
+          text: string,
+          toolCalls: ToolCallInfo[],
+          _finishReason: StreamFinishReason,
+          returnedSessionId?: string
+        ) {
           if (returnedSessionId) {
             sessionIdRef.current = returnedSessionId;
             setSessionId(returnedSessionId);
@@ -237,9 +254,15 @@ export function useChat(): UseChatReturn {
 
         onEnd() {
           setIsStreaming(false);
+          runIdRef.current = null;
         }
       }
     );
+  }, [isStreaming]);
+
+  const stopStreaming = useCallback(() => {
+    if (!isStreaming || !runIdRef.current) return;
+    abortRun(runIdRef.current).catch(() => {});
   }, [isStreaming]);
 
   const newConversation = useCallback(() => {
@@ -275,5 +298,5 @@ export function useChat(): UseChatReturn {
       });
   }, []);
 
-  return { messages, isStreaming, sessionId, sendMessage, newConversation, loadSession };
+  return { messages, isStreaming, sessionId, sendMessage, stopStreaming, newConversation, loadSession };
 }

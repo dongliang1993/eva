@@ -1,7 +1,8 @@
-import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
 
+import type { FastifyInstance, FastifyReply } from "fastify";
+import type { RunStreamFrame, StreamFinishReason } from "@eva/shared";
 import { toErrorMessage } from "@eva/shared";
-import { type AgentStreamEvent } from "@eva/harness";
 
 import { AgentUnavailableError, resolveAgentRuntimeConfig } from "../agent.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
@@ -14,8 +15,9 @@ import type { RunInput } from "../types/runs.js";
 const formatSseFrame = (event: string, data: unknown): string =>
   `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
-const streamEventToSse = (event: AgentStreamEvent): string =>
-  formatSseFrame(event.type, event);
+const writeFrame = (reply: FastifyReply, frame: RunStreamFrame): void => {
+  reply.raw.write(formatSseFrame(frame.type, frame));
+};
 
 /**
  * Extract the last user message content from the request body.
@@ -143,9 +145,18 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
   });
 
   app.post("/api/v1/runs/stream", async (request, reply) => {
+    const runId = randomUUID();
+    const controller = app.services.runRegistry.register(runId);
+    let finished = false;
+    let sessionId = "";
+    let seq = 0;
+
     try {
       const body = runSchema.parse(request.body ?? {});
-      const { input, sessionId } = await resolveSessionInput(app, body);
+      const { input, sessionId: resolvedSessionId } = await resolveSessionInput(app, body);
+      sessionId = resolvedSessionId;
+
+      input.abortSignal = controller.signal;
 
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -154,7 +165,20 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         "X-Accel-Buffering": "no"
       });
 
+      seq = 1;
+      writeFrame(reply, { seq, type: "run_start", runId, sessionId });
+
+      // 客户端断连检测必须挂在 response 上:Node ≥18 的 request "close"
+      // 在请求体读完即触发(不等客户端断开),response "close" 才是
+      // "response.end() 之前 socket 被关闭"的语义。
+      reply.raw.on("close", () => {
+        if (!finished) {
+          app.services.runRegistry.abort(runId);
+        }
+      });
+
       let resultText = "";
+      let finishReason: StreamFinishReason = "stop";
       let thinkingDurationMs: number | undefined;
       const streamStart = Date.now();
       const toolCalls: Array<{
@@ -163,26 +187,32 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         args: Record<string, unknown>;
         output: string;
         status: "success" | "error";
+        durationMs?: number;
       }> = [];
 
       for await (const event of app.services.runs.stream(input)) {
-        reply.raw.write(streamEventToSse(event));
+        seq += 1;
+        writeFrame(reply, { ...event, seq } as RunStreamFrame);
 
-        // Track thinking duration: time until first text chunk
-        if (event.type === "text_chunk" && thinkingDurationMs === undefined) {
+        if (event.type === "text-delta" && thinkingDurationMs === undefined) {
           thinkingDurationMs = Date.now() - streamStart;
         }
 
-        // Accumulate result for session persistence
-        if (event.type === "result") {
+        if (event.type === "finish") {
           resultText = event.text;
+          finishReason = event.finishReason;
           toolCalls.push(...event.toolCalls.map((tc) => ({
             toolName: tc.toolName,
-            toolCallId: tc.toolCallId ?? "",
+            toolCallId: tc.toolCallId,
             args: tc.args,
             output: tc.output,
-            status: tc.status
+            status: tc.status,
+            ...(tc.durationMs !== undefined ? { durationMs: tc.durationMs } : {})
           })));
+        }
+
+        if (event.type === "error") {
+          finishReason = "error";
         }
       }
 
@@ -190,10 +220,13 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         sessionId,
         { text: resultText, toolCalls },
         undefined,
-        thinkingDurationMs
+        thinkingDurationMs,
+        finishReason === "aborted" ? { aborted: true } : undefined
       );
 
-      reply.raw.write(formatSseFrame("end", null));
+      seq += 1;
+      writeFrame(reply, { seq, type: "end", finishReason });
+      finished = true;
       reply.raw.end();
     } catch (error) {
       request.log.error({ err: error }, "failed to stream agent run");
@@ -204,10 +237,26 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         return { error: toErrorMessage(error) };
       }
 
-      reply.raw.write(
-        formatSseFrame("error", { type: "error", message: toErrorMessage(error) })
-      );
+      finished = true;
+      seq += 1;
+      writeFrame(reply, { seq, type: "error", message: toErrorMessage(error) });
+      seq += 1;
+      writeFrame(reply, { seq, type: "end", finishReason: "error" });
       reply.raw.end();
+    } finally {
+      app.services.runRegistry.unregister(runId);
     }
+  });
+
+  app.post("/api/v1/runs/:runId/abort", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const found = app.services.runRegistry.abort(runId);
+
+    if (!found) {
+      reply.code(404);
+      return { error: "run not found or already finished" };
+    }
+
+    return { ok: true };
   });
 };

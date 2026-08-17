@@ -1,19 +1,23 @@
 import { useState, useCallback, type KeyboardEvent } from "react";
-import { Send } from "lucide-react";
+import { Send, Square } from "lucide-react";
 
 import { Tooltip, TooltipProvider } from "../ui/tooltip";
 import { SelectModel } from "./select-model";
 
 interface ChatInputProps {
   readonly onSend: (text: string) => void;
+  readonly onStop: () => void;
   readonly disabled: boolean;
+  readonly isStreaming: boolean;
   readonly selectedModel: string | null;
   readonly onSelectModel: (modelId: string) => void;
 }
 
 export function ChatInput({
   onSend,
+  onStop,
   disabled,
+  isStreaming,
   selectedModel,
   onSelectModel
 }: ChatInputProps) {
@@ -61,7 +65,15 @@ export function ChatInput({
               onSelect={onSelectModel}
             />
 
-            {modelConfigured ? (
+            {isStreaming ? (
+              <button
+                type="button"
+                className="rounded-full p-2 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                onClick={onStop}
+              >
+                <Square size={16} />
+              </button>
+            ) : modelConfigured ? (
               <button
                 type="button"
                 className={`rounded-full p-2 transition-colors ${canSend
