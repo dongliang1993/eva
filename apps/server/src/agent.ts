@@ -1,5 +1,4 @@
 import type { LanguageModel } from "ai";
-import type { ProviderType } from "@eva/shared";
 import {
   buildAgentSystemPrompt,
   createAgent,
@@ -24,70 +23,15 @@ import {
   type Skill
 } from "@eva/harness";
 
-import type { AppConfig } from "./config.js";
-import type { AppDatabase } from "./db/index.js";
 import { toolOverflowDir } from "./paths.js";
-import {
-  findStoredProviderById,
-  loadAppSettings,
-  qualifyModelId,
-  splitQualifiedModelId,
-  type StoredProviderConfig
-} from "./services/settings-store.js";
-
-const DEFAULT_OPENAI_COMPATIBLE_BASE_URLS: Partial<Record<ProviderType, string>> = {
-  openai: "https://api.openai.com/v1"
-};
-
-// 只保留最基础的 provider:openai(OpenAI 兼容协议)+ anthropic(原生 SDK)。
-// 与 settings-store.ts 的 CHAT_RUNTIME_PROVIDER_TYPES 保持同步。
-const OPENAI_COMPATIBLE_AGENT_PROVIDER_TYPES = new Set<ProviderType>([
-  "openai"
-]);
-
-const ANTHROPIC_AGENT_PROVIDER_TYPES = new Set<ProviderType>([
-  "anthropic"
-]);
-
-const isSupportedAgentProviderType = (type: ProviderType): boolean =>
-  OPENAI_COMPATIBLE_AGENT_PROVIDER_TYPES.has(type)
-  || ANTHROPIC_AGENT_PROVIDER_TYPES.has(type);
-
-const toNonEmptyString = (value?: string): string | undefined => {
-  const normalized = value?.trim();
-  return normalized ? normalized : undefined;
-};
-
-const ensureQualifiedModelId = (
-  value: string | undefined,
-  fallbackProviderId: string
-): string | undefined => {
-  const normalized = value?.trim();
-
-  if (!normalized) {
-    return undefined;
-  }
-
-  if (normalized.includes(":")) {
-    return normalized;
-  }
-
-  return `${fallbackProviderId}:${normalized}`;
-};
+import type { ModelBinding } from "./services/providers/model-resolver.js";
 
 export class AgentUnavailableError extends Error {
   constructor(
-    message = "Agent is not configured. Configure an enabled OpenAI-compatible provider and default model in Settings."
+    message = "Agent is not configured. Configure an enabled provider and default model in Settings."
   ) {
     super(message);
   }
-}
-
-/** 解析运行时模型绑定需要的输入(纯读 DB/config)。 */
-export interface ResolveRuntimeOptions {
-  readonly config: AppConfig;
-  readonly db: AppDatabase;
-  readonly requestedModelId?: string | undefined;
 }
 
 /** 一次 run 的工作区上下文 —— 路径 + 已读好的项目文档 section。 */
@@ -103,34 +47,10 @@ export interface ConfiguredAgentOptions {
   readonly soulSection?: PromptSection | undefined;
   readonly observer?: AgentObserver | undefined;
   readonly requestApproval?: RequestApproval | undefined;
+  readonly extraTools?: readonly import("@eva/harness").AgentTool[];
   /** 本次 run 的工作区;缺省则不注入 fs 工具(纯聊天会话)。 */
   readonly workspace?: ResolvedWorkspaceContext | undefined;
 }
-
-export interface ResolvedRuntimeModelBinding {
-  readonly providerId: string;
-  readonly providerType: ProviderType;
-  readonly qualifiedModelId: string;
-  readonly modelId: string;
-  readonly apiKey: string;
-  readonly baseURL?: string;
-  readonly temperature: number;
-  readonly contextWindow?: number;
-  readonly maxOutputTokens?: number;
-}
-
-export type AgentRuntimeResolution =
-  | {
-    ok: true;
-    value: {
-      readonly mainModel: ResolvedRuntimeModelBinding;
-      readonly toolModel?: ResolvedRuntimeModelBinding;
-    };
-  }
-  | {
-    ok: false;
-    reason: string;
-  };
 
 // Agent system prompt 的 Memory 板块说明,由 createConfiguredAgent 注入。
 const MEMORY_PROMPT_SECTION: PromptSection = {
@@ -145,89 +65,31 @@ const MEMORY_PROMPT_SECTION: PromptSection = {
   ].join("\n")
 };
 
-const resolveModelBinding = (
-  provider: StoredProviderConfig | undefined,
-  qualifiedModelId: string,
-  modelId: string,
-  temperature: number
-): ResolvedRuntimeModelBinding | undefined => {
-  if (!provider) {
-    return undefined;
-  }
-
-  if (!isSupportedAgentProviderType(provider.type)) {
-    return undefined;
-  }
-
-  if (!provider.enabled) {
-    return undefined;
-  }
-
-  const apiKey = toNonEmptyString(provider.apiKey);
-
-  if (!apiKey) {
-    return undefined;
-  }
-
-  // defaultBaseURL 是 OpenAI 兼容 provider 用的(参数无 baseURL 时由 SDK 用默认端点)。
-  // openai/anthropic 都能用各自 SDK 的默认端点;自定义的 OpenAI 兼容 provider
-  // (custom/deepseek 等)必须显式给 baseURL。
-  const baseURL = toNonEmptyString(provider.baseURL);
-
-  if (
-    !baseURL
-    && !DEFAULT_OPENAI_COMPATIBLE_BASE_URLS[provider.type]
-    && provider.type !== "anthropic"
-  ) {
-    return undefined;
-  }
-
-  const modelCapabilities = provider.models.find((model) => model.id === modelId)?.capabilities
-    ?? provider.availableModels.find((model) => model.id === modelId)?.capabilities;
-
-  return {
-    providerId: provider.id,
-    providerType: provider.type,
-    qualifiedModelId,
-    modelId,
-    apiKey,
-    ...(baseURL ? { baseURL } : {}),
-    temperature,
-    ...(modelCapabilities?.contextWindow !== undefined
-      ? { contextWindow: modelCapabilities.contextWindow }
-      : {}),
-    ...(modelCapabilities?.maxOutputTokens !== undefined
-      ? { maxOutputTokens: modelCapabilities.maxOutputTokens }
-      : {})
-  };
-};
-
-export const toAgentModel = (binding: ResolvedRuntimeModelBinding): LanguageModel => {
+/** 按 binding.kind 分派到对应的 AI SDK 工厂。 */
+export const toAgentModel = (binding: ModelBinding): LanguageModel => {
   const options = {
     apiKey: binding.apiKey,
     ...(binding.baseURL ? { baseURL: binding.baseURL } : {}),
-    model: binding.modelId,
-    temperature: binding.temperature
+    model: binding.modelId
   };
 
-  if (ANTHROPIC_AGENT_PROVIDER_TYPES.has(binding.providerType)) {
-    return createAnthropicModel(options);
-  }
-
-  return createOpenAiCompatibleModel(options);
+  return binding.kind === "anthropic"
+    ? createAnthropicModel(options)
+    : createOpenAiCompatibleModel(options);
 };
 
 export const createConfiguredAgent = (
   options: ConfiguredAgentOptions,
-  runtime: AgentRuntimeResolution & { ok: true },
-  getModel: (binding: ResolvedRuntimeModelBinding) => LanguageModel
+  models: { readonly chat: ModelBinding; readonly tool: ModelBinding; readonly temperature: number },
+  getModel: (binding: ModelBinding) => LanguageModel
 ): Agent => {
-  const { mainModel, toolModel } = runtime.value;
-  const { skills, soulSection, observer, workspace, requestApproval } = options;
+  const { skills, soulSection, observer, workspace, requestApproval, extraTools } = options;
 
   const tools = [
     ...(skills.length > 0 ? [createReadSkillTool(skills)] : []),
-    createDuckDuckGoWebSearchTool()
+    createDuckDuckGoWebSearchTool(),
+    createWebFetchTool({ summaryModel: getModel(models.tool) }),
+    ...(extraTools ?? [])
   ];
 
   // 绑定了工作区 → 注入文件系统工具。overflow 落在 ~/.eva/tool-overflow/<id>/,
@@ -249,110 +111,30 @@ export const createConfiguredAgent = (
     ...(workspace?.docsSection ? [workspace.docsSection] : []),
     MEMORY_PROMPT_SECTION,
     ...(skills.length > 0 ? [skillsToPromptSection(skills)] : []),
-    createWebSearchPromptSection()
+    createWebSearchPromptSection(),
+    createWebFetchPromptSection()
   ];
 
-  if (toolModel) {
-    tools.push(createWebFetchTool({ summaryModel: getModel(toolModel) }));
-    sections.push(createWebFetchPromptSection());
-  }
-
   return createAgent({
-    model: getModel(mainModel),
+    model: getModel(models.chat),
     tools,
     systemPrompt: buildAgentSystemPrompt({ sections }),
     maxSteps: 25,
     callSettings: {
-      temperature: mainModel.temperature,
-      ...(mainModel.maxOutputTokens !== undefined
-        ? { maxOutputTokens: mainModel.maxOutputTokens }
+      temperature: models.temperature,
+      ...(models.chat.maxOutputTokens !== undefined
+        ? { maxOutputTokens: models.chat.maxOutputTokens }
         : {})
     },
     ...(requestApproval !== undefined ? { requestApproval } : {}),
     contextPolicy: {
-      ...(mainModel.contextWindow !== undefined
-        ? { contextWindow: mainModel.contextWindow }
+      ...(models.chat.contextWindow !== undefined
+        ? { contextWindow: models.chat.contextWindow }
         : {}),
-      ...(mainModel.maxOutputTokens !== undefined
-        ? { reservedOutputTokens: mainModel.maxOutputTokens }
+      ...(models.chat.maxOutputTokens !== undefined
+        ? { reservedOutputTokens: models.chat.maxOutputTokens }
         : {})
     },
     ...(observer !== undefined ? { observer } : {})
   });
-};
-
-export const resolveAgentRuntimeConfig = ({
-  config,
-  db,
-  requestedModelId
-}: ResolveRuntimeOptions): AgentRuntimeResolution => {
-  const settings = loadAppSettings(db, config);
-  const selectedModelId = qualifyModelId(requestedModelId?.trim() ?? "", "openai")
-    || settings.chat.defaultModel;
-  const parsedMainModel = splitQualifiedModelId(selectedModelId);
-
-  if (!parsedMainModel) {
-    return {
-      ok: false,
-      reason: "No default model is configured."
-    };
-  }
-
-  const mainProvider = findStoredProviderById(db, parsedMainModel.providerId);
-
-  if (!mainProvider) {
-    return {
-      ok: false,
-      reason: `Provider "${parsedMainModel.providerId}" was not found.`
-    };
-  }
-
-  if (!isSupportedAgentProviderType(mainProvider.type)) {
-    return {
-      ok: false,
-      reason: `Provider type "${mainProvider.type}" is not supported for chat runtime yet.`
-    };
-  }
-
-  const mainModel = resolveModelBinding(
-    mainProvider,
-    selectedModelId,
-    parsedMainModel.modelId,
-    settings.chat.temperature
-  );
-
-  if (!mainModel) {
-    return {
-      ok: false,
-      reason: `Provider "${mainProvider.name}" is not ready. Enable it and configure a valid API key first.`
-    };
-  }
-
-  const configuredToolModelId = toNonEmptyString(settings.toolModel.model);
-  const qualifiedToolModelId = ensureQualifiedModelId(
-    configuredToolModelId,
-    mainModel.providerId
-  );
-  const parsedToolModel = qualifiedToolModelId
-    ? splitQualifiedModelId(qualifiedToolModelId)
-    : undefined;
-  const toolProvider = parsedToolModel
-    ? findStoredProviderById(db, parsedToolModel.providerId)
-    : undefined;
-  const toolModel = parsedToolModel
-    ? resolveModelBinding(
-      toolProvider,
-      qualifiedToolModelId!,
-      parsedToolModel.modelId,
-      0.1
-    )
-    : undefined;
-
-  return {
-    ok: true,
-    value: {
-      mainModel,
-      ...(toolModel ? { toolModel } : {})
-    }
-  };
 };

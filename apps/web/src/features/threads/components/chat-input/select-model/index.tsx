@@ -58,7 +58,7 @@ export function SelectModel({ selectedModel, onSelect }: SelectModelProps) {
     }
 
     restoredRef.current = true;
-    const saved = data.chat.defaultModel;
+    const saved = data.models.chat;
     const resolvedModelId = models.some((model) => model.id === saved)
       ? saved
       : models[0]!.id;
@@ -68,9 +68,9 @@ export function SelectModel({ selectedModel, onSelect }: SelectModelProps) {
     if (resolvedModelId !== saved) {
       saveSettings({
         ...data,
-        chat: {
-          ...data.chat,
-          defaultModel: resolvedModelId
+        models: {
+          ...data.models,
+          chat: resolvedModelId
         }
       });
     }
@@ -128,9 +128,9 @@ export function SelectModel({ selectedModel, onSelect }: SelectModelProps) {
 
     saveSettings({
       ...data,
-      chat: {
-        ...data.chat,
-        defaultModel: model.modelId
+      models: {
+        ...data.models,
+        chat: model.modelId
       }
     });
   };

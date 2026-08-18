@@ -10,7 +10,7 @@ import {
   type AppDatabase
 } from "../apps/server/src/db/index.js";
 import { registerProviderRoutes } from "../apps/server/src/routes/providers.js";
-import { findProviderById } from "../apps/server/src/services/settings-store.js";
+import { findProviderById } from "../apps/server/src/services/providers/provider-repository.js";
 
 let app: FastifyInstance;
 let db: AppDatabase;

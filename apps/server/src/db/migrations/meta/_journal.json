@@ -120,6 +120,13 @@
       "when": 1786910000000,
       "tag": "0016_workspaces",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1786920000000,
+      "tag": "0017_provider_slots",
+      "breakpoints": true
     }
   ]
 }

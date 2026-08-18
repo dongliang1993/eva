@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Settings as SettingsIcon, Store, ArrowLeft, Brain } from "lucide-react";
 
-import { GeneralSettings } from "./components/general-settings";
+import { ModelSettings } from "./components/model-settings";
 import { MemorySettings } from "./components/memory-settings";
 import { ProviderSettings } from "./components/provider-settings";
 import { SettingsHeader } from "./components/settings-header";
@@ -12,7 +12,7 @@ interface SettingsPageProps {
 }
 
 const NAV_ITEMS = [
-  { id: "general", label: "General", icon: SettingsIcon },
+  { id: "models", label: "Models", icon: SettingsIcon },
   { id: "providers", label: "Providers", icon: Store },
   { id: "memory", label: "Memory", icon: Brain }
 ] as const;
@@ -20,7 +20,7 @@ const NAV_ITEMS = [
 type NavId = (typeof NAV_ITEMS)[number]["id"];
 
 export function SettingsPage({ onBack }: SettingsPageProps) {
-  const [activeNav, setActiveNav] = useState<NavId>("general");
+  const [activeNav, setActiveNav] = useState<NavId>("models");
 
   const settingsNav = (
     <div className="flex h-full flex-col bg-sidebar">
@@ -69,7 +69,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
             title={NAV_ITEMS.find((n) => n.id === activeNav)!.label}
           />
           <div className="flex-1 overflow-y-hidden px-8 py-6">
-            {activeNav === "general" ? <GeneralSettings /> : null}
+            {activeNav === "models" ? <ModelSettings /> : null}
             {activeNav === "providers" ? <ProviderSettings /> : null}
             {activeNav === "memory" ? <MemorySettings /> : null}
           </div>

@@ -19,14 +19,14 @@ import {
 
 import {
   AgentUnavailableError,
-  type ResolvedRuntimeModelBinding,
   type ResolvedWorkspaceContext
 } from "../agent.js";
 import { DrizzleRunRepository, runStatusFor } from "../db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
 import { autoCompactIfNeeded, createAutoCompactConfig } from "../services/auto-compact.js";
 import { buildMemoryRuntimeSupport } from "../services/memory-runtime.js";
-import { loadAppSettings } from "../services/settings-store.js";
+import { loadAppSettings } from "../services/settings/app-settings.js";
+import type { ModelBinding } from "../services/providers/model-resolver.js";
 import { loadProjectDocsSection } from "../services/workspaces/project-docs.js";
 import { resolveWorkspaceForSession } from "../services/workspaces/workspace-store.js";
 import { runRequestSchema, type RunRequest } from "../types/runs.js";
@@ -107,7 +107,7 @@ const openSessionTurn = async (
 const buildRunContext = async (
   app: FastifyInstance,
   open: OpenTurn,
-  mainModel: ResolvedRuntimeModelBinding,
+  mainModel: ModelBinding,
   body: RunRequest
 ): Promise<PreparedRun> => {
   new DrizzleSessionRepository(app.infra.db).updateModel(open.sessionId, mainModel.qualifiedModelId);

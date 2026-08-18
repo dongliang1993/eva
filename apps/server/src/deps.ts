@@ -11,6 +11,7 @@ import {
 import { DrizzleRunRepository } from "./db/repositories/run-repository.js";
 import { createPinoObserver } from "./observability.js";
 import { findMonorepoRoot } from "./services/monorepo-root.js";
+import { migrateLegacySettings } from "./services/settings/migrate-legacy.js";
 import type { AppInfrastructure, AppServices } from "./types/common.js";
 
 export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
@@ -38,6 +39,9 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   }
 
   const db = initializeDatabase(config, logger);
+
+  // 一次性把旧 settings 结构迁到模型槽位(存在 models 行即幂等跳过)。
+  migrateLegacySettings(db, logger);
 
   // 进程重启时把上次没跑完的 run 收成 error —— 否则崩溃留下的 running 行会永远挂着。
   const staleRuns = new DrizzleRunRepository(db).failStale();

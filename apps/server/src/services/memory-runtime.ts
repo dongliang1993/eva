@@ -18,7 +18,7 @@ import {
   recallMemories,
   renderRecallPromptContext
 } from "./memory-recall.js";
-import { loadAppSettings } from "./settings-store.js";
+import { loadAppSettings } from "./settings/app-settings.js";
 
 export interface MemoryRuntimeModelLimits {
   readonly contextWindow?: number;

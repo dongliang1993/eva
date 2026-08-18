@@ -19,7 +19,7 @@ import { ApprovalGateway } from "../apps/server/src/services/approval-gateway.js
 import { RunRegistry } from "../apps/server/src/services/run-registry.js";
 import { SessionService } from "../apps/server/src/services/session.js";
 import { registerRunRoutes } from "../apps/server/src/routes/runs.js";
-import { loadAppSettings, replaceAppSettings } from "../apps/server/src/services/settings-store.js";
+import { loadAppSettings, replaceAppSettings } from "../apps/server/src/services/settings/app-settings.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },

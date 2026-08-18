@@ -83,19 +83,19 @@ describe("Phase 1 API routes", () => {
     expect(current.statusCode).toBe(200);
 
     const settings = current.json() as {
-      chat: { defaultModel: string };
+      models: { chat: string };
       security: { logLevel: string };
       providers?: unknown;
     };
 
     expect(settings.providers).toBeUndefined();
-    expect(settings.chat.defaultModel).toContain(":");
+    expect(settings.models.chat).toContain(":");
 
     const updated = {
       ...settings,
-      chat: {
-        ...settings.chat,
-        defaultModel: "openai:gpt-4o"
+      models: {
+        ...settings.models,
+        chat: "openai:gpt-4o"
       },
       security: {
         ...settings.security,
@@ -111,7 +111,7 @@ describe("Phase 1 API routes", () => {
 
     expect(put.statusCode).toBe(200);
     expect(put.json()).toMatchObject({
-      chat: { defaultModel: "openai:gpt-4o" },
+      models: { chat: "openai:gpt-4o" },
       security: { logLevel: "debug" }
     });
   });

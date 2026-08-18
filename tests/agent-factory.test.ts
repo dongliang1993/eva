@@ -11,9 +11,9 @@ import {
 } from "../apps/server/src/db/index.js";
 import {
   loadAppSettings,
-  replaceAppSettings,
-  updateProvider
-} from "../apps/server/src/services/settings-store.js";
+  replaceAppSettings
+} from "../apps/server/src/services/settings/app-settings.js";
+import { updateProvider } from "../apps/server/src/services/providers/provider-repository.js";
 import type { AppInfrastructure } from "../apps/server/src/types/common.js";
 
 let db: AppDatabase;
@@ -27,9 +27,9 @@ const setDefaultModel = (
 
   replaceAppSettings(db, config, {
     ...current,
+    models: { chat: modelId },
     chat: {
       ...current.chat,
-      defaultModel: modelId,
       temperature
     }
   });

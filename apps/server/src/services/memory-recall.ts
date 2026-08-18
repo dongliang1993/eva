@@ -11,18 +11,7 @@ import type { IMessageSearchRepository, MessageSearchHit } from "../db/repositor
 import { memories } from "../db/schema.js";
 import { generateEmbedding } from "./memory-embedding.js";
 import { estimateHistoryTokens, estimateTokens } from "./token-estimator.js";
-import {
-  findStoredProviderById,
-  loadAppSettings,
-  splitQualifiedModelId
-} from "./settings-store.js";
-
-const DEFAULT_BASE_URLS: Record<string, string> = {
-  openai: "https://api.openai.com/v1",
-  openrouter: "https://openrouter.ai/api/v1",
-  deepseek: "https://api.deepseek.com/v1",
-  moonshot: "https://api.moonshot.cn/v1"
-};
+import { resolveModelSlot } from "./providers/model-resolver.js";
 
 const QUERY_REWRITE_SYSTEM_PROMPT = `You are a query rewriting assistant. Your task is to rewrite conversational user messages into concise search queries optimized for semantic memory retrieval.
 
@@ -246,41 +235,23 @@ const extractKeywords = (text: string, maxKeywords = 5): readonly string[] => {
 
 /**
  * Resolve the embedding provider for semantic recall.
+ * 槽位不可用 → undefined(语义检索降级为纯 FTS)。
  */
 const resolveEmbeddingProvider = (db: AppDatabase, config: AppConfig) => {
-  const settings = loadAppSettings(db, config);
-  const { baseUrl, apiKey, model } = settings.memory.embedding;
-
-  if (!baseUrl || !apiKey || !model) return undefined;
-
-  return { providerId: "embedding", modelId: model, apiKey, baseUrl: baseUrl.replace(/\/+$/, "") };
+  const resolved = resolveModelSlot(db, config, "embedding");
+  return resolved.ok ? resolved.binding : undefined;
 };
 
 /**
- * Resolve the tool model for query rewriting.
- * Fallback chain: memory.toolModel → toolModel.model → chat.defaultModel
+ * Resolve the tool model for query rewriting。
+ * 槽位 = tool,不可用回落 chat(与 AgentFactory 一致)。
  */
 const resolveToolModelProvider = (db: AppDatabase, config: AppConfig) => {
-  const settings = loadAppSettings(db, config);
-  const modelId = settings.memory.toolModel?.trim()
-    || settings.toolModel.model?.trim()
-    || settings.chat.defaultModel;
+  const tool = resolveModelSlot(db, config, "tool");
+  if (tool.ok) return tool.binding;
 
-  if (!modelId) return undefined;
-
-  const parsed = splitQualifiedModelId(modelId);
-  if (!parsed) return undefined;
-
-  const provider = findStoredProviderById(db, parsed.providerId);
-  if (!provider || !provider.enabled || !provider.apiKey) return undefined;
-
-  const baseUrl = provider.baseURL?.replace(/\/+$/, "")
-    || DEFAULT_BASE_URLS[provider.type]
-    || "";
-
-  if (!baseUrl) return undefined;
-
-  return { modelId: parsed.modelId, apiKey: provider.apiKey, baseUrl };
+  const chat = resolveModelSlot(db, config, "chat");
+  return chat.ok ? chat.binding : undefined;
 };
 
 /**
@@ -296,7 +267,7 @@ const rewriteQuery = async (
   if (!provider) return userMessage;
 
   try {
-    const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+    const response = await fetch(`${(provider.baseURL ?? "").replace(/\/+$/, "")}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${provider.apiKey}`,

@@ -5,7 +5,7 @@ import type { AppDatabase } from "../db/index.js";
 import { isVecAvailable } from "../db/index.js";
 import { MemoryEmbeddingRepository } from "../db/repositories/memory-embedding-repository.js";
 import { memories } from "../db/schema.js";
-import { loadAppSettings } from "./settings-store.js";
+import { resolveModelSlot } from "./providers/model-resolver.js";
 
 export interface EmbeddingResult {
   readonly embedding: Float32Array;
@@ -13,28 +13,18 @@ export interface EmbeddingResult {
   readonly dimensions: number;
 }
 
-interface ResolvedEmbeddingProvider {
-  readonly providerId: string;
-  readonly modelId: string;
-  readonly apiKey: string;
-  readonly baseUrl: string;
-}
+/**
+ * embedding 走 providers 表 + settings.models.embedding 槽位。
+ * 槽位不可用 → 返回 undefined(语义检索降级为纯 FTS,不是崩溃)。
+ */
+const resolveEmbeddingBinding = (db: AppDatabase, config: AppConfig) => {
+  const resolved = resolveModelSlot(db, config, "embedding");
 
-const resolveEmbeddingProvider = (
-  db: AppDatabase,
-  config: AppConfig
-): ResolvedEmbeddingProvider | undefined => {
-  const settings = loadAppSettings(db, config);
-  const { baseUrl, apiKey, model } = settings.memory.embedding;
+  if (!resolved.ok) {
+    return { ok: false as const, reason: resolved.reason };
+  }
 
-  if (!baseUrl || !apiKey || !model) return undefined;
-
-  return {
-    providerId: "embedding",
-    modelId: model,
-    apiKey,
-    baseUrl: baseUrl.replace(/\/+$/, "")
-  };
+  return { ok: true as const, binding: resolved.binding };
 };
 
 /**
@@ -42,10 +32,11 @@ const resolveEmbeddingProvider = (
  * OpenAI-compatible /embeddings API.
  */
 export const generateEmbedding = async (
-  provider: ResolvedEmbeddingProvider,
+  provider: { readonly modelId: string; readonly apiKey: string; readonly baseURL?: string; readonly qualifiedModelId: string },
   text: string
 ): Promise<EmbeddingResult> => {
-  const response = await fetch(`${provider.baseUrl}/embeddings`, {
+  const baseURL = (provider.baseURL ?? "").replace(/\/+$/, "");
+  const response = await fetch(`${baseURL}/embeddings`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${provider.apiKey}`,
@@ -76,7 +67,7 @@ export const generateEmbedding = async (
 
   return {
     embedding: new Float32Array(vec),
-    model: `${provider.providerId}:${provider.modelId}`,
+    model: provider.qualifiedModelId,
     dimensions: vec.length
   };
 };
@@ -93,8 +84,9 @@ export const embedAndStoreMemory = async (
 ): Promise<boolean> => {
   if (!isVecAvailable()) return false;
 
-  const provider = resolveEmbeddingProvider(db, config);
-  if (!provider) return false;
+  const resolved = resolveEmbeddingBinding(db, config);
+  if (!resolved.ok) return false;
+  const provider = resolved.binding;
 
   try {
     const result = await generateEmbedding(provider, content);
@@ -133,8 +125,8 @@ export const backfillPendingEmbeddings = async (
 ): Promise<{ processed: number; remaining: number }> => {
   if (!isVecAvailable()) return { processed: 0, remaining: 0 };
 
-  const provider = resolveEmbeddingProvider(db, config);
-  if (!provider) return { processed: 0, remaining: 0 };
+  const resolved = resolveEmbeddingBinding(db, config);
+  if (!resolved.ok) return { processed: 0, remaining: 0 };
 
   const pending = db
     .select({ id: memories.id, content: memories.content })

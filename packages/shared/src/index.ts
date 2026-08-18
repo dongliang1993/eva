@@ -1,20 +1,20 @@
 export type UnknownRecord = Record<string, unknown>;
 
+/**
+ * 只保留真正被 runtime 支持的 provider 类型。google/azure 需要各自的 @ai-sdk/* 包,
+ * copilot/acp/... 是特殊鉴权流从未实现 —— 要支持就正经加(见 services/providers/provider-catalog.ts)。
+ */
 export type ProviderType =
   | "openai"
   | "anthropic"
-  | "google"
-  | "aihubmix"
-  | "openrouter"
   | "deepseek"
-  | "copilot"
-  | "azure"
+  | "openrouter"
   | "moonshot"
-  | "custom"
-  | "acp"
-  | "claude-subscription"
-  | "zai-coding-plan"
-  | "kimi-coding-plan";
+  | "aihubmix"
+  | "custom";
+
+/** 决定用哪个 AI SDK 工厂 + 哪套 HTTP 探活协议。 */
+export type ProviderKind = "openai-compatible" | "anthropic";
 
 export interface ProviderModelCapabilities {
   vision?: boolean;
@@ -36,6 +36,19 @@ export interface ProviderModel {
   providerOptions?: Record<string, unknown>;
 }
 
+/** provider 的静态知识(数据在 server 的 catalog,类型放 shared 供前端消费)。 */
+export interface ProviderSpec {
+  readonly type: ProviderType;
+  readonly label: string;
+  readonly kind: ProviderKind;
+  /** 缺省 baseURL;undefined = 必须由用户显式填。 */
+  readonly defaultBaseURL?: string;
+  readonly baseURLPlaceholder?: string;
+  readonly apiKeyHint?: string;
+  /** 内置模型目录 —— 用户没拉过模型列表时的兜底。 */
+  readonly builtinModels: readonly ProviderModel[];
+}
+
 export interface Provider {
   id: string;
   name: string;
@@ -44,10 +57,21 @@ export interface Provider {
   availableModels: readonly ProviderModel[];
   hasApiKey: boolean;
   baseURL?: string;
-  apiVersion?: string;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** 哪个模型干哪件事。 */
+export type ModelSlot = "chat" | "tool" | "embedding";
+
+export interface ModelSlotSettings {
+  /** 主对话。必填。 */
+  readonly chat: string;
+  /** 杂务档(compact 摘要 / web-fetch 摘要);缺省回落 chat。 */
+  readonly tool?: string;
+  /** 记忆向量;缺省 = 语义检索禁用,降级为纯 FTS。 */
+  readonly embedding?: string;
 }
 
 export interface ProviderConnectionTestResult {
@@ -70,32 +94,13 @@ export interface ModelSummary {
 }
 
 export interface AppSettings {
-  general: {
-    language: "zh" | "en";
-    theme: "light" | "dark" | "system";
-  };
+  /** 三个模型槽位 —— "哪个模型干哪件事"的唯一事实源。 */
+  models: ModelSlotSettings;
   chat: {
-    defaultModel: string;
     temperature: number;
-    streamResponse: boolean;
-    autoSaveHistory: boolean;
-    historyRetentionDays: number;
-    showTokenUsage: boolean;
-    enableMarkdown: boolean;
-    modelUsageHistory: Record<string, number>;
-    defaultToolSelection: "auto" | "all" | "none";
-    defaultSkillSelection: "auto" | "all" | "none";
     autoCompact: boolean;
     autoCompactTokenThreshold: number;
     autoCompactMessageThreshold: number;
-  };
-  security: {
-    encryptApiKeys: boolean;
-    requirePassword: boolean;
-    sessionTimeout: number;
-    enableLogging: boolean;
-    logLevel: "error" | "warn" | "info" | "debug";
-    autoApproveToolRequests: boolean;
   };
   memory: {
     enabled: boolean;
@@ -104,18 +109,10 @@ export interface AppSettings {
     queryRewriting: boolean;
     maxRetrievedMemories: number;
     similarityThreshold: number;
-    embedding: {
-      baseUrl: string;
-      apiKey: string;
-      model: string;
-    };
-    toolModel?: string;
   };
-  toolModel: {
-    model?: string;
-  };
-  webSearch: {
-    engine: "google" | "xiaohongshu";
+  security: {
+    logLevel: "error" | "warn" | "info" | "debug";
+    autoApproveToolRequests: boolean;
   };
 }
 
