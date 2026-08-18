@@ -20,8 +20,15 @@ export interface ToolDefinition<S extends z.ZodObject<z.ZodRawShape>> {
   requiresApproval?: boolean;
 }
 
-const toErrorOutput = (error: unknown): string =>
-  `[Tool Error] ${error instanceof Error ? error.message : "Unknown error"}`;
+/**
+ * 工具执行失败的输出前缀。
+ * `stream-part-mapper.ts` 靠它把 tool-result 判成 error 状态；`buildTool` 与
+ * `buildJsonSchemaTool` 靠它包装执行异常。三处共用这一个定义，不要各自抄字面量。
+ */
+export const TOOL_ERROR_PREFIX = "[Tool Error]";
+
+export const toToolErrorOutput = (error: unknown): string =>
+  `${TOOL_ERROR_PREFIX} ${error instanceof Error ? error.message : "Unknown error"}`;
 
 export const buildTool = <S extends z.ZodObject<z.ZodRawShape>>(
   definition: ToolDefinition<S>
@@ -40,7 +47,7 @@ export const buildTool = <S extends z.ZodObject<z.ZodRawShape>>(
         const parsed = definition.schema.parse(input);
         return await definition.execute(parsed);
       } catch (error) {
-        return toErrorOutput(error);
+        return toToolErrorOutput(error);
       }
     }
   });

@@ -15,6 +15,7 @@ export * from "./prompts/sections/web-search.js";
 export * from "./prompts/soul.js";
 export * from "./skills/index.js";
 export * from "./tools.js";
+export * from "./tools/build-json-schema-tool.js";
 export * from "./tools/with-approval.js";
 export * from "./tools/web-search/index.js";
 export * from "./tools/web-fetch/index.js";

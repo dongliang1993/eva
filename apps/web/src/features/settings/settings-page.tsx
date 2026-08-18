@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Settings as SettingsIcon, Store, ArrowLeft, Brain } from "lucide-react";
+import { Settings as SettingsIcon, Store, ArrowLeft, Brain, Plug } from "lucide-react";
 
 import { ModelSettings } from "./components/model-settings";
+import { McpSettings } from "./components/mcp-settings";
 import { MemorySettings } from "./components/memory-settings";
 import { ProviderSettings } from "./components/provider-settings";
 import { SettingsHeader } from "./components/settings-header";
@@ -14,7 +15,8 @@ interface SettingsPageProps {
 const NAV_ITEMS = [
   { id: "models", label: "Models", icon: SettingsIcon },
   { id: "providers", label: "Providers", icon: Store },
-  { id: "memory", label: "Memory", icon: Brain }
+  { id: "memory", label: "Memory", icon: Brain },
+  { id: "mcp", label: "MCP", icon: Plug }
 ] as const;
 
 type NavId = (typeof NAV_ITEMS)[number]["id"];
@@ -72,6 +74,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
             {activeNav === "models" ? <ModelSettings /> : null}
             {activeNav === "providers" ? <ProviderSettings /> : null}
             {activeNav === "memory" ? <MemorySettings /> : null}
+            {activeNav === "mcp" ? <McpSettings /> : null}
           </div>
         </div>
       </ResizableSidebar>

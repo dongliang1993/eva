@@ -199,10 +199,15 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       open = await openSessionTurn(app, body, runId);
       sessionId = open.sessionId;
 
-      // 阶段②:解析模型(带工作区)。模型不可用(503)时,本次刚建的会话要回滚。
+      // MCP 连接在这里懒触发(首个 run 付一次成本,之后是空调用)。连不上的 server
+      // 只在 registry 里记 error,工具缺席即可 —— MCP 不可用绝不让对话失败。
+      await app.services.mcp.ensureConnected();
+
+      // 阶段②:解析模型(带工作区 + MCP 工具)。模型不可用(503)时,本次刚建的会话要回滚。
       const resolved = app.services.agents.resolve({
         ...(body.modelId !== undefined ? { requestedModelId: body.modelId } : {}),
         ...(open.workspace !== undefined ? { workspace: open.workspace } : {}),
+        extraTools: app.services.mcp.listTools(),
         requestApproval
       });
 

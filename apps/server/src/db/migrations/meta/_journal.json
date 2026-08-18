@@ -127,6 +127,13 @@
       "when": 1786920000000,
       "tag": "0017_provider_slots",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1786930000000,
+      "tag": "0018_mcp_servers",
+      "breakpoints": true
     }
   ]
 }

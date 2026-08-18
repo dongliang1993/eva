@@ -254,3 +254,40 @@ export const approvalRequests = sqliteTable(
     index("idx_approval_requests_run").on(table.runId)
   ]
 );
+
+export const mcpTransports = ["stdio", "http"] as const;
+
+export const mcpOrigins = ["manual", "file"] as const;
+
+export const mcpServers = sqliteTable(
+  "mcp_servers",
+  {
+    id: text("id").primaryKey(),
+    /** 工具名前缀 —— mcp__<name>__<tool>。限 [a-z0-9_-]+，唯一。 */
+    name: text("name").notNull(),
+    /** file 来自 ~/.eva/mcp.json，UI 只能启停；manual 由 UI 创建，文件同步不碰。 */
+    origin: text("origin", { enum: mcpOrigins }).notNull().default("manual"),
+    transport: text("transport", { enum: mcpTransports }).notNull(),
+    command: text("command"),
+    /** JSON string[]。 */
+    args: text("args").notNull().default("[]"),
+    /** JSON Record<string,string>。含密钥，不回给前端。 */
+    env: text("env").notNull().default("{}"),
+    url: text("url"),
+    /** JSON Record<string,string>。含密钥，不回给前端。 */
+    headers: text("headers").notNull().default("{}"),
+    /** JSON string[] —— 免审批的 MCP 侧工具原名。 */
+    autoApproveTools: text("auto_approve_tools").notNull().default("[]"),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`(datetime('now'))`)
+  },
+  (table) => [
+    uniqueIndex("idx_mcp_servers_name").on(table.name),
+    index("idx_mcp_servers_origin").on(table.origin)
+  ]
+);

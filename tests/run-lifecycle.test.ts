@@ -77,7 +77,9 @@ const startApp = async (agent: Agent): Promise<void> => {
       new DrizzleMessageRepository(db)
     ),
     approvals: new ApprovalGateway(new ApprovalRepository(db)),
-    runRegistry: new RunRegistry()
+    runRegistry: new RunRegistry(),
+    // 本用例不测 MCP:给个空 registry 桩,证明"没配 MCP 时 run 照常跑"
+    mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });
 
   registerRunRoutes(app);

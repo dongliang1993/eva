@@ -11,10 +11,11 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.38",
-    "ai": "^7.0.64",
     "@eva/harness": "workspace:*",
     "@eva/shared": "workspace:*",
     "@fastify/static": "^9.0.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ai": "^7.0.64",
     "better-sqlite3": "^12.8.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.45.2",

@@ -222,3 +222,4 @@ export const toErrorMessage = (error: unknown): string =>
 export * from "./stream-events.js";
 export * from "./ui-message.js";
 export * from "./ui-message-builder.js";
+export * from "./mcp.js";

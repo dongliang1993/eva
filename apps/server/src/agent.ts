@@ -18,6 +18,7 @@ import {
   skillsToPromptSection,
   type Agent,
   type AgentObserver,
+  type AgentTool,
   type PromptSection,
   type RequestApproval,
   type Skill
@@ -47,7 +48,8 @@ export interface ConfiguredAgentOptions {
   readonly soulSection?: PromptSection | undefined;
   readonly observer?: AgentObserver | undefined;
   readonly requestApproval?: RequestApproval | undefined;
-  readonly extraTools?: readonly import("@eva/harness").AgentTool[];
+  /** 进程级注册的外部工具（当前来源：MCP registry）。 */
+  readonly extraTools?: readonly AgentTool[] | undefined;
   /** 本次 run 的工作区;缺省则不注入 fs 工具(纯聊天会话)。 */
   readonly workspace?: ResolvedWorkspaceContext | undefined;
 }

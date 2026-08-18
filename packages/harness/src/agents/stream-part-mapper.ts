@@ -2,6 +2,7 @@ import type { TextStreamPart, ToolSet } from "ai";
 
 import type { AgentToolCallResult } from "./types.js";
 import type { AgentStreamEvent } from "./types.js";
+import { TOOL_ERROR_PREFIX } from "../tools.js";
 
 /**
  * 工具调用的计时表:tool-call 时打点,tool-result 时取差。
@@ -19,9 +20,6 @@ export interface MappedPart {
   /** part 表示流级错误,需要抛给外层处理 reactive compact。 */
   readonly error?: unknown;
 }
-
-/** buildTool 把执行异常包成这个前缀开头的文本返回,没有独立的 isError 标记。 */
-export const TOOL_ERROR_PREFIX = "[Tool Error]";
 
 /** 工具 execute 的返回值 → 纯文本。Eva 的工具都返回 string,非 string 是异常情况才 stringify。 */
 export const toOutputText = (output: unknown): string =>

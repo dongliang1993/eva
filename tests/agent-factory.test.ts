@@ -35,9 +35,16 @@ const setDefaultModel = (
   });
 };
 
+const silentLogger = {
+  info: () => {},
+  warn: () => {},
+  error: () => {}
+} as unknown as AppInfrastructure["logger"];
+
 const makeInfra = (): AppInfrastructure => ({
   config: loadConfig({ env: {}, cwd: "/tmp" }),
   db,
+  logger: silentLogger,
   skills: []
 });
 

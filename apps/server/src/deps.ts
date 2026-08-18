@@ -11,6 +11,7 @@ import {
 import { DrizzleRunRepository } from "./db/repositories/run-repository.js";
 import { createPinoObserver } from "./observability.js";
 import { findMonorepoRoot } from "./services/monorepo-root.js";
+import { syncMcpConfigFile } from "./services/mcp/mcp-config-file.js";
 import { migrateLegacySettings } from "./services/settings/migrate-legacy.js";
 import type { AppInfrastructure, AppServices } from "./types/common.js";
 
@@ -43,6 +44,10 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   // 一次性把旧 settings 结构迁到模型槽位(存在 models 行即幂等跳过)。
   migrateLegacySettings(db, logger);
 
+  // ~/.eva/mcp.json → mcp_servers 表（file-origin）。运行时只读表，不读文件。
+  // 这里只同步配置，不建连接 —— 连接留给第一个 run 触发（没配 MCP 的用户零开销）。
+  syncMcpConfigFile(db, logger);
+
   // 进程重启时把上次没跑完的 run 收成 error —— 否则崩溃留下的 running 行会永远挂着。
   const staleRuns = new DrizzleRunRepository(db).failStale();
   if (staleRuns > 0) {
@@ -52,6 +57,7 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   return {
     config,
     db,
+    logger,
     skills,
     observer,
     soulSection

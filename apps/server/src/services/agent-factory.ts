@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import type { Agent, RequestApproval } from "@eva/harness";
+import type { Agent, AgentTool, RequestApproval } from "@eva/harness";
 
 import {
   AgentUnavailableError,
@@ -18,6 +18,8 @@ export interface AgentResolveOptions {
   readonly requestedModelId?: string | undefined;
   readonly requestApproval?: RequestApproval | undefined;
   readonly workspace?: ResolvedWorkspaceContext | undefined;
+  /** 进程级外部工具（MCP）；由路由从 registry 取好传进来。 */
+  readonly extraTools?: readonly AgentTool[] | undefined;
 }
 
 export interface ResolvedModels {
@@ -99,7 +101,8 @@ export class AgentFactory {
         ...(options.requestApproval !== undefined
           ? { requestApproval: options.requestApproval }
           : {}),
-        ...(options.workspace !== undefined ? { workspace: options.workspace } : {})
+        ...(options.workspace !== undefined ? { workspace: options.workspace } : {}),
+        ...(options.extraTools !== undefined ? { extraTools: options.extraTools } : {})
       },
       models,
       (binding) => this.getModel(binding)
