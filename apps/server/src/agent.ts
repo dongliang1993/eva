@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import type { LanguageModel } from "ai";
 import type { ProviderType } from "@eva/shared";
 import {
   buildAgentSystemPrompt,
@@ -84,15 +85,20 @@ export class AgentUnavailableError extends Error {
   }
 }
 
-export interface BuildAgentOptions {
+/** 解析运行时模型绑定需要的输入(纯读 DB/config)。 */
+export interface ResolveRuntimeOptions {
   readonly config: AppConfig;
   readonly db: AppDatabase;
+  readonly requestedModelId?: string | undefined;
+}
+
+/** 构造 agent 需要的输入(不含 db —— 模型已解析完)。 */
+export interface ConfiguredAgentOptions {
   readonly skills: Skill[];
   readonly soulSection?: PromptSection | undefined;
   readonly observer?: AgentObserver | undefined;
-  readonly requestedModelId?: string | undefined;
   readonly requestApproval?: RequestApproval | undefined;
-  /** fs 工具的工作区根;传入才会注入 fs 工具。 */
+  /** fs 工具的工作区根;缺省则不注入 fs 工具(见 T0.3)。 */
   readonly workRoot?: string | undefined;
 }
 
@@ -191,7 +197,7 @@ const resolveModelBinding = (
   };
 };
 
-const toAgentModel = (binding: ResolvedRuntimeModelBinding) => {
+export const toAgentModel = (binding: ResolvedRuntimeModelBinding): LanguageModel => {
   const options = {
     apiKey: binding.apiKey,
     ...(binding.baseURL ? { baseURL: binding.baseURL } : {}),
@@ -206,11 +212,13 @@ const toAgentModel = (binding: ResolvedRuntimeModelBinding) => {
   return createOpenAiCompatibleModel(options);
 };
 
-const createConfiguredAgent = (
-  { skills, soulSection, observer, workRoot, requestApproval }: Omit<BuildAgentOptions, "requestedModelId" | "db">,
-  runtime: AgentRuntimeResolution & { ok: true }
+export const createConfiguredAgent = (
+  options: ConfiguredAgentOptions,
+  runtime: AgentRuntimeResolution & { ok: true },
+  getModel: (binding: ResolvedRuntimeModelBinding) => LanguageModel
 ): Agent => {
   const { mainModel, toolModel } = runtime.value;
+  const { skills, soulSection, observer, workRoot, requestApproval } = options;
 
   const tools = [
     ...(skills.length > 0 ? [createReadSkillTool(skills)] : []),
@@ -238,15 +246,21 @@ const createConfiguredAgent = (
   ];
 
   if (toolModel) {
-    tools.push(createWebFetchTool({ summaryModel: toAgentModel(toolModel) }));
+    tools.push(createWebFetchTool({ summaryModel: getModel(toolModel) }));
     sections.push(createWebFetchPromptSection());
   }
 
   return createAgent({
-    model: toAgentModel(mainModel),
+    model: getModel(mainModel),
     tools,
     systemPrompt: buildAgentSystemPrompt({ sections }),
     maxSteps: 25,
+    callSettings: {
+      temperature: mainModel.temperature,
+      ...(mainModel.maxOutputTokens !== undefined
+        ? { maxOutputTokens: mainModel.maxOutputTokens }
+        : {})
+    },
     ...(requestApproval !== undefined ? { requestApproval } : {}),
     contextPolicy: {
       ...(mainModel.contextWindow !== undefined
@@ -265,7 +279,7 @@ export const resolveAgentRuntimeConfig = ({
   config,
   db,
   requestedModelId
-}: Pick<BuildAgentOptions, "config" | "db" | "requestedModelId">): AgentRuntimeResolution => {
+}: ResolveRuntimeOptions): AgentRuntimeResolution => {
   const settings = loadAppSettings(db, config);
   const selectedModelId = qualifyModelId(requestedModelId?.trim() ?? "", "openai")
     || settings.chat.defaultModel;
@@ -335,19 +349,4 @@ export const resolveAgentRuntimeConfig = ({
       ...(toolModel ? { toolModel } : {})
     }
   };
-};
-
-/**
- * Build the chat Agent from the runtime config. Fails fast (throws) if the
- * configured provider/model is not usable — a startup with no usable model
- * should surface loudly rather than fail on the first chat message.
- */
-export const buildChatAgent = (options: BuildAgentOptions): Agent => {
-  const runtime = resolveAgentRuntimeConfig(options);
-
-  if (!runtime.ok) {
-    throw new AgentUnavailableError(runtime.reason);
-  }
-
-  return createConfiguredAgent(options, runtime);
 };

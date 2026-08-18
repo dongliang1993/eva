@@ -65,6 +65,9 @@ export const registerSettingsRoutes = (app: FastifyInstance): void => {
   app.put("/api/v1/settings", async (request): Promise<AppSettings> => {
     const body = appSettingsSchema.parse(request.body ?? {}) as AppSettings;
 
-    return replaceAppSettings(app.infra.db, app.infra.config, body);
+    const updated = replaceAppSettings(app.infra.db, app.infra.config, body);
+    app.services.agents.invalidate();
+
+    return updated;
   });
 };

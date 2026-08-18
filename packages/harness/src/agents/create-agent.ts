@@ -56,7 +56,8 @@ export const createAgent = (options: CreateAgentOptions): Agent => {
         : {}),
       ...(rest.contextPolicy !== undefined
         ? { contextPolicy: rest.contextPolicy }
-        : {})
+        : {}),
+      ...(rest.callSettings !== undefined ? { callSettings: rest.callSettings } : {})
     });
   }
 
@@ -73,6 +74,7 @@ export const createAgent = (options: CreateAgentOptions): Agent => {
       : {}),
     ...(rest.contextPolicy !== undefined
       ? { contextPolicy: rest.contextPolicy }
-      : {})
+      : {}),
+    ...(rest.callSettings !== undefined ? { callSettings: rest.callSettings } : {})
   });
 };

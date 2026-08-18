@@ -1,16 +1,20 @@
 import { randomUUID } from "node:crypto";
 
+import type { ModelMessage } from "ai";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { RunStreamFrame, StreamFinishReason } from "@eva/shared";
 import { toErrorMessage } from "@eva/shared";
 
-import { AgentUnavailableError, resolveAgentRuntimeConfig } from "../agent.js";
+import {
+  AgentUnavailableError,
+  type ResolvedRuntimeModelBinding
+} from "../agent.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
 import { autoCompactIfNeeded, createAutoCompactConfig } from "../services/auto-compact.js";
 import { buildMemoryRuntimeSupport } from "../services/memory-runtime.js";
 import { loadAppSettings } from "../services/settings-store.js";
 import { runSchema } from "../types/runs.js";
-import type { RunInput } from "../types/runs.js";
+import type { RunInput, RunInputMessage, RunMessageContent } from "../types/runs.js";
 
 const formatSseFrame = (event: string, data: unknown): string =>
   `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -18,6 +22,40 @@ const formatSseFrame = (event: string, data: unknown): string =>
 const writeFrame = (reply: FastifyReply, frame: RunStreamFrame): void => {
   reply.raw.write(formatSseFrame(frame.type, frame));
 };
+
+// Normalize legacy LangChain roles (human/ai/function/generic/remove) and the
+// generic "developer" role down to the four Vercel ModelMessage roles.
+const normalizeRole = (role: RunInputMessage["role"]): ModelMessage["role"] => {
+  switch (role) {
+    case "human":
+      return "user";
+    case "ai":
+    case "function":
+    case "generic":
+    case "remove":
+      return "assistant";
+    case "developer":
+      return "system";
+    default:
+      return role;
+  }
+};
+
+const toAgentMessage = ({
+  role,
+  content
+}: RunInputMessage): ModelMessage => ({
+  role: normalizeRole(role),
+  content: content as RunMessageContent
+} as ModelMessage);
+
+const toAgentRunInput = (input: RunInput) => ({
+  messages: input.messages.map(toAgentMessage),
+  ...(input.context !== undefined ? { context: input.context } : {}),
+  ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
+  ...(input.additionalTools !== undefined ? { additionalTools: input.additionalTools } : {}),
+  ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {})
+});
 
 /**
  * Extract the last user message content from the request body.
@@ -41,7 +79,8 @@ const extractUserContent = (
  */
 const resolveSessionInput = async (
   app: FastifyInstance,
-  body: ReturnType<typeof runSchema.parse>
+  body: ReturnType<typeof runSchema.parse>,
+  mainModel: ResolvedRuntimeModelBinding
 ): Promise<{ input: RunInput; sessionId: string }> => {
   const userContent = extractUserContent(body);
 
@@ -68,18 +107,8 @@ const resolveSessionInput = async (
   }));
 
   // Record which model is being used on this session
-  const runtime = resolveAgentRuntimeConfig({
-    config: app.infra.config,
-    db: app.infra.db,
-    requestedModelId: body.modelId
-  });
-
-  if (!runtime.ok) {
-    throw new AgentUnavailableError(runtime.reason);
-  }
-
   const sessionRepo = new DrizzleSessionRepository(app.infra.db);
-  sessionRepo.updateModel(session.id, runtime.value.mainModel.qualifiedModelId);
+  sessionRepo.updateModel(session.id, mainModel.qualifiedModelId);
 
   const memoryRuntime = await buildMemoryRuntimeSupport({
     db: app.infra.db,
@@ -90,15 +119,15 @@ const resolveSessionInput = async (
       ? { baseContext: body.context }
       : {}),
     ...(
-      runtime.value.mainModel.contextWindow !== undefined
-        || runtime.value.mainModel.maxOutputTokens !== undefined
+      mainModel.contextWindow !== undefined
+        || mainModel.maxOutputTokens !== undefined
         ? {
           modelLimits: {
-            ...(runtime.value.mainModel.contextWindow !== undefined
-              ? { contextWindow: runtime.value.mainModel.contextWindow }
+            ...(mainModel.contextWindow !== undefined
+              ? { contextWindow: mainModel.contextWindow }
               : {}),
-            ...(runtime.value.mainModel.maxOutputTokens !== undefined
-              ? { maxOutputTokens: runtime.value.mainModel.maxOutputTokens }
+            ...(mainModel.maxOutputTokens !== undefined
+              ? { maxOutputTokens: mainModel.maxOutputTokens }
               : {})
           }
         }
@@ -125,10 +154,15 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
   app.post("/api/v1/runs/wait", async (request, reply) => {
     try {
       const body = runSchema.parse(request.body ?? {});
-      const { input, sessionId } = await resolveSessionInput(app, body);
+      const resolved = app.services.agents.resolve({
+        ...(body.modelId !== undefined
+          ? { requestedModelId: body.modelId }
+          : {})
+      });
+      const { input, sessionId } = await resolveSessionInput(app, body, resolved.mainModel);
 
       const waitStart = Date.now();
-      const result = await app.services.runs.wait(input);
+      const result = await resolved.agent.invoke(toAgentRunInput(input));
       const waitDurationMs = Date.now() - waitStart;
 
       app.services.session.recordAssistantResult(sessionId, result, undefined, waitDurationMs);
@@ -153,7 +187,13 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
     try {
       const body = runSchema.parse(request.body ?? {});
-      const { input, sessionId: resolvedSessionId } = await resolveSessionInput(app, body);
+      const resolved = app.services.agents.resolve({
+        ...(body.modelId !== undefined
+          ? { requestedModelId: body.modelId }
+          : {})
+      });
+      const { input, sessionId: resolvedSessionId } =
+        await resolveSessionInput(app, body, resolved.mainModel);
       sessionId = resolvedSessionId;
 
       input.abortSignal = controller.signal;
@@ -190,7 +230,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         durationMs?: number;
       }> = [];
 
-      for await (const event of app.services.runs.stream(input)) {
+      for await (const event of resolved.agent.stream(toAgentRunInput(input))) {
         seq += 1;
         writeFrame(reply, { ...event, seq } as RunStreamFrame);
 

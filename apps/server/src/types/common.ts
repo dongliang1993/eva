@@ -6,9 +6,9 @@ import type {
 
 import type { AppConfig } from "../config.js";
 import type { AppDatabase } from "../db/index.js";
+import type { AgentFactory } from "../services/agent-factory.js";
 import type { ApprovalGateway } from "../services/approval-gateway.js";
 import type { RunRegistry } from "../services/run-registry.js";
-import type { RunApiService } from "../services/runs.js";
 import type { SessionService } from "../services/session.js";
 
 export interface AppInfrastructure {
@@ -17,10 +17,12 @@ export interface AppInfrastructure {
   skills: readonly Skill[];
   observer?: AgentObserver | undefined;
   soulSection?: PromptSection | undefined;
+  /** fs 工具的工作区根;undefined = 不注入 fs 工具(见 T0.3)。 */
+  workRoot?: string | undefined;
 }
 
 export interface AppServices {
-  runs: RunApiService;
+  agents: AgentFactory;
   session: SessionService;
   approvals: ApprovalGateway;
   runRegistry: RunRegistry;

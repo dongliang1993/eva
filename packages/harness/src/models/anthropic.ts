@@ -8,6 +8,7 @@ export interface AnthropicModelOptions {
   apiKey: string;
   baseURL?: string;
   model: string;
+  /** 已不生效:temperature 是 AI SDK 的 call setting,走 AgentCallSettings 透传。T4 清理该字段。 */
   temperature?: number;
 }
 

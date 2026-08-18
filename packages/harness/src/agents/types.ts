@@ -51,6 +51,12 @@ export interface ToolApprovalRequest {
 /** 危险工具执行前的用户审批入口(由宿主注入;默认放行)。 */
 export type RequestApproval = (request: ToolApprovalRequest) => Promise<boolean>;
 
+/** 每次模型调用的 call settings(AI SDK 语义:不属于 model 实例,属于调用)。 */
+export interface AgentCallSettings {
+  readonly temperature?: number;
+  readonly maxOutputTokens?: number;
+}
+
 export interface CreateAgentOptions {
   model: AgentModel;
   tools?: AgentTool[];
@@ -60,4 +66,5 @@ export interface CreateAgentOptions {
   observer?: AgentObserver;
   contextPolicy?: ContextWindowPolicyOptions;
   requestApproval?: RequestApproval;
+  callSettings?: AgentCallSettings;
 }

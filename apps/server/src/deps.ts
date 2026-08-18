@@ -38,12 +38,18 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
 
   const db = initializeDatabase(config, logger);
 
+  // fs 工具工作区根:优先 TARGET_REPO_ROOT(对话仓库),否则用 activity 默认目录。
+  // TODO(T0.3):改为显式工作区,未配置时不注入 fs 工具。
+  const workRoot = config.TARGET_REPO_ROOT.trim()
+    || config.DB_PATH.split("/").slice(0, -2).join("/");
+
   return {
     config,
     db,
     skills,
     observer,
-    soulSection
+    soulSection,
+    ...(workRoot !== undefined ? { workRoot } : {})
   };
 };
 

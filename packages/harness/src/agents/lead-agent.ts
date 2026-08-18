@@ -39,6 +39,7 @@ import {
 import { isReactiveCompactCandidateError } from "../models/errors.js";
 import { coalesceTextDeltas } from "./coalesce-stream.js";
 import type {
+  AgentCallSettings,
   AgentRunInput,
   AgentRunResult,
   AgentStreamEvent,
@@ -181,6 +182,7 @@ export interface LeadAgentOptions {
   contextPolicy?: ContextWindowPolicyOptions;
   /** 危险工具执行前的用户审批入口(由宿主注入)。缺省时危险工具直接执行。 */
   requestApproval?: RequestApproval;
+  callSettings?: AgentCallSettings;
 }
 
 const resolveSystemMessage = (
@@ -400,6 +402,12 @@ export class LeadAgent implements Agent {
           toolApproval: () => ({ type: "user-approval" }),
           stopWhen: stepCountIs(1),
           ...(abortSignal !== undefined ? { abortSignal } : {}),
+          ...(this.options.callSettings?.temperature !== undefined
+            ? { temperature: this.options.callSettings.temperature }
+            : {}),
+          ...(this.options.callSettings?.maxOutputTokens !== undefined
+            ? { maxOutputTokens: this.options.callSettings.maxOutputTokens }
+            : {}),
           onError: (event) => {
             // 错误会在 stream 里以 'error' part 出现;这里只记,不因拒而抛。
             void event;

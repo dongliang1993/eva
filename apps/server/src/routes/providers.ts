@@ -154,7 +154,7 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
 
     reply.code(201);
 
-    return createProvider(app.infra.db, {
+    const created = createProvider(app.infra.db, {
       ...(body.id !== undefined ? { id: body.id } : {}),
       name: body.name,
       type: body.type as ProviderType,
@@ -166,6 +166,9 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
         ? { availableModels: normalizeProviderModels(body.availableModels) }
         : {})
     });
+    app.services.agents.invalidate();
+
+    return created;
   });
 
   app.post(
@@ -225,6 +228,7 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
         updateProvider(app.infra.db, id, {
           availableModels: discovered.models
         });
+        app.services.agents.invalidate();
 
         return discovered;
       } catch (error) {
@@ -252,6 +256,7 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
         return { error: "Provider not found" };
       }
 
+      app.services.agents.invalidate();
       return updated;
     }
   );
@@ -277,6 +282,7 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
       return { error: "Provider not found" };
     }
 
+    app.services.agents.invalidate();
     return updated;
   });
 
@@ -289,6 +295,7 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
       return { error: "Provider not found" };
     }
 
+    app.services.agents.invalidate();
     reply.code(204);
     return null;
   });

@@ -27,7 +27,9 @@ beforeEach(async () => {
     db,
     skills: []
   });
-  app.decorate("services", {} as never);
+  app.decorate("services", {
+    agents: { invalidate() { /* no-op in this fixture */ } }
+  } as never);
 
   registerProviderRoutes(app);
   await app.ready();
