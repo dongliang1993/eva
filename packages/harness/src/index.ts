@@ -13,6 +13,7 @@ export * from "./prompts/sections/web-search.js";
 export * from "./prompts/soul.js";
 export * from "./skills/index.js";
 export * from "./tools.js";
+export * from "./tools/with-approval.js";
 export * from "./tools/web-search/index.js";
 export * from "./tools/task/index.js";
 export * from "./subagents/index.js";

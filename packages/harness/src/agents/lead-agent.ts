@@ -44,7 +44,6 @@ import type {
   AgentRunResult,
   AgentStreamEvent,
   AgentToolCallResult,
-  RequestApproval,
   Agent
 } from "./types.js";
 
@@ -103,29 +102,26 @@ const finalizeAssistantText = (
     : "The agent returned an empty response.";
 };
 
-// 把 ToolResultPart.output 拍平成纯文本,用于事件产出和统计。
-const stringifyToolOutput = (output: ToolResultPart["output"]): string => {
-  switch (output.type) {
-    case "text":
-      return output.value;
-    case "json":
-      return typeof output.value === "string" ? output.value : JSON.stringify(output.value);
-    case "execution-denied":
-      return `Execution denied${output.reason ? `: ${output.reason}` : ""}`;
-    case "error-text":
-      return output.value;
-    case "error-json":
-      return typeof output.value === "string" ? output.value : JSON.stringify(output.value);
-    default:
-      return JSON.stringify(output);
-  }
-};
+/**
+ * buildTool 把执行异常包成这个前缀开头的文本返回,没有独立的 isError 标记。
+ * T2 会把这段逻辑抽进 stream-part-mapper.ts 的 toOutputText。
+ */
+const TOOL_ERROR_PREFIX = "[Tool Error]";
 
-// eva 的 buildTool 把执行错误包成 "[Tool Error] ..." 文本返回,没有 isError 标记。
-const readToolStatus = (output: ToolResultPart["output"]): "success" | "error" => {
-  const text = stringifyToolOutput(output);
-  return text.startsWith("[Tool Error]") ? "error" : "success";
-};
+/**
+ * 工具 execute 的返回值 → 纯文本。
+ *
+ * Eva 的工具都返回 string(成功内容或 "[Tool Error] ..." 拒绝文本),所以流里的
+ * tool-result part 的 output 就是 execute 的返回值本身。老代码按
+ * ToolResultPart["output"] 的结构化联合(按 output.type 分支)处理,对一个 plain
+ * string 会落到 default: JSON.stringify —— 字符串被二次 JSON 转义,且
+ * readToolStatus 的 startsWith 因为前面多了引号而永远判不到错误。
+ */
+const toOutputText = (output: unknown): string =>
+  typeof output === "string" ? output : JSON.stringify(output);
+
+const readToolStatus = (output: unknown): "success" | "error" =>
+  toOutputText(output).startsWith(TOOL_ERROR_PREFIX) ? "error" : "success";
 
 // LanguageModelUsage(inputTokens/outputTokens/totalTokens) → eva 的 TokenUsage。
 const readTokenUsage = (usage: {
@@ -180,8 +176,6 @@ export interface LeadAgentOptions {
   maxSteps?: number;
   observer?: AgentObserver;
   contextPolicy?: ContextWindowPolicyOptions;
-  /** 危险工具执行前的用户审批入口(由宿主注入)。缺省时危险工具直接执行。 */
-  requestApproval?: RequestApproval;
   callSettings?: AgentCallSettings;
 }
 
@@ -204,7 +198,6 @@ export class LeadAgent implements Agent {
   private readonly maxSteps: number;
   private readonly observer: AgentObserver | undefined;
   private readonly contextPolicy: ContextWindowPolicy;
-  private readonly requestApproval: RequestApproval | undefined;
 
   constructor(private readonly options: LeadAgentOptions) {
     this.toolsByName = new Map(
@@ -213,7 +206,6 @@ export class LeadAgent implements Agent {
     this.systemMessage = resolveSystemMessage(options.systemPrompt);
     this.maxSteps = options.maxSteps ?? 5;
     this.observer = options.observer;
-    this.requestApproval = options.requestApproval;
     this.contextPolicy = resolveContextWindowPolicy(options.contextPolicy);
   }
 
@@ -377,280 +369,226 @@ export class LeadAgent implements Agent {
     let usage: TokenUsage | undefined;
     const toolCallStartTimes = new Map<string, number>();
 
-    // 审批: 官方「两轮模型调用」。streamText 用 toolApproval(返回 user-approval)对
-    // needsApproval 工具产 tool-approval-request part; 收集审批, 把 tool-approval-response
-    // push 到 messages, 再重新 streamText —— 直到本步无待审批工具。
-    let rerun = true;
     try {
-      while (rerun) {
-        rerun = false;
-        const { instructions, messages: promptMessages } = this.splitInstructionsAndMessages(
-          state.messages
-        );
-        const approvalRequests: Array<{
-          approvalId: string;
-          toolCallId: string;
-          toolName: string;
-          input: unknown;
-        }> = [];
+      const { instructions, messages: promptMessages } = this.splitInstructionsAndMessages(
+        state.messages
+      );
 
-        const result = streamText({
-          model: this.options.model,
-          instructions,
-          messages: promptMessages,
-          tools: toolSet,
-          toolApproval: () => ({ type: "user-approval" }),
-          stopWhen: stepCountIs(1),
-          ...(abortSignal !== undefined ? { abortSignal } : {}),
-          ...(this.options.callSettings?.temperature !== undefined
-            ? { temperature: this.options.callSettings.temperature }
-            : {}),
-          ...(this.options.callSettings?.maxOutputTokens !== undefined
-            ? { maxOutputTokens: this.options.callSettings.maxOutputTokens }
-            : {}),
-          onError: (event) => {
-            // 错误会在 stream 里以 'error' part 出现;这里只记,不因拒而抛。
-            void event;
+      const result = streamText({
+        model: this.options.model,
+        instructions,
+        messages: promptMessages,
+        tools: toolSet,
+        stopWhen: stepCountIs(1),
+        ...(abortSignal !== undefined ? { abortSignal } : {}),
+        ...(this.options.callSettings?.temperature !== undefined
+          ? { temperature: this.options.callSettings.temperature }
+          : {}),
+        ...(this.options.callSettings?.maxOutputTokens !== undefined
+          ? { maxOutputTokens: this.options.callSettings.maxOutputTokens }
+          : {}),
+        onError: (event) => {
+          // 错误会在 stream 里以 'error' part 出现;这里只记,不因拒而抛。
+          void event;
+        }
+      });
+
+      for await (const part of result.stream) {
+        // SDK 不保证对忽略信号的 provider 流强制中断(尤其本地/mock 流),
+        // 每个 part 消费前显式检查一次,确保 abort 确定性生效。
+        if (abortSignal?.aborted) {
+          out.collect = { text, toolCalls, toolResults, finishReason, usage };
+          out.aborted = true;
+          return;
+        }
+
+        switch (part.type) {
+          case "text-delta": {
+            text += part.text;
+
+            if (mode === "stream") {
+              yield {
+                type: "text-delta",
+                textDelta: part.text
+              };
+            }
+            break;
           }
-        });
 
-        for await (const part of result.stream) {
-          // SDK 不保证对忽略信号的 provider 流强制中断(尤其本地/mock 流),
-          // 每个 part 消费前显式检查一次,确保 abort 确定性生效。
-          if (abortSignal?.aborted) {
-            out.collect = { text, toolCalls, toolResults, finishReason, usage };
-            out.aborted = true;
-            return;
+          case "reasoning-delta": {
+            if (mode === "stream") {
+              yield {
+                type: "reasoning-delta",
+                textDelta: part.text
+              };
+            }
+            break;
           }
 
-          switch (part.type) {
-            case "text-delta": {
-              text += part.text;
-
-              if (mode === "stream") {
-                yield {
-                  type: "text-delta",
-                  textDelta: part.text
-                };
-              }
-              break;
+          case "tool-input-start": {
+            if (mode === "stream") {
+              yield {
+                type: "tool-input-start",
+                toolCallId: part.id,
+                toolName: part.toolName
+              };
             }
+            break;
+          }
 
-            case "reasoning-delta": {
-              if (mode === "stream") {
-                yield {
-                  type: "reasoning-delta",
-                  textDelta: part.text
-                };
-              }
-              break;
+          case "tool-input-delta": {
+            if (mode === "stream") {
+              yield {
+                type: "tool-input-delta",
+                toolCallId: part.id,
+                delta: part.delta
+              };
             }
+            break;
+          }
 
-            case "tool-input-start": {
-              if (mode === "stream") {
-                yield {
-                  type: "tool-input-start",
-                  toolCallId: part.id,
-                  toolName: part.toolName
-                };
-              }
-              break;
-            }
+          case "tool-call": {
+            const toolCallPart: ToolCallPart = {
+              type: "tool-call",
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              input: part.input
+            };
+            toolCalls.push(toolCallPart);
+            toolCallStartTimes.set(part.toolCallId, Date.now());
 
-            case "tool-input-delta": {
-              if (mode === "stream") {
-                yield {
-                  type: "tool-input-delta",
-                  toolCallId: part.id,
-                  delta: part.delta
-                };
-              }
-              break;
-            }
-
-            case "tool-call": {
-              const toolCallPart: ToolCallPart = {
+            if (mode === "stream") {
+              yield {
                 type: "tool-call",
                 toolCallId: part.toolCallId,
                 toolName: part.toolName,
-                input: part.input
+                input: (part.input as Record<string, unknown>) ?? {}
               };
-              toolCalls.push(toolCallPart);
-              toolCallStartTimes.set(part.toolCallId, Date.now());
-
-              if (mode === "stream") {
-                yield {
-                  type: "tool-call",
-                  toolCallId: part.toolCallId,
-                  toolName: part.toolName,
-                  input: (part.input as Record<string, unknown>) ?? {}
-                };
-              }
-
-              emit({
-                type: "tool_call_initiated",
-                step,
-                toolName: part.toolName,
-                toolCallId: part.toolCallId
-              });
-              break;
             }
 
-            case "tool-result": {
-              const output = part.output as ToolResultPart["output"];
-              const toolResultPart: ToolResultPart = {
+            emit({
+              type: "tool_call_initiated",
+              step,
+              toolName: part.toolName,
+              toolCallId: part.toolCallId
+            });
+            break;
+          }
+
+          case "tool-result": {
+            const output = part.output;
+            const outputText = toOutputText(output);
+            const status = readToolStatus(output);
+            // 回灌给下一轮的 ToolResultPart.output 必须是结构化的 ToolResultOutput。
+            // Eva 工具 execute 返回 plain string,SDK 的 tool-result stream part 把它原样
+            // 放在 part.output —— 直接塞回 ToolResultPart 会触发 ModelMessage schema 校验失败。
+            const toolResultPart: ToolResultPart = {
+              type: "tool-result",
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              output: { type: "text", value: outputText }
+            };
+            toolResults.push(toolResultPart);
+
+            const startedAt = toolCallStartTimes.get(part.toolCallId);
+            const durationMs = startedAt !== undefined ? Date.now() - startedAt : 0;
+            toolCallStartTimes.delete(part.toolCallId);
+
+            state.toolCalls.push({
+              toolName: part.toolName,
+              toolCallId: part.toolCallId,
+              args: (part.input as Record<string, unknown>) ?? {},
+              output: outputText,
+              status,
+              durationMs
+            });
+
+            if (mode === "stream") {
+              yield {
                 type: "tool-result",
                 toolCallId: part.toolCallId,
                 toolName: part.toolName,
-                output
-              };
-              toolResults.push(toolResultPart);
-
-              const outputText = stringifyToolOutput(output);
-              const status = readToolStatus(output);
-              const startedAt = toolCallStartTimes.get(part.toolCallId);
-              const durationMs = startedAt !== undefined ? Date.now() - startedAt : 0;
-              toolCallStartTimes.delete(part.toolCallId);
-
-              state.toolCalls.push({
-                toolName: part.toolName,
-                toolCallId: part.toolCallId,
-                args: (part.input as Record<string, unknown>) ?? {},
                 output: outputText,
                 status,
                 durationMs
-              });
-
-              if (mode === "stream") {
-                yield {
-                  type: "tool-result",
-                  toolCallId: part.toolCallId,
-                  toolName: part.toolName,
-                  output: outputText,
-                  status,
-                  durationMs
-                };
-              }
-
-              emit({
-                type: "tool_call_completed",
-                step,
-                toolName: part.toolName,
-                toolCallId: part.toolCallId,
-                status,
-                durationMs
-              });
-              break;
+              };
             }
 
-            case "tool-error": {
-              // 工具执行抛出但未被 buildTool 包成文本的情况(ai 层错误)。
-              const errorOutput = toErrorMessage(part.error);
-              const errorResultPart: ToolResultPart = {
+            emit({
+              type: "tool_call_completed",
+              step,
+              toolName: part.toolName,
+              toolCallId: part.toolCallId,
+              status,
+              durationMs
+            });
+            break;
+          }
+
+          case "tool-error": {
+            // 工具执行抛出但未被 buildTool 包成异常的情况(ai 层错误)。
+            const errorOutput = toErrorMessage(part.error);
+            const errorResultPart: ToolResultPart = {
+              type: "tool-result",
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              output: { type: "text", value: errorOutput }
+            };
+            toolResults.push(errorResultPart);
+
+            const startedAt = toolCallStartTimes.get(part.toolCallId);
+            const durationMs = startedAt !== undefined ? Date.now() - startedAt : 0;
+            toolCallStartTimes.delete(part.toolCallId);
+
+            state.toolCalls.push({
+              toolName: part.toolName,
+              toolCallId: part.toolCallId,
+              args: (part.input as Record<string, unknown>) ?? {},
+              output: errorOutput,
+              status: "error",
+              durationMs
+            });
+
+            if (mode === "stream") {
+              yield {
                 type: "tool-result",
                 toolCallId: part.toolCallId,
                 toolName: part.toolName,
-                output: { type: "text", value: errorOutput }
-              };
-              toolResults.push(errorResultPart);
-
-              const startedAt = toolCallStartTimes.get(part.toolCallId);
-              const durationMs = startedAt !== undefined ? Date.now() - startedAt : 0;
-              toolCallStartTimes.delete(part.toolCallId);
-
-              state.toolCalls.push({
-                toolName: part.toolName,
-                toolCallId: part.toolCallId,
-                args: (part.input as Record<string, unknown>) ?? {},
                 output: errorOutput,
                 status: "error",
                 durationMs
-              });
-
-              if (mode === "stream") {
-                yield {
-                  type: "tool-result",
-                  toolCallId: part.toolCallId,
-                  toolName: part.toolName,
-                  output: errorOutput,
-                  status: "error",
-                  durationMs
-                };
-              }
-
-              emit({
-                type: "tool_call_completed",
-                step,
-                toolName: part.toolName,
-                toolCallId: part.toolCallId,
-                status: "error",
-                durationMs
-              });
-              break;
+              };
             }
 
-            case "finish-step": {
-              finishReason = part.finishReason;
-              usage = readTokenUsage(part.usage);
-              break;
-            }
-
-            case "error": {
-              // 真正的流级错误(网络/模型异常)。交给外层 try/catch 处理 reactive compact。
-              throw part.error;
-            }
-
-            case "tool-approval-request": {
-              // 危险工具等待审批 → 记录审批请求, 本轮结束后处理。
-              approvalRequests.push({
-                approvalId: part.approvalId,
-                toolCallId: part.toolCall.toolCallId,
-                toolName: part.toolCall.toolName,
-                input: part.toolCall.input
-              });
-              break;
-            }
-
-            default: {
-              break;
-            }
-          }
-        }
-
-        // 若本步有等待审批的工具: 调 requestApproval 收决策 → push tool-approval-response
-        // 到 messages → 重跑 streamText(官方"两轮模型调用")。
-        if (approvalRequests.length > 0 && this.requestApproval) {
-          const responses: Array<{ type: "tool-approval-response"; approvalId: string; approved: boolean }> = [];
-
-          for (const req of approvalRequests) {
-            const approved = await this.requestApproval({
-              toolName: req.toolName,
-              toolCallId: req.toolCallId,
-              args: (req.input as Record<string, unknown>) ?? {}
+            emit({
+              type: "tool_call_completed",
+              step,
+              toolName: part.toolName,
+              toolCallId: part.toolCallId,
+              status: "error",
+              durationMs
             });
-
-            if (abortSignal?.aborted) {
-              out.collect = { text, toolCalls, toolResults, finishReason, usage };
-              out.aborted = true;
-              return;
-            }
-
-            responses.push({ type: "tool-approval-response", approvalId: req.approvalId, approved });
+            break;
           }
 
-          // 官方: 审批响应作为 tool-role 消息 push 回 messages, 重跑 streamText,
-          // SDK 据此执行/拒绝危险工具。
-          state.messages.push({
-            role: "tool",
-            content: responses
-          } as ToolModelMessage);
+          case "finish-step": {
+            finishReason = part.finishReason;
+            usage = readTokenUsage(part.usage);
+            break;
+          }
 
-          rerun = true;
-          continue;
+          case "error": {
+            // 真正的流级错误(网络/模型异常)。交给外层 try/catch 处理 reactive compact。
+            throw part.error;
+          }
+
+          default: {
+            break;
+          }
         }
-
-        out.collect = { text, toolCalls, toolResults, finishReason, usage };
       }
+
+      out.collect = { text, toolCalls, toolResults, finishReason, usage };
     } catch (error) {
       if (isAbortError(error)) {
         out.collect = { text, toolCalls, toolResults, finishReason, usage };

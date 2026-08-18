@@ -17,12 +17,13 @@ interface PendingRequest {
  *
  * 信任模型(04 §5.2):本机进程是自己人,审批只防「AI 乱来」。
  */
+/** 审批挂起的上限。超时按拒绝处理,避免 run 永久吊死。 */
+const PENDING_TIMEOUT_MS = 5 * 60 * 1000;
+
 export class ApprovalGateway {
   private readonly pending = new Map<string, PendingRequest>();
 
   constructor(private readonly repo: ApprovalRepository) {}
-
-  private static readonly PENDING_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟
 
   /** 发起一次审批请求,返回解析为「是否允许」的 Promise。 */
   ask(callId: string, sessionId: string, tool: string, args: unknown): Promise<boolean> {
@@ -33,7 +34,7 @@ export class ApprovalGateway {
         this.pending.delete(callId);
         this.repo.decide(callId, "denied");
         resolve(false);
-      }, ApprovalGateway.PENDING_TIMEOUT_MS);
+      }, PENDING_TIMEOUT_MS);
 
       this.pending.set(callId, { sessionId, tool, args, resolve, timer });
     });
@@ -51,7 +52,29 @@ export class ApprovalGateway {
     return true;
   }
 
-  /** 当前未决的审批请求(供前端 SSE/轮询发现)。 */
+  /**
+   * 取消某会话下所有未决审批(abort / run 结束 / 进程收尾时调用)。
+   * docs 14 §4.4:「abort / run 结束 / destroy 时 cancelAll 统一 reject(不会永远吊着)」。
+   * @returns 被取消的数量
+   */
+  cancelBySession(sessionId: string): number {
+    let cancelled = 0;
+
+    for (const [callId, entry] of [...this.pending]) {
+      if (entry.sessionId !== sessionId) {
+        continue;
+      }
+      clearTimeout(entry.timer);
+      this.pending.delete(callId);
+      this.repo.decide(callId, "denied");
+      entry.resolve(false);
+      cancelled += 1;
+    }
+
+    return cancelled;
+  }
+
+  /** 当前未决的审批请求(供前端 SSE/轮询恢复)。 */
   listPending(sessionId?: string): ReadonlyArray<{
     callId: string;
     tool: string;

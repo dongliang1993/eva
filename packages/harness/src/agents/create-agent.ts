@@ -3,6 +3,7 @@ import type { SystemModelMessage } from "ai";
 import { createSubagentPromptSection } from "../prompts/sections/subagents.js";
 import { SubagentRegistry } from "../subagents/registry.js";
 import { createTaskTool } from "../tools/task/index.js";
+import { withApproval } from "../tools/with-approval.js";
 import { LeadAgent } from "./lead-agent.js";
 import type { CreateAgentOptions, Agent } from "./types.js";
 
@@ -20,7 +21,13 @@ const appendPromptSection = (
 };
 
 export const createAgent = (options: CreateAgentOptions): Agent => {
-  const { subagents, ...rest } = options;
+  const { subagents, requestApproval, ...rest } = options;
+
+  // 危险工具统一在 createAgent 一层包装 execute(两个分支共用,子代理也自动继承
+  // 审批)。不再把 requestApproval 传给 LeadAgent —— 审批逻辑完全收敛到 withApproval。
+  const tools = requestApproval
+    ? (rest.tools ?? []).map((t) => withApproval(t, requestApproval))
+    : rest.tools;
 
   if (subagents && subagents.length > 0) {
     const registry = new SubagentRegistry();
@@ -29,7 +36,7 @@ export const createAgent = (options: CreateAgentOptions): Agent => {
       registry.register(config);
     }
 
-    const baseTools = rest.tools ?? [];
+    const baseTools = tools ?? [];
 
     const taskTool = createTaskTool({
       registry,
@@ -51,9 +58,6 @@ export const createAgent = (options: CreateAgentOptions): Agent => {
       systemPrompt: enhancedPrompt,
       ...(rest.maxSteps !== undefined ? { maxSteps: rest.maxSteps } : {}),
       ...(rest.observer !== undefined ? { observer: rest.observer } : {}),
-      ...(rest.requestApproval !== undefined
-        ? { requestApproval: rest.requestApproval }
-        : {}),
       ...(rest.contextPolicy !== undefined
         ? { contextPolicy: rest.contextPolicy }
         : {}),
@@ -63,15 +67,12 @@ export const createAgent = (options: CreateAgentOptions): Agent => {
 
   return new LeadAgent({
     model: rest.model,
-    ...(rest.tools !== undefined ? { tools: rest.tools } : {}),
+    ...(tools !== undefined ? { tools } : {}),
     ...(rest.systemPrompt !== undefined
       ? { systemPrompt: rest.systemPrompt }
       : {}),
     ...(rest.maxSteps !== undefined ? { maxSteps: rest.maxSteps } : {}),
     ...(rest.observer !== undefined ? { observer: rest.observer } : {}),
-    ...(rest.requestApproval !== undefined
-      ? { requestApproval: rest.requestApproval }
-      : {}),
     ...(rest.contextPolicy !== undefined
       ? { contextPolicy: rest.contextPolicy }
       : {}),

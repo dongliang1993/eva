@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import type { ModelMessage } from "ai";
+import type { RequestApproval } from "@eva/harness";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import type { RunStreamFrame, StreamFinishReason } from "@eva/shared";
+import type { RunStreamEvent, RunStreamFrame, StreamFinishReason } from "@eva/shared";
 import { toErrorMessage } from "@eva/shared";
 
 import {
@@ -185,13 +186,35 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     let sessionId = "";
     let seq = 0;
 
+    // 统一的帧出口:seq 只在这里递增(generator 帧与审批帧共用同一序列)。
+    const emit = (event: RunStreamEvent): void => {
+      seq += 1;
+      writeFrame(reply, { ...event, seq } as RunStreamFrame);
+    };
+
+    const requestApproval: RequestApproval = async ({ toolCallId, toolName, args }) => {
+      const settings = loadAppSettings(app.infra.db, app.infra.config);
+
+      if (settings.security.autoApproveToolRequests) {
+        return true;
+      }
+
+      emit({ type: "approval_request", callId: toolCallId, toolName, args });
+      const approved = await app.services.approvals.ask(toolCallId, sessionId, toolName, args);
+      emit({ type: "approval_resolved", callId: toolCallId, approved });
+
+      return approved;
+    };
+
     try {
       const body = runSchema.parse(request.body ?? {});
       const resolved = app.services.agents.resolve({
         ...(body.modelId !== undefined
           ? { requestedModelId: body.modelId }
-          : {})
+          : {}),
+        requestApproval
       });
+
       const { input, sessionId: resolvedSessionId } =
         await resolveSessionInput(app, body, resolved.mainModel);
       sessionId = resolvedSessionId;
@@ -205,15 +228,18 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         "X-Accel-Buffering": "no"
       });
 
-      seq = 1;
-      writeFrame(reply, { seq, type: "run_start", runId, sessionId });
+      emit({ type: "run_start", runId, sessionId });
 
       // 客户端断连检测必须挂在 response 上:Node ≥18 的 request "close"
       // 在请求体读完即触发(不等客户端断开),response "close" 才是
       // "response.end() 之前 socket 被关闭"的语义。
       reply.raw.on("close", () => {
         if (!finished) {
-          app.services.runRegistry.abort(runId);
+          const abortedSessionId = app.services.runRegistry.abort(runId);
+          // 别让 pending 审批吊住 agent loop
+          if (abortedSessionId) {
+            app.services.approvals.cancelBySession(abortedSessionId);
+          }
         }
       });
 
@@ -231,8 +257,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       }> = [];
 
       for await (const event of resolved.agent.stream(toAgentRunInput(input))) {
-        seq += 1;
-        writeFrame(reply, { ...event, seq } as RunStreamFrame);
+        emit(event);
 
         if (event.type === "text-delta" && thinkingDurationMs === undefined) {
           thinkingDurationMs = Date.now() - streamStart;
@@ -264,8 +289,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         finishReason === "aborted" ? { aborted: true } : undefined
       );
 
-      seq += 1;
-      writeFrame(reply, { seq, type: "end", finishReason });
+      emit({ type: "end", finishReason });
       finished = true;
       reply.raw.end();
     } catch (error) {
@@ -278,24 +302,29 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       }
 
       finished = true;
-      seq += 1;
-      writeFrame(reply, { seq, type: "error", message: toErrorMessage(error) });
-      seq += 1;
-      writeFrame(reply, { seq, type: "end", finishReason: "error" });
+      emit({ type: "error", message: toErrorMessage(error) });
+      emit({ type: "end", finishReason: "error" });
       reply.raw.end();
     } finally {
       app.services.runRegistry.unregister(runId);
+      // pending 审批要么已被决策、要么被上面 cancelBySession 清掉;这里兜底。
+      if (sessionId) {
+        app.services.approvals.cancelBySession(sessionId);
+      }
     }
   });
 
   app.post("/api/v1/runs/:runId/abort", async (request, reply) => {
     const { runId } = request.params as { runId: string };
-    const found = app.services.runRegistry.abort(runId);
+    const sessionId = app.services.runRegistry.abort(runId);
 
-    if (!found) {
+    if (sessionId === undefined) {
       reply.code(404);
       return { error: "run not found or already finished" };
     }
+
+    // 中止时立刻拒绝该会话下 pending 的审批,否则 agent loop 会被吊住
+    app.services.approvals.cancelBySession(sessionId);
 
     return { ok: true };
   });

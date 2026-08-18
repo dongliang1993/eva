@@ -114,7 +114,31 @@ export interface RunEndEvent {
   finishReason: StreamFinishReason;
 }
 
-export type RunStreamEvent = RunAgentStreamEvent | RunStartEvent | RunEndEvent;
+// ---------- Eva 自有域：审批桥（docs 14 §6.1） ----------
+
+/** 危险工具挂起等待用户决策。 */
+export interface RunApprovalRequestEvent {
+  type: "approval_request";
+  callId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}
+
+/** 审批已决（用户决策 / 自动放行 / abort 取消）。 */
+export interface RunApprovalResolvedEvent {
+  type: "approval_resolved";
+  callId: string;
+  approved: boolean;
+}
+
+export type RunApprovalEvent = RunApprovalRequestEvent | RunApprovalResolvedEvent;
+
+export type RunStreamEvent =
+  | RunAgentStreamEvent
+  | RunStartEvent
+  | RunEndEvent
+  | RunApprovalRequestEvent
+  | RunApprovalResolvedEvent;
 
 /** 线上帧 = 事件 + seq；seq 单 run 内从 1 单调递增，含终态帧（accumulator 依赖此约定）。 */
 export type RunStreamFrame = RunStreamEvent & { seq: number };

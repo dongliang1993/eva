@@ -1,22 +1,31 @@
-export class RunRegistry {
-  private readonly controllers = new Map<string, AbortController>();
+interface RunHandle {
+  readonly controller: AbortController;
+  readonly sessionId: string;
+}
 
-  register(runId: string): AbortController {
+export class RunRegistry {
+  private readonly runs = new Map<string, RunHandle>();
+
+  register(runId: string, sessionId = ""): AbortController {
     const controller = new AbortController();
-    this.controllers.set(runId, controller);
+    this.runs.set(runId, { controller, sessionId });
     return controller;
   }
 
-  abort(runId: string): boolean {
-    const controller = this.controllers.get(runId);
-    if (!controller) {
-      return false;
+  /**
+   * 中止一次 run。
+   * @returns 该 run 绑定的 sessionId(路由据此取消该会话下 pending 的审批);找不到返回 undefined。
+   */
+  abort(runId: string): string | undefined {
+    const handle = this.runs.get(runId);
+    if (!handle) {
+      return undefined;
     }
-    controller.abort();
-    return true;
+    handle.controller.abort();
+    return handle.sessionId;
   }
 
   unregister(runId: string): void {
-    this.controllers.delete(runId);
+    this.runs.delete(runId);
   }
 }

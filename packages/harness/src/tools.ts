@@ -7,7 +7,7 @@ export interface AgentTool {
   readonly name: string;
   readonly tool: Tool;
   readonly readOnly?: boolean;
-  /** 危险工具:执行前需用户审批。buildTool 会把它映射成 ai tool 的 needsApproval。 */
+  /** 危险工具标记;由 createAgent 用 withApproval 包装 execute 实现闸门。 */
   readonly requiresApproval?: boolean;
 }
 
@@ -34,7 +34,6 @@ export const buildTool = <S extends z.ZodObject<z.ZodRawShape>>(
   const built: Tool = tool({
     description,
     inputSchema: definition.schema,
-    ...(definition.requiresApproval === true ? { needsApproval: true } : {}),
     execute: async (input) => {
       try {
         // parse 应用 schema 的 .default() 等默认值,再交给业务 execute。
