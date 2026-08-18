@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { PanelLeftClose, PanelLeft, SquarePen, Settings, Bot } from "lucide-react";
+import { PanelLeftClose, PanelLeft, SquarePen, Settings } from "lucide-react";
 
 import { apiFetch } from "../api/fetch";
 import type { ThreadSummary } from "../types/api";
@@ -9,7 +9,6 @@ interface SidebarProps {
   readonly onToggle: () => void;
   readonly onNewChat: () => void;
   readonly onOpenSettings: () => void;
-  readonly onOpenAgentLab: () => void;
   readonly onSelectThread: (threadId: string) => void;
   readonly sessionId: string | null;
 }
@@ -19,7 +18,6 @@ export function Sidebar({
   onToggle,
   onNewChat,
   onOpenSettings,
-  onOpenAgentLab,
   onSelectThread,
   sessionId
 }: SidebarProps) {
@@ -52,14 +50,6 @@ export function Sidebar({
           <SquarePen size={18} />
         </button>
         <div className="flex-1" />
-        <button
-          type="button"
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          onClick={onOpenAgentLab}
-          title="Agent Lab"
-        >
-          <Bot size={18} />
-        </button>
         <button
           type="button"
           className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
@@ -119,14 +109,6 @@ export function Sidebar({
 
       {/* Bottom: settings */}
       <div className="px-2 py-2">
-        <button
-          type="button"
-          className="mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          onClick={onOpenAgentLab}
-        >
-          <Bot size={16} />
-          <span>Agent Lab</span>
-        </button>
         <button
           type="button"
           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"

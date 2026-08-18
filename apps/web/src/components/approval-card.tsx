@@ -6,8 +6,6 @@ interface ApprovalCardProps {
   readonly approval: PendingApproval;
   readonly onDecide: (callId: string, allowed: boolean) => void;
   readonly onAllowAlways: (callId: string) => void;
-  /** 工具展示名(可选)。 */
-  readonly title?: string;
 }
 
 const summarizeArgs = (args: Record<string, unknown>, tool: string): string => {

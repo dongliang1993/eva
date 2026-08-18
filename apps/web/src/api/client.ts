@@ -1,6 +1,8 @@
 import type {
   EvaDynamicToolPart,
   RunAgentStreamEvent,
+  RunApprovalRequestEvent,
+  RunApprovalResolvedEvent,
   RunStreamEvent,
   RunStreamFrame,
   StreamFinishReason
@@ -22,6 +24,8 @@ export interface StreamCallbacks {
   readonly onRunStart?: (runId: string, sessionId: string) => void;
   /** 已按 seq 归位的 agent 域事件,交给 UiMessageBuilder 累积。 */
   readonly onEvent: (event: RunAgentStreamEvent) => void;
+  /** T0.4 引入的 Eva 自有域审批事件。 */
+  readonly onApproval?: (event: RunApprovalRequestEvent | RunApprovalResolvedEvent) => void;
   readonly onError: (message: string) => void;
   readonly onEnd: (finishReason: StreamFinishReason) => void;
 }
@@ -97,9 +101,10 @@ const dispatchEvent = (ev: RunStreamEvent, callbacks: StreamCallbacks): void => 
     case "run_start":
       callbacks.onRunStart?.(ev.runId, ev.sessionId);
       break;
-    // T0.4 引入的审批事件:T3 会接进 useApprovals,T1 暂时忽略。
+    // T0.4 引入的审批事件:T3 接进 useApprovals。
     case "approval_request":
     case "approval_resolved":
+      callbacks.onApproval?.(ev);
       break;
     case "end":
       callbacks.onEnd(ev.finishReason);

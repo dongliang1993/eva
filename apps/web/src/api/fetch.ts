@@ -33,7 +33,7 @@ export async function apiFetch<T>(
   return JSON.parse(text) as T;
 }
 
-export class ApiError extends Error {
+class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly body: string

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   Search,
   Globe,
@@ -72,7 +72,7 @@ interface ToolCallBlockProps {
   readonly toolCall: ToolCallInfo;
 }
 
-export function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
+function ToolCallBlockImpl({ toolCall }: ToolCallBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const [showFullResult, setShowFullResult] = useState(false);
 
@@ -188,3 +188,5 @@ export function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
     </div>
   );
 }
+
+export const ToolCallBlock = memo(ToolCallBlockImpl);

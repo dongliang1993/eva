@@ -13,19 +13,29 @@ export function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const { messages, isStreaming, sessionId, sendMessage, stopStreaming, newConversation, loadSession } = useChat();
-  const settings = useSettings();
 
   // 「始终允许」→ 打开工具自动审批, 之后的危险工具不再逐条弹。
-  const enableAutoApprove = (): Promise<void> | void => {
+  const settings = useSettings();
+  const enableAutoApprove = useCallback((): Promise<void> | void => {
     const current = settings.data;
     if (!current) return;
     settings.saveSettings({
       ...current,
       security: { ...current.security, autoApproveToolRequests: true }
     });
-  };
+  }, [settings]);
+
   const approvals = useApprovals(enableAutoApprove);
+  const {
+    messages,
+    streamingMessage,
+    isStreaming,
+    sessionId,
+    sendMessage,
+    stopStreaming,
+    newConversation,
+    loadSession
+  } = useChat({ onApproval: approvals.applyStreamEvent });
 
   // Load session from URL on mount (once)
   const threadIdFromUrl = searchParams.get("threadId");
@@ -70,10 +80,6 @@ export function ChatPage() {
     navigate("/settings");
   }, [navigate]);
 
-  const handleOpenAgentLab = useCallback(() => {
-    navigate("/agent-lab");
-  }, [navigate]);
-
   return (
     <div className="h-screen bg-background text-foreground">
       <div className="titlebar-drag h-11 w-full fixed top-0 left-0 z-50" />
@@ -84,7 +90,6 @@ export function ChatPage() {
             onToggle={handleToggleSidebar}
             onNewChat={handleNewChat}
             onOpenSettings={handleOpenSettings}
-            onOpenAgentLab={handleOpenAgentLab}
             onSelectThread={handleSelectThread}
             sessionId={sessionId}
           />
@@ -92,6 +97,7 @@ export function ChatPage() {
       >
         <ChatView
           messages={messages}
+          streamingMessage={streamingMessage}
           isStreaming={isStreaming}
           selectedModel={selectedModel}
           onSend={(text) => sendMessage(text, selectedModel ?? undefined)}

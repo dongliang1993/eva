@@ -1,15 +1,28 @@
 import { useState, useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import type { EvaUIMessage, RunAgentStreamEvent } from "@eva/shared";
+import type {
+  EvaUIMessage,
+  RunAgentStreamEvent,
+  RunApprovalRequestEvent,
+  RunApprovalResolvedEvent
+} from "@eva/shared";
 import { UiMessageBuilder, createUserUIMessage } from "@eva/shared";
 
 import { abortRun, streamChat } from "../api/client";
 import { apiFetch } from "../api/fetch";
 import type { ThreadMessage } from "../types/api";
 
+export interface UseChatHandlers {
+  /** 审批事件(T0.4 引入的 SSE 事件),由 useApprovals 驱动。 */
+  readonly onApproval?: (event: RunApprovalRequestEvent | RunApprovalResolvedEvent) => void;
+}
+
 interface UseChatReturn {
+  /** 已完成的消息(引用只在轮次边界变化)。 */
   readonly messages: readonly EvaUIMessage[];
+  /** 在飞的 assistant 消息;null 表示当前没有 run。 */
+  readonly streamingMessage: EvaUIMessage | null;
   readonly isStreaming: boolean;
   readonly sessionId: string | null;
   readonly sendMessage: (text: string, modelId?: string) => void;
@@ -18,15 +31,17 @@ interface UseChatReturn {
   readonly loadSession: (threadId: string) => void;
 }
 
-export function useChat(): UseChatReturn {
+export function useChat(handlers: UseChatHandlers = {}): UseChatReturn {
   const queryClient = useQueryClient();
-  const [messages, setMessages] = useState<EvaUIMessage[]>([]);
+  const [committed, setCommitted] = useState<EvaUIMessage[]>([]);
+  const [streaming, setStreaming] = useState<EvaUIMessage | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
   const runIdRef = useRef<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const builderRef = useRef<UiMessageBuilder | null>(null);
-  const assistantIdRef = useRef<string>("");
+  const handlersRef = useRef(handlers);
+  handlersRef.current = handlers;
 
   const sendMessage = useCallback((text: string, modelId?: string) => {
     const trimmed = text.trim();
@@ -36,14 +51,11 @@ export function useChat(): UseChatReturn {
 
     const userMessage = createUserUIMessage(crypto.randomUUID(), trimmed);
     const assistantId = crypto.randomUUID();
-    assistantIdRef.current = assistantId;
     builderRef.current = new UiMessageBuilder(assistantId);
 
-    setMessages((prev) => [
-      ...prev,
-      userMessage,
-      { id: assistantId, role: "assistant", parts: [] }
-    ]);
+    // 用户消息一次性进 committed;assistant 走 streaming 通道。
+    setCommitted((prev) => [...prev, userMessage]);
+    setStreaming({ id: assistantId, role: "assistant", parts: [] });
     setIsStreaming(true);
     runIdRef.current = null;
 
@@ -54,11 +66,8 @@ export function useChat(): UseChatReturn {
       }
 
       builder.push(event);
-
-      // 只换在飞那一条的引用 —— 已完成消息的数组引用完全不动。
-      // (T1 仍是全量重建数组,T3 §3.2 会把高频更新隔离到单独的 streaming state)
-      const snapshot = builder.snapshot();
-      setMessages((prev) => prev.map((m) => (m.id === assistantId ? snapshot : m)));
+      // 只换 streaming 这一个引用 —— committed 数组完全不动
+      setStreaming(builder.snapshot());
     };
 
     streamChat(
@@ -77,28 +86,29 @@ export function useChat(): UseChatReturn {
 
         onEvent,
 
+        onApproval(event) {
+          handlersRef.current.onApproval?.(event);
+        },
+
         onError(message) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? {
-                  ...m,
-                  parts: [{ type: "text", text: `Error: ${message}`, state: "done" }]
-                }
-                : m
-            )
-          );
+          setStreaming({
+            id: assistantId,
+            role: "assistant",
+            parts: [{ type: "text", text: `Error: ${message}`, state: "done" }]
+          });
         },
 
         onEnd() {
           const builder = builderRef.current;
-          // 结算:把最终消息并进 messages,清空 builder。
-          // (T3 会把 streaming 拆成独立 state,这里先保持单数组。)
+          // 结算:把最终消息并进 committed,清空 streaming。
+          // 顺序:先 setCommitted 再 setStreaming(null)。React 18+ 同事件内批处理,
+          // 不会出现"消息短暂消失"的中间态。
           if (builder) {
             const finalMessage = builder.build();
-            setMessages((prev) => prev.map((m) => (m.id === assistantId ? finalMessage : m)));
+            setCommitted((prev) => [...prev, finalMessage]);
             builderRef.current = null;
           }
+          setStreaming(null);
           setIsStreaming(false);
           runIdRef.current = null;
         }
@@ -112,7 +122,8 @@ export function useChat(): UseChatReturn {
   }, [isStreaming]);
 
   const newConversation = useCallback(() => {
-    setMessages([]);
+    setCommitted([]);
+    setStreaming(null);
     sessionIdRef.current = null;
     setSessionId(null);
   }, []);
@@ -122,16 +133,26 @@ export function useChat(): UseChatReturn {
 
     sessionIdRef.current = threadId;
     setSessionId(threadId);
-    setMessages([]);
+    setCommitted([]);
+    setStreaming(null);
 
     apiFetch<readonly ThreadMessage[]>(`/api/v1/threads/${threadId}/messages`)
       .then((data) => {
-        setMessages(data.map((m) => m.message));
+        setCommitted(data.map((m) => m.message));
       })
       .catch(() => {
         // Session not found or error — stay with empty messages
       });
   }, []);
 
-  return { messages, isStreaming, sessionId, sendMessage, stopStreaming, newConversation, loadSession };
+  return {
+    messages: committed,
+    streamingMessage: streaming,
+    isStreaming,
+    sessionId,
+    sendMessage,
+    stopStreaming,
+    newConversation,
+    loadSession
+  };
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Brain, ChevronDown, ChevronUp } from "lucide-react";
 import "streamdown/styles.css";
 
@@ -33,7 +33,7 @@ function ThinkingBadge({ durationMs }: { readonly durationMs: number }) {
   );
 }
 
-export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
+function MessageBubbleImpl({ message, isStreaming }: MessageBubbleProps) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -109,3 +109,5 @@ function SmoothStreamingMarkdown({ content }: { readonly content: string }) {
 
   return <StreamMarkdown content={smooth} isStreaming />;
 }
+
+export const MessageBubble = memo(MessageBubbleImpl);

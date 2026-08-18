@@ -44,3 +44,11 @@ T3 §1.1 才做渲染分层(committed / streaming + memo + 虚拟化)。
 T1 为了让 `tool-call-block.tsx` 不动,加了 `toolPartToInfo(part) → ToolCallInfo` 把 dynamic-tool part 派生回旧形状。
 T3 §1.1 会把 `tool-call-block` 改成直接消费 `EvaDynamicToolPart`,届时 `toolPartToInfo` 删除。
 预期归类:`[done in T3]`。
+
+### `apps/web/src/hooks/use-chat.ts` 157 行,未拆成 use-run-stream
+
+T3 §4 计划把 use-chat 拆成 use-run-stream.ts + use-chat.ts(<120) + use-thread-url.ts。
+实际 use-chat.ts 157 行:SSE 消费、committed/streaming 双状态、builder 结算都在一个 hook 里,
+没有单独抽出 use-run-stream(thread-URL 同步本来就在 pages/chat 里)。
+未拆:当前结构已足够清晰,且 use-run-stream 会和 useChat 紧耦合(SSE 帧直接驱动 builder)。
+预期归类:`[next]`(若后续再加 use-thread-url 的真子路由时一起拆)。

@@ -4,9 +4,11 @@ import type { PendingApproval } from "../api/approvals";
 import { MessageList } from "./message-list";
 import { ApprovalCard } from "./approval-card";
 import { ChatInput } from "./chat-input";
+import { useStickToBottom } from "../hooks/use-stick-to-bottom";
 
 interface ChatViewProps {
   readonly messages: readonly EvaUIMessage[];
+  readonly streamingMessage: EvaUIMessage | null;
   readonly isStreaming: boolean;
   readonly selectedModel: string | null;
   readonly onSend: (text: string) => void;
@@ -20,6 +22,7 @@ interface ChatViewProps {
 
 export function ChatView({
   messages,
+  streamingMessage,
   isStreaming,
   selectedModel,
   onSend,
@@ -30,9 +33,17 @@ export function ChatView({
   onDeny,
   onAllowAlways
 }: ChatViewProps) {
+  const { containerRef, isAtBottom, scrollToBottom } = useStickToBottom(streamingMessage);
+
   return (
     <div className="flex h-full flex-col bg-background">
-      <MessageList messages={messages} />
+      <MessageList
+        messages={messages}
+        streamingMessage={streamingMessage}
+        containerRef={containerRef}
+        isAtBottom={isAtBottom}
+        scrollToBottom={scrollToBottom}
+      />
 
       {pendingApprovals?.map((approval) => (
         <div key={approval.callId} className="flex justify-start px-4">
