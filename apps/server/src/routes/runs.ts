@@ -19,13 +19,16 @@ import {
 
 import {
   AgentUnavailableError,
-  type ResolvedRuntimeModelBinding
+  type ResolvedRuntimeModelBinding,
+  type ResolvedWorkspaceContext
 } from "../agent.js";
 import { DrizzleRunRepository, runStatusFor } from "../db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
 import { autoCompactIfNeeded, createAutoCompactConfig } from "../services/auto-compact.js";
 import { buildMemoryRuntimeSupport } from "../services/memory-runtime.js";
 import { loadAppSettings } from "../services/settings-store.js";
+import { loadProjectDocsSection } from "../services/workspaces/project-docs.js";
+import { resolveWorkspaceForSession } from "../services/workspaces/workspace-store.js";
 import { runRequestSchema, type RunRequest } from "../types/runs.js";
 
 const formatSseFrame = (event: string, data: unknown): string =>
@@ -43,19 +46,24 @@ interface PreparedRun {
   readonly context?: Record<string, unknown>;
 }
 
+interface OpenTurn {
+  readonly sessionId: string;
+  readonly userMessageId: string;
+  readonly workspace?: ResolvedWorkspaceContext | undefined;
+  /** 本次请求新建了会话时非空 —— 供 503 回滚用。 */
+  readonly createdSessionId?: string | undefined;
+}
+
 /**
- * 落库用户消息 → 必要时 compact → 组装模型可见的消息序列。
+ * 阶段①:建/取会话 + 落用户消息 + 解析工作区(含 project docs)。
+ * 只回答「这次对话发生在哪」。不碰模型 —— 模型是阶段②(工作区确定后)才知道的。
  */
-const prepareRun = async (
+const openSessionTurn = async (
   app: FastifyInstance,
   body: RunRequest,
-  runId: string,
-  mainModel: ResolvedRuntimeModelBinding
-): Promise<PreparedRun> => {
-  const userMessage = createUserUIMessage(randomUUID(), body.text, {
-    runId,
-    model: mainModel.qualifiedModelId
-  });
+  runId: string
+): Promise<OpenTurn> => {
+  const userMessage = createUserUIMessage(randomUUID(), body.text, { runId });
 
   const resolved = body.sessionId
     ? app.services.session.continueSession(body.sessionId, userMessage, runId)
@@ -65,13 +73,49 @@ const prepareRun = async (
   const { session, userMessage: storedUser } =
     resolved ?? app.services.session.createSession(userMessage, runId);
 
-  new DrizzleSessionRepository(app.infra.db)
-    .updateModel(session.id, mainModel.qualifiedModelId);
+  const workspace = resolveWorkspaceForSession(
+    app.services.workspaces,
+    session,
+    app.log
+  );
+
+  const docsSection = workspace
+    ? await loadProjectDocsSection(workspace.path)
+    : undefined;
+
+  const workspaceContext: ResolvedWorkspaceContext | undefined = workspace
+    ? {
+      id: workspace.id,
+      root: workspace.path,
+      ...(docsSection !== undefined ? { docsSection } : {})
+    }
+    : undefined;
+
+  return {
+    sessionId: session.id,
+    userMessageId: storedUser.id,
+    ...(resolved === undefined ? { createdSessionId: session.id } : {}),
+    ...(workspaceContext !== undefined ? { workspace: workspaceContext } : {})
+  };
+};
+
+/**
+ * 阶段③:模型这一轮看见什么。
+ * 需要 mainModel 的窗口信息 → 必须在阶段② 解析模型之后调用。
+ * userMessageId 由阶段① 产出,这里不碰 —— 模型属于 assistant 消息与 runs.model。
+ */
+const buildRunContext = async (
+  app: FastifyInstance,
+  open: OpenTurn,
+  mainModel: ResolvedRuntimeModelBinding,
+  body: RunRequest
+): Promise<PreparedRun> => {
+  new DrizzleSessionRepository(app.infra.db).updateModel(open.sessionId, mainModel.qualifiedModelId);
 
   const settings = loadAppSettings(app.infra.db, app.infra.config);
-  autoCompactIfNeeded(app.infra.db, session.id, createAutoCompactConfig(settings.chat));
+  autoCompactIfNeeded(app.infra.db, open.sessionId, createAutoCompactConfig(settings.chat));
 
-  const history = app.services.session.buildModelHistory(app.infra.db, session.id);
+  const history = app.services.session.buildModelHistory(app.infra.db, open.sessionId);
 
   // ignoreIncompleteToolCalls:上一轮被 abort 时可能留下没有结果的 tool part,
   // 带着它去请求模型会被 provider 拒绝(tool_use 必须有配对的 tool_result)。
@@ -103,8 +147,8 @@ const prepareRun = async (
   });
 
   return {
-    sessionId: session.id,
-    userMessageId: storedUser.id,
+    sessionId: open.sessionId,
+    userMessageId: open.userMessageId,
     modelMessages,
     additionalTools: [...memoryRuntime.additionalTools],
     ...(memoryRuntime.memoryContext
@@ -120,6 +164,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     let finished = false;
     let sessionId = "";
     let seq = 0;
+    // 供 catch 回滚 503 时新建的会话。
+    let open: OpenTurn | undefined;
 
     // 统一的帧出口:seq 只在这里递增(generator 帧与审批帧共用同一序列)。
     const emit = (event: RunStreamEvent): void => {
@@ -148,13 +194,20 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
     try {
       const body = runRequestSchema.parse(request.body ?? {});
+
+      // 阶段①:会话/工作区先落 —— agent 的工具集依赖工作区,工作区来自会话。
+      open = await openSessionTurn(app, body, runId);
+      sessionId = open.sessionId;
+
+      // 阶段②:解析模型(带工作区)。模型不可用(503)时,本次刚建的会话要回滚。
       const resolved = app.services.agents.resolve({
         ...(body.modelId !== undefined ? { requestedModelId: body.modelId } : {}),
+        ...(open.workspace !== undefined ? { workspace: open.workspace } : {}),
         requestApproval
       });
 
-      const prepared = await prepareRun(app, body, runId, resolved.mainModel);
-      sessionId = prepared.sessionId;
+      // 阶段③:模型这轮看见什么(需要 mainModel 的窗口信息)。
+      const prepared = await buildRunContext(app, open, resolved.mainModel, body);
 
       const runs = new DrizzleRunRepository(app.infra.db);
       runs.start({
@@ -238,6 +291,12 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       reply.raw.end();
     } catch (error) {
       request.log.error({ err: error, runId }, "failed to stream agent run");
+
+      // 模型不可用(503)且这条会话是本次请求刚建的 → 撤掉,别让没配好 API key 的
+      // 新装用户每点一次发送就攒一条空会话。已有会话不动:用户说的话得留下。
+      if (error instanceof AgentUnavailableError && open?.createdSessionId) {
+        new DrizzleSessionRepository(app.infra.db).deleteById(open.createdSessionId);
+      }
 
       if (sessionId) {
         new DrizzleRunRepository(app.infra.db).settle(runId, {

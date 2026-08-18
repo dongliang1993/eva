@@ -6,13 +6,15 @@ import {
   createConfiguredAgent,
   resolveAgentRuntimeConfig,
   toAgentModel,
-  type ResolvedRuntimeModelBinding
+  type ResolvedRuntimeModelBinding,
+  type ResolvedWorkspaceContext
 } from "../agent.js";
 import type { AppInfrastructure } from "../types/common.js";
 
 export interface AgentResolveOptions {
   readonly requestedModelId?: string | undefined;
   readonly requestApproval?: RequestApproval | undefined;
+  readonly workspace?: ResolvedWorkspaceContext | undefined;
 }
 
 export interface ResolvedAgent {
@@ -74,7 +76,7 @@ export class AgentFactory {
         ...(options.requestApproval !== undefined
           ? { requestApproval: options.requestApproval }
           : {}),
-        ...(this.infra.workRoot !== undefined ? { workRoot: this.infra.workRoot } : {})
+        ...(options.workspace !== undefined ? { workspace: options.workspace } : {})
       },
       runtime,
       (binding) => this.getModel(binding)

@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import type { LanguageModel } from "ai";
 import type { ProviderType } from "@eva/shared";
 import {
@@ -28,6 +26,7 @@ import {
 
 import type { AppConfig } from "./config.js";
 import type { AppDatabase } from "./db/index.js";
+import { toolOverflowDir } from "./paths.js";
 import {
   findStoredProviderById,
   loadAppSettings,
@@ -91,14 +90,21 @@ export interface ResolveRuntimeOptions {
   readonly requestedModelId?: string | undefined;
 }
 
+/** 一次 run 的工作区上下文 —— 路径 + 已读好的项目文档 section。 */
+export interface ResolvedWorkspaceContext {
+  readonly id: string;
+  readonly root: string;
+  readonly docsSection?: PromptSection | undefined;
+}
+
 /** 构造 agent 需要的输入(不含 db —— 模型已解析完)。 */
 export interface ConfiguredAgentOptions {
   readonly skills: Skill[];
   readonly soulSection?: PromptSection | undefined;
   readonly observer?: AgentObserver | undefined;
   readonly requestApproval?: RequestApproval | undefined;
-  /** fs 工具的工作区根;缺省则不注入 fs 工具(见 T0.3)。 */
-  readonly workRoot?: string | undefined;
+  /** 本次 run 的工作区;缺省则不注入 fs 工具(纯聊天会话)。 */
+  readonly workspace?: ResolvedWorkspaceContext | undefined;
 }
 
 export interface ResolvedRuntimeModelBinding {
@@ -217,28 +223,30 @@ export const createConfiguredAgent = (
   getModel: (binding: ResolvedRuntimeModelBinding) => LanguageModel
 ): Agent => {
   const { mainModel, toolModel } = runtime.value;
-  const { skills, soulSection, observer, workRoot, requestApproval } = options;
+  const { skills, soulSection, observer, workspace, requestApproval } = options;
 
   const tools = [
     ...(skills.length > 0 ? [createReadSkillTool(skills)] : []),
     createDuckDuckGoWebSearchTool()
   ];
 
-  // 配置了工作区根 → 注入文件系统工具(subplexly base fs set)。
-  if (workRoot) {
-    const overflowDir = path.join(workRoot, ".eva", "tool-output");
+  // 绑定了工作区 → 注入文件系统工具。overflow 落在 ~/.eva/tool-overflow/<id>/,
+  // 不进用户仓库;只读白名单只对 read_file 放开,让它能读回自己的溢出文件。
+  if (workspace) {
+    const overflowDir = toolOverflowDir(workspace.id);
     tools.push(
-      createReadFileTool({ workRoot, overflowDir }),
-      createListDirTool({ workRoot, overflowDir }),
-      createGrepTool({ workRoot, overflowDir }),
-      createWriteTool({ workRoot, overflowDir }),
-      createEditTool({ workRoot, overflowDir }),
-      createBashTool({ workRoot, overflowDir })
+      createReadFileTool({ workRoot: workspace.root, overflowDir, readableRoots: [overflowDir] }),
+      createListDirTool({ workRoot: workspace.root, overflowDir }),
+      createGrepTool({ workRoot: workspace.root, overflowDir }),
+      createWriteTool({ workRoot: workspace.root, overflowDir }),
+      createEditTool({ workRoot: workspace.root, overflowDir }),
+      createBashTool({ workRoot: workspace.root, overflowDir })
     );
   }
 
   const sections: PromptSection[] = [
     ...(soulSection ? [soulSection] : []),
+    ...(workspace?.docsSection ? [workspace.docsSection] : []),
     MEMORY_PROMPT_SECTION,
     ...(skills.length > 0 ? [skillsToPromptSection(skills)] : []),
     createWebSearchPromptSection()

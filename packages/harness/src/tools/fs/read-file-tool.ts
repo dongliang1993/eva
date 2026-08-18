@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import { z } from "zod";
 
 import { buildTool, type AgentTool } from "../../tools.js";
-import { resolveWorkspacePath } from "./resolve-workspace-path.js";
+import { resolveReadablePath } from "./resolve-workspace-path.js";
 import { maybeOverflow } from "./tool-overflow.js";
 
 const readFileSchema = z.object({
@@ -12,10 +12,12 @@ const readFileSchema = z.object({
 });
 
 export interface FsToolBaseOptions {
-  /** 工作区根目录,所有相对路径都基于它解析。 */
+  /** 工作根目录,所有相对路径都基于它解析。 */
   readonly workRoot: string;
-  /** overflow 落盘目录(通常 {workRoot}/.eva/tool-output)。 */
+  /** overflow 落盘目录(不在工作区内,见 toolOverflowDir)。 */
   readonly overflowDir?: string;
+  /** 只读工具额外可读的根(当前只有 overflowDir)。写工具不受它影响。 */
+  readonly readableRoots?: readonly string[];
 }
 
 export const createReadFileTool = (options: FsToolBaseOptions): AgentTool =>
@@ -27,7 +29,7 @@ export const createReadFileTool = (options: FsToolBaseOptions): AgentTool =>
     schema: readFileSchema,
     readOnly: true,
     async execute({ path: rel, offset, limit }) {
-      const absolute = resolveWorkspacePath(rel, options.workRoot);
+      const absolute = resolveReadablePath(rel, options.workRoot, options.readableRoots ?? []);
       const content = await fs.readFile(absolute, "utf-8");
       const lines = content.split("\n");
       const lastLine = lines.length > 0 ? lines.length - 1 : 0;

@@ -36,3 +36,28 @@ export const isPathInsideWorkspace = (
   const rel = path.relative(path.resolve(workRoot), path.resolve(target));
   return rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
 };
+
+/**
+ * 只读路径解析：允许落在 workRoot 内，或落在显式给出的额外只读根内。
+ *
+ * 为什么需要第二个根：工具溢出文件按设计落在用户数据目录（~/.eva/tool-overflow/），
+ * 不在工作区里；而 maybeOverflow 明确告诉模型"用 read_file 去续读它"。
+ * 不给这条缝，那句指令就是谎话。
+ *
+ * 写工具（write / edit / bash）**不使用**本函数 —— 白名单只放开读，不放开写。
+ */
+export const resolveReadablePath = (
+  input: string,
+  workRoot: string,
+  extraReadableRoots: readonly string[] = []
+): string => {
+  for (const root of [workRoot, ...extraReadableRoots]) {
+    const resolved = path.resolve(root, input);
+
+    if (isPathInsideWorkspace(resolved, root)) {
+      return resolved;
+    }
+  }
+
+  throw new PathEscapeError(input);
+};

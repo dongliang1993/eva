@@ -9,6 +9,7 @@ import {
   createReadFileTool,
   createWriteTool,
   PathEscapeError,
+  resolveReadablePath,
   resolveWorkspacePath
 } from "../packages/harness/src/index.js";
 
@@ -90,5 +91,45 @@ describe("fs tools", () => {
       { messages: [], toolCallId: "c5", context: {} }
     );
     expect(String(res)).toContain("appears 2 times");
+  });
+});
+
+describe("readableRoots(overflow 白名单)", () => {
+  it("resolveReadablePath 读工作区内 → 正常", () => {
+    const root = "/ws";
+    expect(resolveReadablePath("a/b.txt", root)).toBe(path.join("/ws", "a/b.txt"));
+  });
+
+  it("resolveReadablePath 读 extraReadableRoots 里的文件 → 正常", () => {
+    // maybeOverflow 返回绝对路径,所以这里也传绝对路径。相对路径会先命中 workRoot。
+    expect(resolveReadablePath("/extra/overflow.txt", "/ws", ["/extra"])).toBe("/extra/overflow.txt");
+  });
+
+  it("resolveReadablePath 读两者之外 → PathEscapeError", () => {
+    expect(() => resolveReadablePath("/etc/hosts", "/ws", ["/extra"])).toThrow(PathEscapeError);
+  });
+
+  it("read_file 能读回 readableRoots 里的溢出文件;write 对同一路径仍拒绝", async () => {
+    const root = await makeWorkspace();
+    const overflowDir = await mkdtemp(path.join(os.tmpdir(), "eva-overflow-"));
+    tempDirs.push(overflowDir);
+
+    const overflowFile = path.join(overflowDir, "big.log");
+    await writeFile(overflowFile, "overflowed content", "utf-8");
+
+    const readTool = createReadFileTool({ workRoot: root, overflowDir, readableRoots: [overflowDir] });
+    const readRes = await readTool.tool.execute!(
+      { path: overflowFile },
+      { messages: [], toolCallId: "c-read", context: {} }
+    );
+    expect(String(readRes)).toContain("overflowed content");
+
+    // write 工具不用 readableRoots,给绝对路径溢出文件 → 仍按工作区解析并拒绝(白名单不放开写)。
+    const writeTool = createWriteTool({ workRoot: root, overflowDir });
+    const writeRes = await writeTool.tool.execute!(
+      { path: overflowFile, content: "x" },
+      { messages: [], toolCallId: "c-write", context: {} }
+    );
+    expect(String(writeRes)).toContain("workspace");
   });
 });

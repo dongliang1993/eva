@@ -22,6 +22,10 @@ const createThreadSchema = z.object({
   title: z.string().min(1).max(200).optional()
 });
 
+const setThreadWorkspaceSchema = z.object({
+  workspaceId: z.string().nullable()
+});
+
 interface ThreadCompactResult {
   success: boolean;
   compacted: boolean;
@@ -55,7 +59,8 @@ const listThreadSummaries = (
       model: thread.model,
       origin: thread.origin,
       updatedAt: thread.updatedAt,
-      messageCount: Number(countRow?.count ?? 0)
+      messageCount: Number(countRow?.count ?? 0),
+      workspaceId: thread.workspaceId
     };
   });
 };
@@ -83,9 +88,28 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
       model: thread.model,
       origin: thread.origin,
       updatedAt: thread.updatedAt,
-      messageCount: 0
+      messageCount: 0,
+      workspaceId: thread.workspaceId
     };
   });
+
+  app.put(
+    "/api/v1/threads/:id/workspace",
+    async (request, reply): Promise<ThreadSummary | { error: string }> => {
+      const { id } = request.params as { id: string };
+      const body = setThreadWorkspaceSchema.parse(request.body ?? {});
+      const sessionRepo = new DrizzleSessionRepository(app.infra.db);
+
+      const updated = sessionRepo.updateWorkspace(id, body.workspaceId);
+
+      if (!updated) {
+        reply.code(404);
+        return { error: "Thread not found" };
+      }
+
+      return listThreadSummaries(app, 1000).find((item) => item.id === id)!;
+    }
+  );
 
   app.delete("/api/v1/threads/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -128,7 +152,8 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
           .select({ count: sql<number>`count(*)` })
           .from(messages)
           .where(eq(messages.sessionId, thread.id))
-          .get()?.count ?? 0
+          .get()?.count ?? 0,
+        workspaceId: thread.workspaceId
       };
 
       return {
