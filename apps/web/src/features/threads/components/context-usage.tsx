@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { fetchThreadUsage } from "../api";
-import { Tooltip } from "../../../shared/ui/tooltip";
+import { Tooltip, TooltipProvider } from "../../../shared/ui/tooltip";
 
 /** 把 token 数格式化成 12.4k / 200k 这类紧凑形式。 */
 const formatTokens = (value: number | null | undefined): string | null => {
@@ -40,23 +40,27 @@ export function ContextUsage({ sessionId }: { readonly sessionId: string | null 
     `上下文占用:${contextTokens ?? "未知"}${contextWindow ? ` / ${contextWindow}` : ""}` +
     ` · 累计 ${totalTokens} token`;
 
+  // Radix Tooltip 需要向上的 Provider 上下文;ContextUsage 渲染在 ChatInput 之上,
+  // 不能借用它的 provider,这里自带一个。
   return (
-    <div className="flex items-center px-4 py-1.5 text-xs text-muted-foreground">
-      <Tooltip content={tooltip}>
-        <div className="flex w-44 items-center gap-2">
-          <div className="h-1 flex-1 rounded-full bg-border overflow-hidden">
-            <div
-              className="h-full rounded-full bg-primary/60 transition-all"
-              style={{ width: barWidth }}
-            />
+    <TooltipProvider delayDuration={300}>
+      <div className="flex items-center px-4 py-1.5 text-xs text-muted-foreground">
+        <Tooltip content={tooltip}>
+          <div className="flex w-44 items-center gap-2">
+            <div className="h-1 flex-1 rounded-full bg-border overflow-hidden">
+              <div
+                className="h-full rounded-full bg-primary/60 transition-all"
+                style={{ width: barWidth }}
+              />
+            </div>
+            <span className="tabular-nums whitespace-nowrap">
+              {contextTokens ?? "?"}
+              {contextWindow ? ` / ${contextWindow}` : ""}
+              {ratio !== null ? ` · ${formatPct(ratio)}` : ""}
+            </span>
           </div>
-          <span className="tabular-nums whitespace-nowrap">
-            {contextTokens ?? "?"}
-            {contextWindow ? ` / ${contextWindow}` : ""}
-            {ratio !== null ? ` · ${formatPct(ratio)}` : ""}
-          </span>
-        </div>
-      </Tooltip>
-    </div>
+        </Tooltip>
+      </div>
+    </TooltipProvider>
   );
 }
