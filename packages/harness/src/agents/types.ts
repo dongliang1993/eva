@@ -7,7 +7,6 @@ import type {
 
 import type { ContextWindowPolicyOptions } from "../context/policy.js";
 import type { AgentModel } from "../models/agent-model.js";
-import type { SubagentConfig } from "../subagents/types.js";
 import type { AgentTool } from "../tools.js";
 import type { AgentObserver } from "./observer.js";
 
@@ -62,7 +61,6 @@ export interface CreateAgentOptions {
   tools?: AgentTool[];
   systemPrompt?: string | SystemModelMessage;
   maxSteps?: number;
-  subagents?: SubagentConfig[];
   observer?: AgentObserver;
   contextPolicy?: ContextWindowPolicyOptions;
   requestApproval?: RequestApproval;

@@ -18,7 +18,6 @@ import {
   createWebFetchTool,
   createWebSearchPromptSection,
   createWriteTool,
-  generalPurposeSubagent,
   skillsToPromptSection,
   type Agent,
   type AgentObserver,
@@ -270,7 +269,6 @@ export const createConfiguredAgent = (
         ? { reservedOutputTokens: mainModel.maxOutputTokens }
         : {})
     },
-    subagents: [generalPurposeSubagent],
     ...(observer !== undefined ? { observer } : {})
   });
 };
