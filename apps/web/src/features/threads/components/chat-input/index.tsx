@@ -2,6 +2,7 @@ import { useState, useCallback, type KeyboardEvent } from "react";
 import { Send, Square } from "lucide-react";
 
 import { Tooltip, TooltipProvider } from "../../../../shared/ui/tooltip";
+import { WorkspacePicker } from "../../../workspaces/components/workspace-picker";
 import { SelectModel } from "./select-model";
 
 interface ChatInputProps {
@@ -11,6 +12,8 @@ interface ChatInputProps {
   readonly isStreaming: boolean;
   readonly selectedModel: string | null;
   readonly onSelectModel: (modelId: string) => void;
+  readonly workspaceId: string | null;
+  readonly onSelectWorkspace: (workspaceId: string | null) => void;
 }
 
 export function ChatInput({
@@ -19,7 +22,9 @@ export function ChatInput({
   disabled,
   isStreaming,
   selectedModel,
-  onSelectModel
+  onSelectModel,
+  workspaceId,
+  onSelectWorkspace
 }: ChatInputProps) {
   const [text, setText] = useState("");
 
@@ -60,10 +65,16 @@ export function ChatInput({
             disabled={disabled || !modelConfigured}
           />
           <div className="flex items-center justify-between px-3 pb-2">
-            <SelectModel
-              selectedModel={selectedModel}
-              onSelect={onSelectModel}
-            />
+            <div className="flex items-center gap-1">
+              <SelectModel
+                selectedModel={selectedModel}
+                onSelect={onSelectModel}
+              />
+              <WorkspacePicker
+                workspaceId={workspaceId}
+                onSelect={onSelectWorkspace}
+              />
+            </div>
 
             {isStreaming ? (
               <button

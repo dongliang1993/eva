@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   session,
   utilityProcess
@@ -384,6 +385,19 @@ function createWindow(url?: string): BrowserWindow {
 // ---------------------------------------------------------------------------
 
 ipcMain.handle("get-server-port", () => serverPort);
+
+ipcMain.handle("dialog:pick-directory", async (): Promise<string | null> => {
+  if (!mainWindow) {
+    return null;
+  }
+
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openDirectory", "createDirectory"],
+    title: "选择工作区目录"
+  });
+
+  return result.canceled ? null : (result.filePaths[0] ?? null);
+});
 
 // ---------------------------------------------------------------------------
 // App Lifecycle

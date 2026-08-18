@@ -1,15 +1,20 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useChat } from "./hooks/use-chat";
 import { useApprovals } from "./hooks/use-approvals";
+import { apiFetch } from "../../shared/api/fetch";
+import { setThreadWorkspace } from "../workspaces/api";
 import { useSettings } from "../settings/hooks/use-settings";
 import { Sidebar } from "./components/sidebar";
 import { ChatView } from "./components/chat-view";
 import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
+import type { ThreadSummary } from "../../types/api";
 
 export function ChatPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -39,6 +44,48 @@ export function ChatPage() {
 
   // 会话切换/新会话时,从服务端对齐一次该会话下的待审批(不轮询)。事实源仍是 SSE。
   useEffect(() => approvals.refresh(sessionId), [sessionId, approvals.refresh]);
+
+  // 已存在会话的 workspaceId 事实源是服务端 ThreadSummary(与侧栏共用同一 query 缓存,
+  // React Query 去重,不会多发请求)。这里不另存一份。
+  const { data: threads } = useQuery({
+    queryKey: ["threads"],
+    queryFn: () => apiFetch<readonly ThreadSummary[]>("/api/v1/threads"),
+    refetchInterval: 10_000
+  });
+  const sessionWorkspaceId =
+    threads?.find((t) => t.id === sessionId)?.workspaceId ?? null;
+
+  // 新会话还没有 sessionId,没法 PUT —— 先把用户选的工作区暂存在这里。
+  // 等第一条消息让服务端建出会话(sessionId 出现)后再 PUT。这是"还没有 session 可绑"的过渡态。
+  const [pendingWorkspaceId, setPendingWorkspaceId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (sessionId && pendingWorkspaceId !== null) {
+      setThreadWorkspace(sessionId, pendingWorkspaceId)
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["threads"] });
+          setPendingWorkspaceId(null);
+        })
+        .catch(() => {
+          // 绑定失败静默:工作区仍停留在"未选择",用户下次切换可重试。
+        });
+    }
+  }, [sessionId, pendingWorkspaceId, queryClient]);
+
+  const displayWorkspaceId = sessionId ? sessionWorkspaceId : pendingWorkspaceId;
+
+  const handleSelectWorkspace = useCallback(
+    (workspaceId: string | null) => {
+      if (sessionId) {
+        setThreadWorkspace(sessionId, workspaceId)
+          .then(() => queryClient.invalidateQueries({ queryKey: ["threads"] }))
+          .catch(() => {});
+      } else {
+        setPendingWorkspaceId(workspaceId);
+      }
+    },
+    [sessionId, queryClient]
+  );
 
   // Load session from URL on mount (once)
   const threadIdFromUrl = searchParams.get("threadId");
@@ -71,10 +118,12 @@ export function ChatPage() {
 
   const handleNewChat = useCallback(() => {
     newConversation();
+    setPendingWorkspaceId(null);
     setSearchParams({}, { replace: true });
   }, [newConversation, setSearchParams]);
 
   const handleSelectThread = useCallback((threadId: string) => {
+    setPendingWorkspaceId(null);
     setSearchParams({ threadId }, { replace: true });
     loadSession(threadId);
   }, [setSearchParams, loadSession]);
@@ -106,6 +155,8 @@ export function ChatPage() {
           onSend={(text) => sendMessage(text, selectedModel ?? undefined)}
           onStop={stopStreaming}
           onSelectModel={setSelectedModel}
+          workspaceId={displayWorkspaceId}
+          onSelectWorkspace={handleSelectWorkspace}
           pendingApprovals={approvals.pending}
           onApproveOnce={(callId) => approvals.decide(callId, true)}
           onDeny={(callId) => approvals.decide(callId, false)}

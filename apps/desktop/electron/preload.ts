@@ -7,5 +7,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     platform: process.platform
   },
   getServerPort: (): Promise<number | null> =>
-    ipcRenderer.invoke("get-server-port")
+    ipcRenderer.invoke("get-server-port"),
+  pickDirectory: (): Promise<string | null> =>
+    ipcRenderer.invoke("dialog:pick-directory")
 });

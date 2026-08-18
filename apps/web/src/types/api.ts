@@ -14,5 +14,7 @@ export type {
   Provider,
   ProviderModel,
   ThreadMessage,
-  ThreadSummary
+  ThreadSummary,
+  Workspace,
+  WorkspaceInput
 } from "@eva/shared";

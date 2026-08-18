@@ -14,6 +14,8 @@ interface ChatViewProps {
   readonly onSend: (text: string) => void;
   readonly onStop: () => void;
   readonly onSelectModel: (modelId: string) => void;
+  readonly workspaceId: string | null;
+  readonly onSelectWorkspace: (workspaceId: string | null) => void;
   readonly pendingApprovals?: readonly PendingApproval[];
   readonly onApproveOnce?: (callId: string) => void;
   readonly onDeny?: (callId: string) => void;
@@ -28,6 +30,8 @@ export function ChatView({
   onSend,
   onStop,
   onSelectModel,
+  workspaceId,
+  onSelectWorkspace,
   pendingApprovals,
   onApproveOnce,
   onDeny,
@@ -62,6 +66,8 @@ export function ChatView({
         isStreaming={isStreaming}
         selectedModel={selectedModel}
         onSelectModel={onSelectModel}
+        workspaceId={workspaceId}
+        onSelectWorkspace={onSelectWorkspace}
       />
     </div>
   );
