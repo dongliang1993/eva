@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { PanelLeftClose, PanelLeft, SquarePen, Settings } from "lucide-react";
 
-import { apiFetch } from "../api/fetch";
-import type { ThreadSummary } from "../types/api";
+import { apiFetch } from "../../../shared/api/fetch";
+import type { ThreadSummary } from "../../../types/api";
 
 interface SidebarProps {
   readonly collapsed: boolean;

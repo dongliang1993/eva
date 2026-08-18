@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { RunApprovalRequestEvent, RunApprovalResolvedEvent } from "@eva/shared";
 
-import { decideApproval, listApprovals, type PendingApproval } from "../api/approvals";
+import { decideApproval, listApprovals, type PendingApproval } from "../api";
 
 /**
  * 待审批的危险工具请求。

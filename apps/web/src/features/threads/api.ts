@@ -1,4 +1,4 @@
-import { apiFetch } from "./fetch";
+import { apiFetch } from "../../shared/api/fetch";
 
 export interface PendingApproval {
   readonly callId: string;

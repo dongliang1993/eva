@@ -11,7 +11,7 @@ import {
   ChevronUp
 } from "lucide-react";
 
-import type { ToolCallInfo } from "../api/client";
+import type { ToolCallInfo } from "../../../shared/api/run-stream-client";
 
 // ---------------------------------------------------------------------------
 // Semantic tool display config

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { apiFetch } from "../api/fetch";
-import type { ModelSummary } from "../types/api";
+import type { ModelSummary } from "../../types/api";
 
 const MODELS_KEY = ["models"] as const;
 

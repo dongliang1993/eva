@@ -1,12 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { useChat } from "../../hooks/use-chat";
-import { useApprovals } from "../../hooks/use-approvals";
-import { useSettings } from "../../hooks/use-settings";
-import { Sidebar } from "../../components/sidebar";
-import { ChatView } from "../../components/chat-view";
-import { ResizableSidebar } from "../../components/ui/resizable-sidebar";
+import { useChat } from "./hooks/use-chat";
+import { useApprovals } from "./hooks/use-approvals";
+import { useSettings } from "../settings/hooks/use-settings";
+import { Sidebar } from "./components/sidebar";
+import { ChatView } from "./components/chat-view";
+import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
 
 export function ChatPage() {
   const navigate = useNavigate();

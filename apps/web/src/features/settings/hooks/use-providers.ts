@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch } from "../api/fetch";
+import { apiFetch } from "../../../shared/api/fetch";
 import type {
   Provider,
   ProviderConnectionTestResult,
   ProviderModelsPayload
-} from "../types/api";
+} from "../../../types/api";
 
 const PROVIDERS_KEY = ["providers"] as const;
 const MODELS_KEY = ["models"] as const;

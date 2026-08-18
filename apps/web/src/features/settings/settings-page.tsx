@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Settings as SettingsIcon, Store, ArrowLeft, Brain } from "lucide-react";
 
-import { GeneralSettings } from "../../components/settings/general-settings";
-import { MemorySettings } from "../../components/settings/memory-settings";
-import { ProviderSettings } from "../../components/settings/provider-settings";
-import { SettingsHeader } from "../../components/settings/settings-header";
-import { ResizableSidebar } from "../../components/ui/resizable-sidebar";
+import { GeneralSettings } from "./components/general-settings";
+import { MemorySettings } from "./components/memory-settings";
+import { ProviderSettings } from "./components/provider-settings";
+import { SettingsHeader } from "./components/settings-header";
+import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
 
 interface SettingsPageProps {
   onBack: () => void;

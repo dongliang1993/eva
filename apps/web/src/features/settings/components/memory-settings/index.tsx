@@ -11,14 +11,14 @@ import {
   X
 } from "lucide-react";
 
-import { apiFetch } from "../../../api/fetch";
-import { useSettings } from "../../../hooks/use-settings";
+import { apiFetch } from "../../../../shared/api/fetch";
+import { useSettings } from "../../hooks/use-settings";
 import {
   useMemories,
   useMemoryStats,
   type MemoryRecord
-} from "../../../hooks/use-memories";
-import type { AppSettings } from "../../../types/api";
+} from "../../hooks/use-memories";
+import type { AppSettings } from "../../../../types/api";
 
 // ---------------------------------------------------------------------------
 // Helpers

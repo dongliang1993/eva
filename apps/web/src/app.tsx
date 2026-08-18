@@ -2,8 +2,8 @@ import { useCallback } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 
-import { ChatPage } from "./pages/chat";
-import { SettingsPage } from "./pages/settings";
+import { ChatPage } from "./features/threads/chat-page";
+import { SettingsPage } from "./features/settings/settings-page";
 
 const queryClient = new QueryClient({
   defaultOptions: {

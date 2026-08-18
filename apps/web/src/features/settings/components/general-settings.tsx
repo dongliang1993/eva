@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Check } from "lucide-react";
 
-import { useSettings } from "../../hooks/use-settings";
+import { useSettings } from "../hooks/use-settings";
 
 export function GeneralSettings() {
   const { data, isLoading, saveSettings, isSaving, saveSuccess } = useSettings();

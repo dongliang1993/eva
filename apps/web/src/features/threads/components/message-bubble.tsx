@@ -5,9 +5,9 @@ import "streamdown/styles.css";
 import type { EvaUIMessage } from "@eva/shared";
 import { isDynamicToolPart, isTextPart, uiMessageText } from "@eva/shared";
 
-import { StreamMarkdown } from "../shared/markdown/markdown.js";
-import { useSmoothStream } from "../shared/streaming/use-smooth-stream.js";
-import { toolPartToInfo } from "../api/client";
+import { StreamMarkdown } from "../../../shared/markdown/markdown.js";
+import { useSmoothStream } from "../../../shared/streaming/use-smooth-stream.js";
+import { toolPartToInfo } from "../../../shared/api/run-stream-client";
 import { StreamingIndicator } from "./streaming-indicator";
 import { ToolCallBlock } from "./tool-call-block";
 

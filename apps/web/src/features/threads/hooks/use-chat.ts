@@ -9,9 +9,9 @@ import type {
 } from "@eva/shared";
 import { UiMessageBuilder, createUserUIMessage } from "@eva/shared";
 
-import { abortRun, streamChat } from "../api/client";
-import { apiFetch } from "../api/fetch";
-import type { ThreadMessage } from "../types/api";
+import { abortRun, streamChat } from "../../../shared/api/run-stream-client";
+import { apiFetch } from "../../../shared/api/fetch";
+import type { ThreadMessage } from "../../../types/api";
 
 export interface UseChatHandlers {
   /** 审批事件(T0.4 引入的 SSE 事件),由 useApprovals 驱动。 */

@@ -1,6 +1,6 @@
 import type { EvaUIMessage } from "@eva/shared";
 
-import type { PendingApproval } from "../api/approvals";
+import type { PendingApproval } from "../api";
 import { MessageList } from "./message-list";
 import { ApprovalCard } from "./approval-card";
 import { ChatInput } from "./chat-input";

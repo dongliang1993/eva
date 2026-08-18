@@ -9,12 +9,12 @@ import {
   Trash2
 } from "lucide-react";
 
-import { useProviders } from "../../hooks/use-providers";
+import { useProviders } from "../hooks/use-providers";
 import type {
   Provider,
   ProviderConnectionTestResult,
   ProviderModel
-} from "../../types/api";
+} from "../../../types/api";
 import { getProviderPreset } from "./provider-presets";
 
 function Toggle({

@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { ChevronDown, Search } from "lucide-react";
 
-import { useModels } from "../../../hooks/use-models";
-import { useSettings } from "../../../hooks/use-settings";
-import { Popover, PopoverTrigger, PopoverContent } from "../../ui/popover";
+import { useModels } from "../../../../../shared/hooks/use-models";
+import { useSettings } from "../../../../settings/hooks/use-settings";
+import { Popover, PopoverTrigger, PopoverContent } from "../../../../../shared/ui/popover";
 
 // ---------------------------------------------------------------------------
 // Types

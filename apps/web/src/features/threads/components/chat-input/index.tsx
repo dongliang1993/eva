@@ -1,7 +1,7 @@
 import { useState, useCallback, type KeyboardEvent } from "react";
 import { Send, Square } from "lucide-react";
 
-import { Tooltip, TooltipProvider } from "../ui/tooltip";
+import { Tooltip, TooltipProvider } from "../../../../shared/ui/tooltip";
 import { SelectModel } from "./select-model";
 
 interface ChatInputProps {

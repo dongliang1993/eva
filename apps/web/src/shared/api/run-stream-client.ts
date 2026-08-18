@@ -8,8 +8,8 @@ import type {
   StreamFinishReason
 } from "@eva/shared";
 import { toolPartOutput } from "@eva/shared";
-import { DeltaAccumulator } from "../shared/streaming/delta-accumulator.js";
-import type { StreamEvent } from "../shared/streaming/types.js";
+import { DeltaAccumulator } from "../streaming/delta-accumulator.js";
+import type { StreamEvent } from "../streaming/types.js";
 
 export interface ToolCallInfo {
   readonly toolName: string;

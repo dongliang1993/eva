@@ -1,6 +1,6 @@
 import { ShieldAlert, Check, X, Sparkles } from "lucide-react";
 
-import type { PendingApproval } from "../api/approvals";
+import type { PendingApproval } from "../api";
 
 interface ApprovalCardProps {
   readonly approval: PendingApproval;

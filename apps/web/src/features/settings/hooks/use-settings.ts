@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch } from "../api/fetch";
-import type { AppSettings } from "../types/api";
+import { apiFetch } from "../../../shared/api/fetch";
+import type { AppSettings } from "../../../types/api";
 
 const SETTINGS_KEY = ["settings"] as const;
 
