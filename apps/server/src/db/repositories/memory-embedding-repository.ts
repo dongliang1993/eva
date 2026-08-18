@@ -55,6 +55,15 @@ export class MemoryEmbeddingRepository {
       .run(memoryId);
   }
 
+  /** 直接按 memory_id 查,确认向量存在(不依赖距离检索)。 */
+  has(memoryId: string): boolean {
+    const row = this.sqlite
+      .prepare("SELECT 1 AS present FROM memory_embeddings WHERE memory_id = ?")
+      .get(memoryId) as { present: number } | undefined;
+
+    return row !== undefined;
+  }
+
   countByStatus(): { ready: number; pending: number } {
     // Count via main memories table since vec0 doesn't support aggregation well
     const ready = this.sqlite

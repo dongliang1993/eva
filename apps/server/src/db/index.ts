@@ -56,19 +56,27 @@ const loadVecExtension = (sqlite: Database.Database): void => {
 /** Embedding dimension — must match the model used (BGE-M3 = 1024). */
 export const EMBEDDING_DIMENSIONS = 1024;
 
+const VEC_TABLE = "memory_embeddings";
+
+/** 读现有 vec0 表声明的维度;表不存在返回 undefined。 */
+const readVecTableDimensions = (sqlite: Database.Database): number | undefined => {
+  const row = sqlite
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(VEC_TABLE) as { sql?: string } | undefined;
+  const matched = row?.sql?.match(/FLOAT\[(\d+)\]/i)?.[1];
+
+  return matched ? Number(matched) : undefined;
+};
+
+/**
+ * vec0 虚表是派生索引,但**重建代价是重新调用 embedding API**,不能每次启动都清。
+ * 只在「不存在」或「维度变了」时重建;后者同时把 ready 打回 pending,
+ * 否则 backfillPendingEmbeddings 永远捞不到它们(它只看 pending/error)。
+ */
 const createVecTables = (sqlite: Database.Database): void => {
-  if (!vecLoaded) return;
-
-  // Drop and recreate to ensure correct dimensions.
-  // Vec table is a derived index — data can be rebuilt from memories table.
-  sqlite.exec("DROP TABLE IF EXISTS memory_embeddings");
-
-  sqlite.exec(`
-    CREATE VIRTUAL TABLE memory_embeddings USING vec0(
-      memory_id TEXT PRIMARY KEY,
-      embedding FLOAT[${EMBEDDING_DIMENSIONS}]
-    );
-  `);
+  if (!vecLoaded) {
+    return;
+  }
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS memory_metadata (
@@ -76,6 +84,25 @@ const createVecTables = (sqlite: Database.Database): void => {
       value TEXT NOT NULL
     );
   `);
+
+  const existingDimensions = readVecTableDimensions(sqlite);
+
+  if (existingDimensions === EMBEDDING_DIMENSIONS) {
+    return;
+  }
+
+  sqlite.exec(`DROP TABLE IF EXISTS ${VEC_TABLE}`);
+  sqlite.exec(`
+    CREATE VIRTUAL TABLE ${VEC_TABLE} USING vec0(
+      memory_id TEXT PRIMARY KEY,
+      embedding FLOAT[${EMBEDDING_DIMENSIONS}]
+    );
+  `);
+
+  if (existingDimensions !== undefined) {
+    // 维度变更 → 旧向量全部作废,标回 pending 让 backfill 重建
+    sqlite.exec("UPDATE memories SET embedding_status = 'pending' WHERE embedding_status = 'ready'");
+  }
 };
 
 export const initDb = (options: InitDbOptions = {}): AppDatabase => {
