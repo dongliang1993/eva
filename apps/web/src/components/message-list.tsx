@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
 
-import type { DisplayMessage } from "../hooks/use-chat";
+import type { EvaUIMessage } from "@eva/shared";
+
 import { MessageBubble } from "./message-bubble";
 
 interface MessageListProps {
-  readonly messages: readonly DisplayMessage[];
+  readonly messages: readonly EvaUIMessage[];
 }
 
 export function MessageList({ messages }: MessageListProps) {

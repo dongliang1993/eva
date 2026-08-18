@@ -1,11 +1,12 @@
-import type { DisplayMessage } from "../hooks/use-chat";
+import type { EvaUIMessage } from "@eva/shared";
+
 import type { PendingApproval } from "../api/approvals";
 import { MessageList } from "./message-list";
 import { ApprovalCard } from "./approval-card";
 import { ChatInput } from "./chat-input";
 
 interface ChatViewProps {
-  readonly messages: readonly DisplayMessage[];
+  readonly messages: readonly EvaUIMessage[];
   readonly isStreaming: boolean;
   readonly selectedModel: string | null;
   readonly onSend: (text: string) => void;

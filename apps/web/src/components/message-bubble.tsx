@@ -2,14 +2,18 @@ import { useState } from "react";
 import { Brain, ChevronDown, ChevronUp } from "lucide-react";
 import "streamdown/styles.css";
 
-import type { DisplayMessage } from "../hooks/use-chat";
+import type { EvaUIMessage } from "@eva/shared";
+import { isDynamicToolPart, isTextPart, uiMessageText } from "@eva/shared";
+
 import { StreamMarkdown } from "../shared/markdown/markdown.js";
 import { useSmoothStream } from "../shared/streaming/use-smooth-stream.js";
+import { toolPartToInfo } from "../api/client";
 import { StreamingIndicator } from "./streaming-indicator";
 import { ToolCallBlock } from "./tool-call-block";
 
 interface MessageBubbleProps {
-  readonly message: DisplayMessage;
+  readonly message: EvaUIMessage;
+  readonly isStreaming?: boolean;
 }
 
 function ThinkingBadge({ durationMs }: { readonly durationMs: number }) {
@@ -29,32 +33,47 @@ function ThinkingBadge({ durationMs }: { readonly durationMs: number }) {
   );
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
-  const isUser = message.role === "user";
-
-  if (isUser) {
+export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
+  if (message.role === "user") {
     return (
       <div className="flex justify-end">
         <div className="relative max-w-[75%]">
           <div className="rounded-3xl rounded-tr-xs bg-user-bubble px-4 py-2.5 text-sm text-user-bubble-foreground">
-            <p className="whitespace-pre-wrap">{message.content}</p>
+            <p className="whitespace-pre-wrap">{uiMessageText(message)}</p>
           </div>
         </div>
       </div>
     );
   }
 
+  const thinkingMs = message.metadata?.thinkingDurationMs;
+
   return (
     <div className="max-w-none">
-      {message.thinkingDurationMs !== undefined && message.thinkingDurationMs > 0 ? (
-        <ThinkingBadge durationMs={message.thinkingDurationMs} />
+      {thinkingMs !== undefined && thinkingMs > 0 ? (
+        <ThinkingBadge durationMs={thinkingMs} />
       ) : null}
 
-      {message.toolCalls?.map((tc) => (
-        <ToolCallBlock key={tc.toolCallId} toolCall={tc} />
-      ))}
+      {message.parts.map((part, index) => {
+        if (isTextPart(part)) {
+          return (
+            <AssistantContent
+              key={`text-${index}`}
+              content={part.text}
+              isStreaming={isStreaming === true && part.state === "streaming"}
+            />
+          );
+        }
 
-      <AssistantContent content={message.content} isStreaming={message.isStreaming} />
+        if (isDynamicToolPart(part)) {
+          return <ToolCallBlock key={part.toolCallId} toolCall={toolPartToInfo(part)} />;
+        }
+
+        // step-start 等不渲染
+        return null;
+      })}
+
+      {message.parts.length === 0 ? <StreamingIndicator /> : null}
     </div>
   );
 }

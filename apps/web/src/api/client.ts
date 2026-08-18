@@ -1,11 +1,13 @@
-import type { RunStreamEvent, RunStreamFrame, StreamFinishReason } from "@eva/shared";
+import type {
+  EvaDynamicToolPart,
+  RunAgentStreamEvent,
+  RunStreamEvent,
+  RunStreamFrame,
+  StreamFinishReason
+} from "@eva/shared";
+import { toolPartOutput } from "@eva/shared";
 import { DeltaAccumulator } from "../shared/streaming/delta-accumulator.js";
 import type { StreamEvent } from "../shared/streaming/types.js";
-
-export interface ChatMessage {
-  readonly role: "user" | "assistant";
-  readonly content: string;
-}
 
 export interface ToolCallInfo {
   readonly toolName: string;
@@ -17,25 +19,37 @@ export interface ToolCallInfo {
 }
 
 export interface StreamCallbacks {
-  readonly onTextChunk: (content: string) => void;
-  readonly onToolCallStart: (info: ToolCallInfo) => void;
-  readonly onToolCallEnd: (info: ToolCallInfo) => void;
-    readonly onResult: (
-    text: string,
-    toolCalls: ToolCallInfo[],
-    finishReason: StreamFinishReason,
-    returnedSessionId?: string
-  ) => void;
-  readonly onError: (message: string) => void;
-  readonly onEnd: () => void;
   readonly onRunStart?: (runId: string, sessionId: string) => void;
+  /** 已按 seq 归位的 agent 域事件,交给 UiMessageBuilder 累积。 */
+  readonly onEvent: (event: RunAgentStreamEvent) => void;
+  readonly onError: (message: string) => void;
+  readonly onEnd: (finishReason: StreamFinishReason) => void;
 }
 
-interface StreamRequest {
-  readonly messages: readonly ChatMessage[];
+export interface StreamRequest {
+  readonly text: string;
   readonly sessionId?: string;
   readonly modelId?: string;
 }
+
+/**
+ * 把 dynamic-tool part 派生成 ToolCallInfo —— 这样 tool-call-block.tsx 不用动。
+ * T3 会把 tool-call-block 改成直接消费 part,届时本适配器移除。
+ */
+export const toolPartToInfo = (part: EvaDynamicToolPart): ToolCallInfo => ({
+  toolName: part.toolName,
+  toolCallId: part.toolCallId,
+  args: (part.input as Record<string, unknown>) ?? {},
+  ...(part.state === "output-available" || part.state === "output-error"
+    ? {
+      output: toolPartOutput(part),
+      status: part.state === "output-error" ? ("error" as const) : ("success" as const)
+    }
+    : {}),
+  ...(typeof part.toolMetadata?.durationMs === "number"
+    ? { durationMs: part.toolMetadata.durationMs }
+    : {})
+});
 
 /**
  * Parse SSE lines from a text buffer.
@@ -80,34 +94,23 @@ const parseSSEBuffer = (
 
 const dispatchEvent = (ev: RunStreamEvent, callbacks: StreamCallbacks): void => {
   switch (ev.type) {
-    case "text-delta":
-      callbacks.onTextChunk(ev.textDelta);
-      break;
-    case "tool-call":
-      callbacks.onToolCallStart({
-        toolName: ev.toolName,
-        toolCallId: ev.toolCallId,
-        args: ev.input ?? {}
-      });
-      break;
-    case "tool-result":
-      callbacks.onToolCallEnd({
-        toolName: ev.toolName,
-        toolCallId: ev.toolCallId,
-        args: {},
-        output: ev.output,
-        status: ev.status,
-        ...(ev.durationMs !== undefined ? { durationMs: ev.durationMs } : {})
-      });
-      break;
-    case "finish":
-      callbacks.onResult(ev.text, ev.toolCalls ?? [], ev.finishReason);
-      break;
     case "run_start":
       callbacks.onRunStart?.(ev.runId, ev.sessionId);
       break;
-    default:
+    // T0.4 引入的审批事件:T3 会接进 useApprovals,T1 暂时忽略。
+    case "approval_request":
+    case "approval_resolved":
       break;
+    case "end":
+      callbacks.onEnd(ev.finishReason);
+      break;
+    case "error":
+      callbacks.onError(ev.message);
+      break;
+    default:
+      // 其余都是 agent 域事件(text-delta / tool-* / step-start / finish),
+      // 按 seq 归位后整条交给 UiMessageBuilder。
+      callbacks.onEvent(ev as RunAgentStreamEvent);
   }
 };
 
@@ -124,7 +127,7 @@ export async function streamChat(
   if (!response.ok) {
     const text = await response.text();
     callbacks.onError(`HTTP ${response.status}: ${text}`);
-    callbacks.onEnd();
+    callbacks.onEnd("error");
     return;
   }
 
@@ -132,7 +135,7 @@ export async function streamChat(
 
   if (!reader) {
     callbacks.onError("No response body");
-    callbacks.onEnd();
+    callbacks.onEnd("error");
     return;
   }
 
@@ -156,7 +159,8 @@ export async function streamChat(
       for (const { event, data } of events) {
         try {
           if (event === "end") {
-            callbacks.onEnd();
+            const parsed = JSON.parse(data) as { finishReason: StreamFinishReason };
+            callbacks.onEnd(parsed.finishReason);
             return;
           }
 
@@ -173,6 +177,7 @@ export async function streamChat(
             dispatchEvent(ev as unknown as RunStreamEvent, callbacks);
           }
         } catch {
+          // 忽略单帧解析失败,不要因为一个坏帧断掉整个流
         }
       }
     }
@@ -180,7 +185,7 @@ export async function streamChat(
     reader.releaseLock();
   }
 
-  callbacks.onEnd();
+  callbacks.onEnd("stop");
 }
 
 export async function abortRun(runId: string): Promise<void> {

@@ -1,5 +1,9 @@
 export type {
   AppSettings,
+  EvaDynamicToolPart,
+  EvaMessageMetadata,
+  EvaUIMessage,
+  EvaUIMessagePart,
   MemoryCategory,
   MemoryOrigin,
   MemoryRecord,
@@ -11,4 +15,4 @@ export type {
   ProviderModel,
   ThreadMessage,
   ThreadSummary
-} from "../../../../packages/shared/src/index.js";
+} from "@eva/shared";
