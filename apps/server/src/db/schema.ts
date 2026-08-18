@@ -6,13 +6,8 @@ export const sessions = sqliteTable(
   {
     id: text("id").primaryKey(),
     title: text("title").notNull().default("New Chat"),
-    sessionKey: text("session_key").notNull(),
     model: text("model"),
-    reasoningEffort: text("reasoning_effort").notNull().default("medium"),
     origin: text("origin").notNull().default("chat"),
-    toolPolicy: text("tool_policy").notNull().default("auto"),
-    skillPolicy: text("skill_policy").notNull().default("auto"),
-    memoryPolicy: text("memory_policy").notNull().default("auto"),
     metadata: text("metadata").notNull().default("{}"),
     workspaceId: text("workspace_id"),
     createdAt: text("created_at")
@@ -23,7 +18,6 @@ export const sessions = sqliteTable(
       .default(sql`(datetime('now'))`)
   },
   (table) => [
-    index("idx_sessions_session_key").on(table.sessionKey),
     index("idx_sessions_updated_at").on(table.updatedAt),
     index("idx_sessions_origin").on(table.origin),
     index("idx_sessions_workspace_id").on(table.workspaceId)
@@ -114,40 +108,6 @@ export const memories = sqliteTable(
     index("idx_memories_embedding_status").on(table.embeddingStatus),
     index("idx_memories_created_at").on(table.createdAt)
   ]
-);
-
-export const providerModelsCache = sqliteTable(
-  "provider_models_cache",
-  {
-    id: text("id").primaryKey(),
-    providerId: text("provider_id").notNull(),
-    models: text("models").notNull().default("[]"),
-    fetchedAt: text("fetched_at").notNull(),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(datetime('now'))`),
-    updatedAt: text("updated_at")
-      .notNull()
-      .default(sql`(datetime('now'))`)
-  },
-  (table) => [index("idx_pmc_provider_id").on(table.providerId)]
-);
-
-export const modelCapabilitiesCache = sqliteTable(
-  "model_capabilities_cache",
-  {
-    id: text("id").primaryKey(),
-    modelId: text("model_id").notNull(),
-    capabilities: text("capabilities").notNull().default("{}"),
-    fetchedAt: text("fetched_at").notNull(),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(datetime('now'))`),
-    updatedAt: text("updated_at")
-      .notNull()
-      .default(sql`(datetime('now'))`)
-  },
-  (table) => [index("idx_mcc_model_id").on(table.modelId)]
 );
 
 export const messages = sqliteTable(

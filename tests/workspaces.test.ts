@@ -79,13 +79,8 @@ describe("WorkspaceStore + resolveWorkspaceForSession", () => {
   const sessionWith = (workspaceId: string | null): Session => ({
     id: "session-1",
     title: "t",
-    sessionKey: "k",
     model: null,
-    reasoningEffort: "medium",
     origin: "chat",
-    toolPolicy: "auto",
-    skillPolicy: "auto",
-    memoryPolicy: "auto",
     metadata: "{}",
     workspaceId,
     createdAt: "",
@@ -128,7 +123,7 @@ describe("WorkspaceStore + resolveWorkspaceForSession", () => {
     const session = sessionWith(ws.id);
 
     // 建一条真实会话再删工作区,验证 FK ON DELETE SET NULL。
-    new DrizzleSessionRepository(db).create({ id: session.id, sessionKey: "k", workspaceId: ws.id });
+    new DrizzleSessionRepository(db).create({ id: session.id, workspaceId: ws.id });
 
     store.remove(ws.id);
 

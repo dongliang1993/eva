@@ -21,15 +21,19 @@ tests/             # Vitest test suite
 
 Three-layer dependency structure (modeled after DeerFlow):
 
-- **`deps.ts`** — Infrastructure only: config loading, DB, skills, observer, work-root. Getter functions for route access.
-- **`services/index.ts`** — Business service assembly: wires infrastructure into `AppServices` (`agents`, `session`, `approvals`, `runRegistry`).
+- **`deps.ts`** — Infrastructure only: config loading, DB, skills, observer, soul-section, legacy settings migration. Getter functions for route access.
+- **`services/index.ts`** — Business service assembly: wires infrastructure into `AppServices` (`agents`, `session`, `approvals`, `runRegistry`, `workspaces`, `mcp`).
 - **`app.ts`** — Fastify lifecycle: creates the app, decorates with `infra` and `services`, registers routes.
 
 Fastify decorators:
-- `app.infra` — `AppInfrastructure` (config, db, skills, observer?, soulSection?, workRoot?)
-- `app.services` — `AppServices` (agents, session, approvals, runRegistry)
+- `app.infra` — `AppInfrastructure` (config, db, logger, skills, observer?)
+- `app.services` — `AppServices` (agents, session, approvals, runRegistry, workspaces, mcp)
 
-**`AgentFactory`** (`services/agent-factory.ts`) resolves the agent **per run** and caches `LanguageModel` instances keyed on (providerType, providerId, baseURL, modelId, apiKey); temperature/maxOutputTokens are call settings, not part of the cache key. Provider/settings mutation routes call `agents.invalidate()` so the next run picks up the new config. Resolution failures throw `AgentUnavailableError` at request time (→ 503), so a fresh install with no API key still boots.
+**`AgentFactory`** (`services/agent-factory.ts`) resolves the agent **per run**:
+1. `resolveModels({ requestedModelId? })` — resolves the three model slots (chat / tool / embedding) via `resolveModelSlot`; tool 缺省回落 chat; temperature is a call setting read once from settings.
+2. `resolve(options)` — builds the agent with `createConfiguredAgent`, injecting per-run `workspace` context.
+
+`LanguageModel` instances are cached keyed on (kind, providerId, baseURL, modelId, apiKey); temperature/maxOutputTokens are call settings, not part of the cache key. Provider/settings mutation routes call `agents.invalidate()`. Resolution failures throw `AgentUnavailableError` at request time (→ 503), so a fresh install with no API key still boots.
 
 ### Harness Layer (`packages/harness/src/`)
 
@@ -50,8 +54,8 @@ tools/
     └── index.ts         # re-export
 ```
 
-- Tools are built with `buildTool({ name, description, schema, execute, readOnly?, requiresApproval? })` (Zod schema, `execute` returns `string`).
-- Dangerous tools set `requiresApproval: true`; `createAgent` wraps their `execute` with `withApproval` so the approval gate lives at execute time (one model call, `cancelBySession` can reject pending approvals on abort).
+- Tools are built with `buildTool({ name, description, schema, execute, readOnly?, requiresApproval? })` (Zod schema, `execute` returns `string`). MCP tools use `buildJsonSchemaTool` (JSON Schema input) — both wrap errors with the shared `TOOL_ERROR_PREFIX` so `stream-part-mapper` treats the two classes the same.
+- Dangerous tools set `requiresApproval: true`; `createAgent` wraps their `execute` with `withApproval` so the approval gate lives at execute time (one model call, `cancelByRun` can reject pending approvals on abort). Approvals are owned by **runId**, not session.
 
 ### SSE Streaming
 
@@ -84,7 +88,8 @@ src/
   features/
     threads/             # chat page, message list/bubble/block, sidebar, chat-input,
                          #   use-chat/use-approvals/use-stick-to-bottom, threads api
-    settings/            # settings page + components/hooks
+    workspaces/          # workspace picker + use-workspaces (api/hook/component)
+    settings/            # settings-layout (nested routes) + per-tab components/hooks
   shared/
     api/                 # fetch wrapper, run-stream client (SSE)
     ui/                  # Radix-based base components (popover, tooltip, resizable-sidebar)
@@ -92,9 +97,11 @@ src/
     markdown/            # Streamdown markdown renderer
     streaming/           # SSE accumulator + smooth-stream hook
   types/api.ts           # re-export from @eva/shared
-  app.tsx                # routes
+  app.tsx                # routes (/chat, /settings/* nested)
   main.tsx               # entry
 ```
+
+Settings is real routes (`/settings/models`, `/settings/providers`, `/settings/memory`, `/settings/mcp`) — no component `useState` tab switching.
 
 ### Rendering performance
 
@@ -111,6 +118,12 @@ Approvals are driven by the SSE `approval_request` / `approval_resolved` events 
 - First request: no `sessionId` → server creates session → `run_start` frame carries the new `sessionId`.
 - Subsequent requests: send `sessionId` → server loads history.
 - Frontend stores `sessionId` in `useState`; new conversation clears it.
+- Session lifecycle: request reordered to session/workspace → agent → context (see `routes/runs.ts` `openSessionTurn` → `resolve` → `buildRunContext`); a 503 on a freshly created session rolls it back.
+
+## Workspaces & MCP
+
+- **Workspaces** (`app.services.workspaces`): a local directory bound to a session (`sessions.workspace_id`). fs tools are injected per-run from it; `CLAUDE.md`/`AGENTS.md` under it are injected into the system prompt (16 KB cap). Paths must pass `assertUsableWorkspacePath` ($HOME and `/` rejected). Tool overflow lands in `~/.eva/tool-overflow/<workspaceId>/`, and `read_file` has a read-only whitelist for it.
+- **MCP** (`app.services.mcp`, T9): DB `mcp_servers` is the only runtime source; `~/.eva/mcp.json` imports file-origin entries at startup. MCP tools are named `mcp__<server>__<tool>` and require approval unless the server declares `readOnlyHint`. A broken server degrades to `state: "error"` and never fails the chat.
 
 ## Commands
 
@@ -137,5 +150,6 @@ Environment variables loaded from `.env.local` at workspace root (`apps/server/s
 | `PORT` | Server port (default 8082) |
 | `HOST` | Server host (default 127.0.0.1) |
 | `LOG_LEVEL` | pino log level (default info) |
-| `TARGET_REPO_ROOT` | Work root for fs tools (read/write/edit/bash/grep/list). Must be an explicit project dir; empty = no fs tools; `$HOME`/`/` rejected. |
 | `DB_PATH` | SQLite DB path (default `~/.eva/eva.db`) |
+
+> Workspaces are managed in-app (not env vars). MCP config file: `~/.eva/mcp.json`.

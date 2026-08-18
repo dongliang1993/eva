@@ -174,7 +174,6 @@ describe("Phase 1 API routes", () => {
     const messageRepo = new DrizzleMessageRepository(db);
     const session = sessionRepo.create({
       id: randomUUID(),
-      sessionKey: "thread:test",
       title: "Debug thread"
     });
 

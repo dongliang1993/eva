@@ -1,9 +1,12 @@
-import { useCallback } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import { ChatPage } from "./features/threads/chat-page";
-import { SettingsPage } from "./features/settings/settings-page";
+import { SettingsLayout } from "./features/settings/settings-layout";
+import { ModelSettings } from "./features/settings/components/model-settings";
+import { ProviderSettings } from "./features/settings/components/provider-settings";
+import { MemorySettings } from "./features/settings/components/memory-settings";
+import { McpSettings } from "./features/settings/components/mcp-settings";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,20 +17,6 @@ const queryClient = new QueryClient({
   }
 });
 
-function SettingsLayout() {
-  const navigate = useNavigate();
-
-  const handleBack = useCallback(() => {
-    navigate("/chat");
-  }, [navigate]);
-
-  return (
-    <div className="h-screen bg-background text-foreground">
-      <SettingsPage onBack={handleBack} />
-    </div>
-  );
-}
-
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -35,7 +24,13 @@ export function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/chat" replace />} />
           <Route path="/chat" element={<ChatPage />} />
-          <Route path="/settings/*" element={<SettingsLayout />} />
+          <Route path="/settings" element={<SettingsLayout />}>
+            <Route index element={<Navigate to="models" replace />} />
+            <Route path="models" element={<ModelSettings />} />
+            <Route path="providers" element={<ProviderSettings />} />
+            <Route path="memory" element={<MemorySettings />} />
+            <Route path="mcp" element={<McpSettings />} />
+          </Route>
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

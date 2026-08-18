@@ -46,11 +46,9 @@ describe("DrizzleSessionRepository", () => {
   it("creates and retrieves a session", () => {
     const session = sessionRepo.create({
       id: randomUUID(),
-      sessionKey: "chat:user1",
       title: "Test Session"
     });
 
-    expect(session.sessionKey).toBe("chat:user1");
     expect(session.title).toBe("Test Session");
 
     const found = sessionRepo.findById(session.id);
@@ -59,28 +57,8 @@ describe("DrizzleSessionRepository", () => {
     expect(found!.id).toBe(session.id);
   });
 
-  it("finds by session key", () => {
-    sessionRepo.create({
-      id: randomUUID(),
-      sessionKey: "thread:abc",
-      title: "Thread Chat"
-    });
-
-    const found = sessionRepo.findBySessionKey("thread:abc");
-
-    expect(found).toBeDefined();
-    expect(found!.sessionKey).toBe("thread:abc");
-  });
-
-  it("returns undefined for unknown session key", () => {
-    expect(sessionRepo.findBySessionKey("nonexistent")).toBeUndefined();
-  });
-
   it("updates timestamp", () => {
-    const session = sessionRepo.create({
-      id: randomUUID(),
-      sessionKey: "key1"
-    });
+    const session = sessionRepo.create({ id: randomUUID() });
 
     const before = sessionRepo.findById(session.id)!.updatedAt;
 
@@ -92,10 +70,7 @@ describe("DrizzleSessionRepository", () => {
   });
 
   it("deletes a session", () => {
-    const session = sessionRepo.create({
-      id: randomUUID(),
-      sessionKey: "delete-me"
-    });
+    const session = sessionRepo.create({ id: randomUUID() });
 
     expect(sessionRepo.deleteById(session.id)).toBe(true);
     expect(sessionRepo.findById(session.id)).toBeUndefined();
@@ -108,10 +83,7 @@ describe("DrizzleSessionRepository", () => {
 
 describe("DrizzleMessageRepository", () => {
   it("creates and retrieves messages", () => {
-    const session = sessionRepo.create({
-      id: randomUUID(),
-      sessionKey: "msg-test"
-    });
+    const session = sessionRepo.create({ id: randomUUID() });
 
     messageRepo.create({ sessionId: session.id, message: userMessage("Hello") });
     messageRepo.create({
@@ -128,10 +100,7 @@ describe("DrizzleMessageRepository", () => {
   });
 
   it("respects limit", () => {
-    const session = sessionRepo.create({
-      id: randomUUID(),
-      sessionKey: "limit-test"
-    });
+    const session = sessionRepo.create({ id: randomUUID() });
 
     for (let i = 0; i < 5; i++) {
       messageRepo.create({ sessionId: session.id, message: userMessage(`Message ${i}`) });
@@ -143,10 +112,7 @@ describe("DrizzleMessageRepository", () => {
   });
 
   it("cascade deletes messages when session is deleted", () => {
-    const session = sessionRepo.create({
-      id: randomUUID(),
-      sessionKey: "cascade-test"
-    });
+    const session = sessionRepo.create({ id: randomUUID() });
 
     messageRepo.create({ sessionId: session.id, message: userMessage("Will be deleted") });
 
@@ -158,10 +124,7 @@ describe("DrizzleMessageRepository", () => {
   });
 
   it("findLastBySessionId returns the most recent message", () => {
-    const session = sessionRepo.create({
-      id: randomUUID(),
-      sessionKey: "last-test"
-    });
+    const session = sessionRepo.create({ id: randomUUID() });
 
     messageRepo.create({ sessionId: session.id, message: userMessage("first") });
     messageRepo.create({ sessionId: session.id, message: userMessage("second") });
@@ -210,25 +173,6 @@ describe("SessionService", () => {
 
   it("returns undefined for unknown session id", () => {
     expect(service.continueSession("nonexistent", userMessage("Hi"))).toBeUndefined();
-  });
-
-  it("resolves by key (IM scenario)", () => {
-    const first = service.resolveByKey("thread:abc", userMessage("First"));
-
-    expect(first.isNew).toBe(true);
-
-    service.recordAssistantMessage(
-      first.session.id,
-      assistantMessage([{ type: "text", text: "Reply", state: "done" }])
-    );
-
-    const second = service.resolveByKey("thread:abc", userMessage("Second"));
-
-    expect(second.isNew).toBe(false);
-    expect(second.session.id).toBe(first.session.id);
-
-    const history = service.buildModelHistory(db, first.session.id);
-    expect(history.messages).toHaveLength(3);
   });
 
   it("records assistant message with tool calls as dynamic-tool parts", () => {

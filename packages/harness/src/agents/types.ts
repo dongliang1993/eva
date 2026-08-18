@@ -37,6 +37,11 @@ export interface AgentRunResult {
 export type AgentStreamEvent = RunAgentStreamEvent;
 
 export interface Agent {
+  /**
+   * 跑完整一轮并返回终态结果(内部就是把 stream 消费干)。
+   * 目前只有测试在用;S7 的子代理会用它(子代理不需要流式,只要 final answer)。
+   * 若 S7 落地后仍无生产调用方,那时再删。
+   */
   invoke(input: AgentRunInput): Promise<AgentRunResult>;
   stream(input: AgentRunInput): AsyncIterable<AgentStreamEvent>;
 }

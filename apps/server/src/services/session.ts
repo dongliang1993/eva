@@ -35,16 +35,15 @@ export class SessionService {
     private readonly messages: IMessageRepository
   ) {}
 
-  createSession(userMessage: EvaUIMessage, runId?: string): ResolvedSession {
+  createSession(input: EvaUIMessage, runId?: string): ResolvedSession {
     const session = this.sessions.create({
       id: randomUUID(),
-      sessionKey: randomUUID(),
-      title: uiMessageText(userMessage).slice(0, TITLE_LENGTH)
+      title: uiMessageText(input).slice(0, TITLE_LENGTH)
     });
 
     return {
       session,
-      userMessage: this.appendUserMessage(session.id, userMessage, runId),
+      userMessage: this.appendUserMessage(session.id, input, runId),
       isNew: true
     };
   }
@@ -64,36 +63,6 @@ export class SessionService {
       session,
       userMessage: this.appendUserMessage(session.id, userMessage, runId),
       isNew: false
-    };
-  }
-
-  resolveByKey(
-    sessionKey: string,
-    userMessage: EvaUIMessage,
-    origin?: string,
-    runId?: string
-  ): ResolvedSession {
-    const existing = this.sessions.findBySessionKey(sessionKey);
-
-    if (existing) {
-      return {
-        session: existing,
-        userMessage: this.appendUserMessage(existing.id, userMessage, runId),
-        isNew: false
-      };
-    }
-
-    const session = this.sessions.create({
-      id: randomUUID(),
-      sessionKey,
-      title: uiMessageText(userMessage).slice(0, TITLE_LENGTH),
-      ...(origin !== undefined ? { origin } : {})
-    });
-
-    return {
-      session,
-      userMessage: this.appendUserMessage(session.id, userMessage, runId),
-      isNew: true
     };
   }
 

@@ -167,7 +167,8 @@ packages/shared   契约层：跨 server/web/desktop 的类型与事件契约（
 
 ### 4.7 MCP【目标，S8】
 
-- `mcp.json` + DB `mcp_servers` 表双来源；工具以 `mcp__<server>__<tool>` 动态注册进 tools 对象；OAuth token 落 `mcp_oauth_tokens`。
+- **DB `mcp_servers` 表是运行时唯一来源**；`~/.eva/mcp.json` 只是导入通道（启动时 upsert 进表并标 `origin='file'`），不做双运行时来源——双来源需要合并与冲突规则，收益不抵复杂度。工具以 `mcp__<server>__<tool>` 动态注册进 tools 对象。
+- OAuth token 落 `mcp_oauth_tokens`（R3）。
 - 与 skill 的分工：skill 教 agent"做法"（流程/规范/模板），MCP 接外部 SaaS/本地服务的新工具。
 
 ---
@@ -198,6 +199,10 @@ Session  一条会话：id / title / model / mode / workspaceId / 累计 token /
 | `running` | run 在飞，或有已发送未认领输入 | 否 |
 | `waiting` | 主 loop 闲 + 有存活后台任务 | 否（禁止回收） |
 | `idle` | 无上述 | 是 |
+
+> **改因（R2 T8）**：`waiting` 态在 T8 未落地 —— 它需要有存活后台任务这个事实，而后台任务
+> 是 S7 引入 `background_tasks` 表之后才有的概念。T8 只落地三态（requires_action > running > idle），
+> S7 落地时给 `SessionStatusFacts` 加一个 `hasLiveBackgroundTask` 字段、`deriveSessionStatus` 加一行即可。
 
 单一事实源 + 多投影：凡是能从其它量算出来的"状态"，都是 getter。这从根上消灭"多份可变状态互相不一致"这一类 bug。
 

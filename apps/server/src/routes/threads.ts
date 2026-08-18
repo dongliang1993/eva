@@ -93,7 +93,6 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
     const repo = new DrizzleSessionRepository(app.infra.db);
     const thread = repo.create({
       id: randomUUID(),
-      sessionKey: randomUUID(),
       ...(body.title ? { title: body.title } : {})
     });
 

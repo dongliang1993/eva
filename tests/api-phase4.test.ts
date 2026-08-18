@@ -92,7 +92,6 @@ describe("Phase 4 API routes", () => {
     const messageRepo = new DrizzleMessageRepository(db);
     const thread = sessionRepo.create({
       id: randomUUID(),
-      sessionKey: "thread:react",
       title: "React debugging"
     });
 
@@ -177,7 +176,6 @@ describe("Phase 4 API routes", () => {
     const messageRepo = new DrizzleMessageRepository(db);
     const thread = sessionRepo.create({
       id: randomUUID(),
-      sessionKey: "thread:compact",
       title: "Long conversation"
     });
 
@@ -277,7 +275,6 @@ describe("Phase 4 API routes", () => {
     const messageRepo = new DrizzleMessageRepository(db);
     const thread = sessionRepo.create({
       id: randomUUID(),
-      sessionKey: "thread:short",
       title: "Short conversation"
     });
 

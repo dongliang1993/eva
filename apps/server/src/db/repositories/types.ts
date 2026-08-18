@@ -3,13 +3,8 @@ import type { EvaUIMessage } from "@eva/shared";
 export interface Session {
   readonly id: string;
   readonly title: string;
-  readonly sessionKey: string;
   readonly model: string | null;
-  readonly reasoningEffort: string;
   readonly origin: string;
-  readonly toolPolicy: string;
-  readonly skillPolicy: string;
-  readonly memoryPolicy: string;
   readonly metadata: string;
   readonly workspaceId: string | null;
   readonly createdAt: string;
@@ -18,7 +13,6 @@ export interface Session {
 
 export interface CreateSessionInput {
   readonly id: string;
-  readonly sessionKey: string;
   readonly title?: string;
   readonly origin?: string;
   readonly workspaceId?: string;
@@ -57,7 +51,6 @@ export interface GetMessagesOptions {
 export interface ISessionRepository {
   create(input: CreateSessionInput): Session;
   findById(id: string): Session | undefined;
-  findBySessionKey(sessionKey: string): Session | undefined;
   listAll(limit?: number): readonly Session[];
   updateTimestamp(id: string): void;
   updateTitle(id: string, title: string): void;

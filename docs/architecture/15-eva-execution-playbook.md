@@ -36,16 +36,19 @@
 | S1 SSE 协议 | ❌ 未对齐 | 仍是自定义 `text_chunk / tool_call_start / tool_call_end / result / error / end` |
 | S1.1 前端三红线 | ❌ 未达标（13 §4 实证） | 无 seq 字段直接 append；chunk 到达即全量 setState；Streamdown 全篇重解析；列表无虚拟化 |
 | S2 存储+版本树 | ⚠️ 半 | `sessions/messages` 平铺表（role/content/searchText），无 UIMessage parts、无 parent/slot/depth |
-| S3 工作区 | ⚙️ 雏形 | `services/workspace/` 存在；无 workspaces 表驱动流程 |
-| S4 工具+审批 | ⚙️ 大部分在 | fs 工具组 + tool-overflow ✅；`approval_requests` 表 + gateway + 前端卡片 ✅；缺 broker 语义细化 |
+| S3 工作区 | ✅ 完成（R2 T6） | `workspaces` 表 + 会话绑定 + per-run 注入 + CLAUDE.md 注入；TARGET_REPO_ROOT 已删 |
+| S4 工具+审批 | ⚙️ 大部分在 | fs 工具组 + tool-overflow ✅；审批归属收敛到 run（R2 T5）✅；per-tool 白名单/危险命令标注待补 |
 | S5 Skill | ✅ 基本完成 | loader/parser/prompt/read-skill-tool 三级渐进披露 |
 | S6 扩展宿主 | ❌ 缺失 | 无 manifest/exposes/EH/slots |
-| S7 子代理 fork-join | ⚠️ 同步骨架 | registry/executor 在，但同步阻塞、无 run_in_background/resume/TaskOutput |
-| S8 MCP | ❌ 缺失（13 §9 确认） | 无 mcp 路由 |
+| S7 子代理 fork-join | ❌ 待重建 | R1 T4 摘掉半成品,Task/TaskOutput 未建 |
+| S8 MCP | ✅ 完成（R2 T9） | `mcp_servers` 表 + stdio/http client + `mcp__server__tool` 注册 + 审批默认开 |
 | 记忆系统 | ✅ 超预期 | DB + sqlite-vec + FTS5 + query rewriting 混合检索（13：比 Alma 05 P0 还完整） |
-| compact | ✅ 超预期 | in-loop proactive/reactive + session_compactions 持久化，两级 |
+| compact | ✅ 超预期 | in-loop proactive/reactive + session_compactions 持久化（R2 T8 起摘要用 tool 槽位模型） |
 
-**结论：Eva 不在 11 篇的起点，而在 Phase A 中段。剩余关键路径：`S1 收尾 → S1.1 → S2 → S3 → S4 补齐 → S6 → S9`。**
+> **改因（R2 T10）**：进度按 R1+R2 实际完成情况重算。S8（MCP）提前到 S6/S7 之前的理由
+> 见 `docs/plans/r2/00-overview.md` §2.1。
+
+**结论：Eva 完成 Phase A（S3/S4 主链）。剩余关键路径：`S6 → S9 → S7 → S11`。**
 
 ---
 
@@ -317,33 +320,26 @@
 
 ## 8. 依赖图与下一步
 
+> **改因（R2 T10）**：R1（S1/S1.1/S2/S4 主体）+ R2 已把 Phase A 收完，S8 提前落地（见
+> `docs/plans/r2/00-overview.md` §2.1）。下面的图反映实际完成情况。
+
 ```
-已完成：S0 ✅   S1(harness) ⚙️   S5 ✅
-                 │
-S1 收尾(SSE+abort) ──> S1.1(三红线+目录重构)
-                 │
-                 └─> S2(存储+版本树+Session/Run) ──> S3(工作区) ──> S4(审批补齐)
-                                      │
-                                      ├─> S6(扩展宿主) ──> S9(Git面板=S6验收)
-                                      │       │
-                                      ├─> S7(fork-join, 复用 shared/streaming)
-                                      │       │
-                                      └─> S8(MCP, 接 S6 mcp 槽)
+已完成：S0 ⚙️ S1 ⚙️ S1.1 ⚙️ S2 ⚙️ S3 ⚙️ S4(主体) ⚙️ S5 ⚙️ S8 ⚙️ 记忆 ⚙️ compact
+   │                    │
+   ├─> S6(扩展宿主) ──> S9(Git面板=S6验收)
+   │       │
+   ├─> S7(fork-join, 复用 shared/streaming 与 tool 槽位)
 
 S11(桌面化) 可与 B/C 后期并行；S10 独立；S12–S17 全独立按需
 ```
 
-**关键路径**（从现在起的最短通路）：
+**关键路径**（从现在起最短通路）：
 
 ```
-S1 收尾 → S1.1 → S2 → S3 → S4 补齐 → S6 → S9
+S6 → S9 → S7 → S11
 ```
 
-**立即行动（下一步就是 S1 收尾）**：
-1. `pnpm typecheck && pnpm test` 确认 harness 迁移无残留；
-2. 在 `packages/shared` 定义 SSE 事件契约（AI SDK chunk 命名 + Eva 自有域）；
-3. `runs.ts` 切换到直转 SDK chunk + run 级 AbortController；
-4. 同 PR 或紧随重写前端流式管线（三红线进 `shared/streaming/`）。
+**下一步（S6 扩展宿主）**：见 09 全篇 + `docs/plans/r2/00-overview.md` §5。
 
 ---
 

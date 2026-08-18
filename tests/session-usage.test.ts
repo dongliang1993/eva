@@ -29,7 +29,7 @@ const config = loadConfig({ env: {}, cwd: "/tmp" });
 describe("readSessionUsage", () => {
   it("累加三条 run 的用量,再算一条 running(无 usage)", () => {
     const sessionRepo = new DrizzleSessionRepository(db);
-    sessionRepo.create({ id: "s-u", sessionKey: "k" });
+    sessionRepo.create({ id: "s-u" });
 
     // started_at 是秒粒度,手动指定逐渐递增的 ISO 时间保证 lastRun 顺序确定。
     const sqlite = (db as unknown as { $client: import("better-sqlite3").Database }).$client;
@@ -60,7 +60,7 @@ describe("readSessionUsage", () => {
 
   it("chat 槽位未解析时 contextWindow 为 null(不抛)", () => {
     const sessionRepo = new DrizzleSessionRepository(db);
-    sessionRepo.create({ id: "s-empty", sessionKey: "k" });
+    sessionRepo.create({ id: "s-empty" });
 
     const sessionService = new SessionService(sessionRepo, new DrizzleMessageRepository(db));
     const result = readSessionUsage(db, config, sessionService, "s-empty");
@@ -73,7 +73,7 @@ describe("readSessionUsage", () => {
 
   it("有消息时 contextTokens 随历史增长", () => {
     const sessionRepo = new DrizzleSessionRepository(db);
-    sessionRepo.create({ id: "s-msg", sessionKey: "k" });
+    sessionRepo.create({ id: "s-msg" });
     const messageRepo = new DrizzleMessageRepository(db);
 
     messageRepo.create({

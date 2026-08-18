@@ -9,7 +9,7 @@ export interface AgentModelOptions {
   apiKey: string;
   baseURL?: string;
   model: string;
-  temperature?: number;
+  // 注意:temperature 不在这里 —— 它是 AI SDK 的 call setting,走 AgentCallSettings 透传。
 }
 
 // 工厂:根据 provider 类型构造 LanguageModel。具体实现见 anthropic.ts /

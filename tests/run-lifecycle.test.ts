@@ -191,7 +191,6 @@ describe("run 台账", () => {
     // 先建一个真实 session 满足外键,再塞一行 running(模拟崩溃残留)
     new DrizzleSessionRepository(db).create({
       id: "session-x",
-      sessionKey: "stale-session"
     });
     sqlite.prepare(
       `INSERT INTO runs (id, session_id, status, model, started_at) VALUES (?, ?, 'running', 'openai:test', datetime('now'))`

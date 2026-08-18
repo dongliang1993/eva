@@ -24,7 +24,7 @@ afterEach(() => {
 /** 建一个会话 + N 条 user 消息(足够触发 compactMessageCount)。 */
 const seedSessionWithMessages = (sessionId: string, count: number): void => {
   const sessionRepo = new DrizzleSessionRepository(db);
-  sessionRepo.create({ id: sessionId, sessionKey: sessionId });
+  sessionRepo.create({ id: sessionId });
   const messageRepo = new DrizzleMessageRepository(db);
   for (let i = 0; i < count; i += 1) {
     messageRepo.create({

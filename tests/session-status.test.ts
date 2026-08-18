@@ -50,7 +50,7 @@ describe("readSessionRuntimeStatus", () => {
 
   it("空闲会话 → idle,activeRunId null", () => {
     const sessionRepo = new DrizzleSessionRepository(db);
-    const session = sessionRepo.create({ id: "s-1", sessionKey: "k" });
+    const session = sessionRepo.create({ id: "s-1" });
     const approvals = new ApprovalGateway(new ApprovalRepository(db));
 
     const status = readSessionRuntimeStatus(db, approvals, session.id);
@@ -74,7 +74,7 @@ describe("readSessionRuntimeStatus", () => {
   });
 
   it("有 running run → running 且 activeRunId 指向它", () => {
-    new DrizzleSessionRepository(db).create({ id: "s-2", sessionKey: "k2" });
+    new DrizzleSessionRepository(db).create({ id: "s-2" });
     new DrizzleRunRepository(db).start({
       id: "r-2",
       sessionId: "s-2",

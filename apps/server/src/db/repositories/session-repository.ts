@@ -10,7 +10,6 @@ export class DrizzleSessionRepository implements ISessionRepository {
   create(input: CreateSessionInput): Session {
     const values = {
       id: input.id,
-      sessionKey: input.sessionKey,
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.origin !== undefined ? { origin: input.origin } : {}),
       ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {})
@@ -38,16 +37,7 @@ export class DrizzleSessionRepository implements ISessionRepository {
       .all();
   }
 
-  findBySessionKey(sessionKey: string): Session | undefined {
-    return this.db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.sessionKey, sessionKey))
-      .orderBy(desc(sessions.updatedAt))
-      .limit(1)
-      .get();
-  }
-
+  
   updateTimestamp(id: string): void {
     this.db
       .update(sessions)

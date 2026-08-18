@@ -327,7 +327,7 @@ const LOADING_HTML = `data:text/html;charset=utf-8,${encodeURIComponent(`
 <body>
   <div class="container">
     <div class="spinner"></div>
-    <h1>Work MI</h1>
+    <h1>Eva</h1>
     <p>Starting server...</p>
   </div>
 </body>
@@ -404,7 +404,7 @@ ipcMain.handle("dialog:pick-directory", async (): Promise<string | null> => {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(async () => {
-  console.log("[app] Starting Work MI Desktop...");
+  console.log("[app] Starting Eva Desktop...");
   console.log(`[app] isDev: ${isDev}`);
   console.log(`[app] platform: ${process.platform}`);
 

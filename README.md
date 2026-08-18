@@ -49,7 +49,7 @@ The harness (`packages/harness`) drives the tool loop with `streamText({ stopWhe
 ## Quick Start
 
 ```bash
-cp .env.example .env.local   # set TARGET_REPO_ROOT to a project dir for fs tools
+cp .env.example .env.local
 pnpm install
 pnpm typecheck
 pnpm test
@@ -58,7 +58,7 @@ pnpm web:dev                 # web (Vite) only
 pnpm desktop:dev             # Electron shell + server + web
 ```
 
-Configure an LLM provider + API key + default model in the Settings page (stored in `~/.eva/eva.db`). Model config does not go through env vars.
+Configure an LLM provider + API key + model slots in the Settings page (stored in `~/.eva/eva.db`). Model and workspace config do not go through env vars — workspaces are added in-app.
 
 ## Core Environment Variables
 
@@ -69,10 +69,9 @@ Loaded from `.env.local` (gitignored) at the workspace root:
 | `HOST` | API bind host — use `127.0.0.1` (do NOT use `0.0.0.0`, exposes to LAN) |
 | `PORT` | API port (default 8082) |
 | `LOG_LEVEL` | pino log level (default info) |
-| `TARGET_REPO_ROOT` | Work root for fs tools (read/write/edit/bash/grep/list). Must be an explicit project dir; empty = no fs tools; `$HOME`/`/` rejected. |
 | `DB_PATH` | SQLite DB path (default `~/.eva/eva.db`) |
 
-> Model config (providers, API keys, default model, temperature) lives in the `providers` table in SQLite, managed via the Settings page — not env vars.
+> Model config (providers, API keys, model slots) lives in the `providers` table in SQLite, managed via the Settings page — not env vars. Workspaces are the in-app equivalent of the old `TARGET_REPO_ROOT`.
 
 ## API Endpoints
 
@@ -82,10 +81,16 @@ Loaded from `.env.local` (gitignored) at the workspace root:
 - `GET/POST /api/v1/threads` — session/thread CRUD
 - `GET /api/v1/threads/:id/messages` — thread messages (UIMessage[])
 - `POST /api/v1/threads/:id/compact` — manual compaction
+- `GET /api/v1/threads/:id/status` — session runtime status (idle/running/requires_action)
+- `GET /api/v1/threads/:id/usage` — session context/token usage
+- `PUT /api/v1/threads/:id/workspace` — bind/unbind workspace
+- `GET/POST/PUT/DELETE /api/v1/workspaces` — workspace management
 - `GET/POST /api/v1/providers` — LLM provider management
+- `GET /api/v1/provider-catalog` — static provider specs (no secrets)
+- `GET/POST/PUT/DELETE /api/v1/mcp-servers` — MCP server management
 - `GET/POST /api/v1/memories` — long-term memory CRUD + search
 - `GET /api/v1/skills` — skill list
-- `GET/PUT /api/v1/settings` — app settings
+- `GET/PUT /api/v1/settings` — app settings (model slots)
 - `GET/POST /api/v1/tool-approvals` — dangerous-tool approval gate
 - `GET /api/v1/search/threads` — full-text thread search
 
@@ -99,18 +104,18 @@ Based on `docs/architecture/11-landing-plan.md`, calibrated to eva's current sta
 | A | **S1** Talking shell — migrate harness LangChain→Vercel AI SDK + Anthropic; SSE chunk forwarding | ✅ Done (r1/T0–T2) | streaming text, no stutter; `@ai-sdk/anthropic` provider |
 | A | **S1.1** Frontend streaming three-red-lines (seq reorder / rAF char pump / Streamdown block memo) | ✅ Done (r1/T3) | no stutter on token burst; only tail block re-renders |
 | A | **S2** Storage + version tree (UIMessage whole-store + parent/slot/depth) | 🟡 Data done (r1/T1), UI next | restart keeps history; regenerate → switchable versions |
-| A | **S3** Project workspace (workspaces table + import repo + CLAUDE.md injection) | ⬜ | import a repo; agent cwd = workspace.path |
-| A | **S4** Tools + agent loop + approval (Read/Write/Edit/Bash + tool-overflow + approval gate) | ✅ Done (r1/T0.3/T0.4) | "create hello.txt with a poem" → created; Bash/Write approved first |
+| A | **S3** Project workspace (workspaces table + import repo + CLAUDE.md injection) | ✅ Done (r2/T6) | add a local repo in UI; agent cwd = workspace.path; CLAUDE.md injected |
+| A | **S4** Tools + agent loop + approval | ✅ Done (r1/T0.3/T0.4 + r2/T5) | approval owned by run; cancel instantly rejects a pending approval |
 | B | **S5** Skill mechanism (SKILL.md 3-level progressive disclosure) | ✅ Mostly done | write a skill → agent loads full text on demand |
-| B | **S6** Extension host + slots (manifest/exposes.json + EH + 4 UI slots + agentPlugin) | ⬜ | hello-ext renders in appSidebar; agent calls its tool |
+| B | **S6** Extension host + slots (manifest/exposes.json + EH + 4 UI slots + agentPlugin) | ⬜ | manifest/exposes; hello-ext renders in appSidebar |
 | B | **S7** Subagents + fork-join (Task/TaskOutput + background + resume + depth limit) | ⬜ | fork 3 background agents, join all; subagent uses toolModel |
-| B | **S8** MCP integration (mcp.json + `mcp__server__tool` dynamic registration) | ⬜ | connect an MCP server; agent calls its tool |
+| B | **S8** MCP integration (`mcp_servers` + `mcp__server__tool`) | ✅ Done (r2/T9) | connect an MCP server; agent calls `mcp__filesystem__...` |
 | C | **S9** Git review panel (diff/commit/push/worktree/MR as an extension) | ⬜ | view diff; commit+push+open MR (= S6 acceptance extension) |
 | C | **S10** Datasource Gateway abstraction (database RPC + external HTTP proxy + AK/SK) | ⬜ | register external datasource; agent queries via Gateway |
 | D | **S11** Desktop polish (electron-updater + tray + global shortcut + deep link + single instance) | ⬜ | dmg installs; Alt+Space唤起; `eva://` deep link |
 | E | **S12–S17** Flavor (memory/persona/heartbeat/activity-recorder/multi-channel/voice) | ⬜ | optional, orthogonal to coding platform |
 
-Critical path: **S1 → S2 → S3 → S4 → S6 → S9**. See `docs/architecture/11-landing-plan.md` §8 for the full dependency graph.
+Critical path: **S6 → S9 → S7 → S11**. See `docs/architecture/15-eva-execution-playbook.md` §8 for the full dependency graph.
 
 ## Notes
 

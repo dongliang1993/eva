@@ -4,7 +4,6 @@ import { convertToModelMessages, type ModelMessage } from "ai";
 import type { RequestApproval } from "@eva/harness";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type {
-  EvaUIMessage,
   RunStreamEvent,
   RunStreamFrame,
   StreamFinishReason,
@@ -345,6 +344,3 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     return { ok: true };
   });
 };
-
-// 保留 EvaUIMessage 类型引用供未来 run 台账查询接口复用。
-export type { EvaUIMessage };
