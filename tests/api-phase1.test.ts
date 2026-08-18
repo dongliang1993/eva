@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "../apps/server/node_modules/fastify/fastify.js";
 import type { FastifyInstance } from "../apps/server/node_modules/fastify";
 
+import { createUserUIMessage, uiMessageText } from "../packages/shared/src/index.js";
 import { loadConfig } from "../apps/server/src/config.js";
 import {
   closeDb,
@@ -168,10 +169,8 @@ describe("Phase 1 API routes", () => {
     });
 
     messageRepo.create({
-      id: randomUUID(),
       sessionId: session.id,
-      role: "user",
-      content: "hello"
+      message: createUserUIMessage(randomUUID(), "hello")
     });
 
     const threadsResponse = await app.inject({
@@ -201,10 +200,10 @@ describe("Phase 1 API routes", () => {
 
     expect(messagesResponse.statusCode).toBe(200);
 
-    const messages = messagesResponse.json() as Array<{ content: string }>;
+    const messages = messagesResponse.json() as Array<{ message: { parts: Array<{ type: string; text?: string }> } }>;
 
     expect(Array.isArray(messages)).toBe(true);
-    expect(messages[0]!.content).toBe("hello");
+    expect(uiMessageText(messages[0]!.message)).toBe("hello");
   });
 
   it("returns direct memory arrays with thread-oriented fields", async () => {

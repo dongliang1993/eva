@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "../apps/server/node_modules/fastify/fastify.js";
 import type { FastifyInstance } from "../apps/server/node_modules/fastify";
 
+import { createUserUIMessage, uiMessageText } from "../packages/shared/src/index.js";
+import type { EvaUIMessage } from "../packages/shared/src/index.js";
 import { loadConfig } from "../apps/server/src/config.js";
 import {
   closeDb,
@@ -19,6 +21,11 @@ import { registerMemoryRoutes } from "../apps/server/src/routes/memories.js";
 import { registerSearchRoutes } from "../apps/server/src/routes/search.js";
 import { registerSkillRoutes } from "../apps/server/src/routes/skills.js";
 import { registerThreadRoutes } from "../apps/server/src/routes/threads.js";
+
+const textMessage = (role: "user" | "assistant", text: string): EvaUIMessage =>
+  role === "user"
+    ? createUserUIMessage(randomUUID(), text)
+    : { id: randomUUID(), role: "assistant", parts: [{ type: "text", text, state: "done" }] };
 
 let app: FastifyInstance;
 let db: AppDatabase;
@@ -69,11 +76,8 @@ describe("Phase 4 API routes", () => {
     });
 
     messageRepo.create({
-      id: randomUUID(),
       sessionId: thread.id,
-      role: "user",
-      content: "React component crash",
-      searchText: "React component crash"
+      message: textMessage("user", "React component crash")
     });
 
     const response = await app.inject({
@@ -156,7 +160,7 @@ describe("Phase 4 API routes", () => {
       title: "Long conversation"
     });
 
-    const contents = [
+    const contents: ReadonlyArray<["user" | "assistant", string]> = [
       ["user", "First user request"],
       ["assistant", "First assistant reply"],
       ["user", "Second user request"],
@@ -169,15 +173,12 @@ describe("Phase 4 API routes", () => {
       ["assistant", "Fifth assistant reply"],
       ["user", "Sixth user request"],
       ["assistant", "Sixth assistant reply"]
-    ] as const;
+    ];
 
     for (const [role, content] of contents) {
       messageRepo.create({
-        id: randomUUID(),
         sessionId: thread.id,
-        role,
-        content,
-        searchText: content
+        message: textMessage(role, content)
       });
     }
 
@@ -211,12 +212,11 @@ describe("Phase 4 API routes", () => {
 
     const compactedMessages = messagesResponse.json() as Array<{
       role: string;
-      content: string;
-      metadata: string;
+      message: EvaUIMessage;
     }>;
 
     expect(compactedMessages).toHaveLength(12);
-    expect(compactedMessages.map((message) => message.content)).toEqual([
+    expect(compactedMessages.map((message) => uiMessageText(message.message))).toEqual([
       "First user request",
       "First assistant reply",
       "Second user request",
@@ -237,13 +237,9 @@ describe("Phase 4 API routes", () => {
     );
     const modelHistory = sessionService.buildModelHistory(db, thread.id);
 
-    expect(modelHistory).toHaveLength(9);
-    expect(modelHistory[0]).toMatchObject({
-      role: "system",
-      content: expect.stringContaining("Conversation summary")
-    });
-    expect(modelHistory[0]!.content).toContain("First user request");
-    expect(modelHistory.slice(1).map((message) => message.content)).toEqual([
+    expect(modelHistory.summary).toContain("Conversation summary");
+    expect(modelHistory.summary).toContain("First user request");
+    expect(modelHistory.messages.map((m) => uiMessageText(m))).toEqual([
       "Third user request",
       "Third assistant reply",
       "Fourth user request",
@@ -266,11 +262,8 @@ describe("Phase 4 API routes", () => {
 
     for (const content of ["One", "Two", "Three"]) {
       messageRepo.create({
-        id: randomUUID(),
         sessionId: thread.id,
-        role: content === "Two" ? "assistant" : "user",
-        content,
-        searchText: content
+        message: textMessage(content === "Two" ? "assistant" : "user", content)
       });
     }
 

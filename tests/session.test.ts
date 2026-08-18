@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 
+import { convertToModelMessages } from "ai";
 import { describe, expect, it, beforeEach } from "vitest";
+
+import {
+  createUserUIMessage,
+  uiMessageText,
+  type EvaUIMessage
+} from "../packages/shared/src/index.js";
 
 import { initDb, migrateDb, type AppDatabase } from "../apps/server/src/db/index.js";
 import { DrizzleSessionRepository } from "../apps/server/src/db/repositories/session-repository.js";
@@ -11,6 +18,17 @@ let db: AppDatabase;
 let sessionRepo: DrizzleSessionRepository;
 let messageRepo: DrizzleMessageRepository;
 let service: SessionService;
+
+const assistantMessage = (
+  parts: EvaUIMessage["parts"]
+): EvaUIMessage => ({
+  id: randomUUID(),
+  role: "assistant",
+  parts
+});
+
+const userMessage = (text: string): EvaUIMessage =>
+  createUserUIMessage(randomUUID(), text);
 
 beforeEach(() => {
   db = initDb({ dbPath: ":memory:" });
@@ -95,18 +113,10 @@ describe("DrizzleMessageRepository", () => {
       sessionKey: "msg-test"
     });
 
+    messageRepo.create({ sessionId: session.id, message: userMessage("Hello") });
     messageRepo.create({
-      id: randomUUID(),
       sessionId: session.id,
-      role: "user",
-      content: "Hello"
-    });
-
-    messageRepo.create({
-      id: randomUUID(),
-      sessionId: session.id,
-      role: "assistant",
-      content: "Hi there"
+      message: assistantMessage([{ type: "text", text: "Hi there", state: "done" }])
     });
 
     const messages = messageRepo.findBySessionId(session.id);
@@ -114,6 +124,7 @@ describe("DrizzleMessageRepository", () => {
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("user");
     expect(messages[1]!.role).toBe("assistant");
+    expect(uiMessageText(messages[1]!.message)).toBe("Hi there");
   });
 
   it("respects limit", () => {
@@ -123,12 +134,7 @@ describe("DrizzleMessageRepository", () => {
     });
 
     for (let i = 0; i < 5; i++) {
-      messageRepo.create({
-        id: randomUUID(),
-        sessionId: session.id,
-        role: "user",
-        content: `Message ${i}`
-      });
+      messageRepo.create({ sessionId: session.id, message: userMessage(`Message ${i}`) });
     }
 
     const messages = messageRepo.findBySessionId(session.id, { limit: 3 });
@@ -142,18 +148,28 @@ describe("DrizzleMessageRepository", () => {
       sessionKey: "cascade-test"
     });
 
-    messageRepo.create({
-      id: randomUUID(),
-      sessionId: session.id,
-      role: "user",
-      content: "Will be deleted"
-    });
+    messageRepo.create({ sessionId: session.id, message: userMessage("Will be deleted") });
 
     sessionRepo.deleteById(session.id);
 
     const messages = messageRepo.findBySessionId(session.id);
 
     expect(messages).toHaveLength(0);
+  });
+
+  it("findLastBySessionId returns the most recent message", () => {
+    const session = sessionRepo.create({
+      id: randomUUID(),
+      sessionKey: "last-test"
+    });
+
+    messageRepo.create({ sessionId: session.id, message: userMessage("first") });
+    messageRepo.create({ sessionId: session.id, message: userMessage("second") });
+
+    const last = messageRepo.findLastBySessionId(session.id);
+
+    expect(last).toBeDefined();
+    expect(uiMessageText(last!.message)).toBe("second");
   });
 });
 
@@ -163,130 +179,193 @@ describe("DrizzleMessageRepository", () => {
 
 describe("SessionService", () => {
   it("creates a new session", () => {
-    const result = service.createSession("Hello bot");
+    const result = service.createSession(userMessage("Hello bot"));
 
     expect(result.isNew).toBe(true);
     expect(result.session.title).toBe("Hello bot");
-    expect(result.history).toHaveLength(1);
-    expect(result.history[0]!.role).toBe("user");
-    expect(result.history[0]!.content).toBe("Hello bot");
+    expect(result.userMessage.role).toBe("user");
+    expect(uiMessageText(result.userMessage.message)).toBe("Hello bot");
   });
 
   it("continues an existing session by id", () => {
-    const first = service.createSession("First message");
+    const first = service.createSession(userMessage("First message"));
 
-    service.recordAssistantResult(first.session.id, {
-      text: "Bot reply",
-      toolCalls: []
-    });
+    service.recordAssistantMessage(
+      first.session.id,
+      assistantMessage([{ type: "text", text: "Bot reply", state: "done" }])
+    );
 
-    const second = service.continueSession(first.session.id, "Second message");
+    const second = service.continueSession(first.session.id, userMessage("Second message"));
 
     expect(second).toBeDefined();
     expect(second!.isNew).toBe(false);
     expect(second!.session.id).toBe(first.session.id);
-    expect(second!.history).toHaveLength(3);
-    expect(second!.history[0]!.content).toBe("First message");
-    expect(second!.history[1]!.content).toBe("Bot reply");
-    expect(second!.history[2]!.content).toBe("Second message");
+
+    const history = service.buildModelHistory(db, first.session.id);
+    expect(history.messages).toHaveLength(3);
+    expect(uiMessageText(history.messages[0]!)).toBe("First message");
+    expect(uiMessageText(history.messages[1]!)).toBe("Bot reply");
+    expect(uiMessageText(history.messages[2]!)).toBe("Second message");
   });
 
   it("returns undefined for unknown session id", () => {
-    expect(service.continueSession("nonexistent", "Hi")).toBeUndefined();
+    expect(service.continueSession("nonexistent", userMessage("Hi"))).toBeUndefined();
   });
 
   it("resolves by key (IM scenario)", () => {
-    const first = service.resolveByKey("thread:abc", "First");
+    const first = service.resolveByKey("thread:abc", userMessage("First"));
 
     expect(first.isNew).toBe(true);
 
-    service.recordAssistantResult(first.session.id, {
-      text: "Reply",
-      toolCalls: []
-    });
+    service.recordAssistantMessage(
+      first.session.id,
+      assistantMessage([{ type: "text", text: "Reply", state: "done" }])
+    );
 
-    const second = service.resolveByKey("thread:abc", "Second");
+    const second = service.resolveByKey("thread:abc", userMessage("Second"));
 
     expect(second.isNew).toBe(false);
     expect(second.session.id).toBe(first.session.id);
-    expect(second.history).toHaveLength(3);
+
+    const history = service.buildModelHistory(db, first.session.id);
+    expect(history.messages).toHaveLength(3);
   });
 
-  it("records assistant result with tool calls as structured content", () => {
-    const { session } = service.createSession("Analyze issue");
+  it("records assistant message with tool calls as dynamic-tool parts", () => {
+    const { session } = service.createSession(userMessage("Analyze issue"));
 
-    service.recordAssistantResult(session.id, {
-      text: "Found the bug",
-      toolCalls: [
+    service.recordAssistantMessage(
+      session.id,
+      assistantMessage([
         {
+          type: "dynamic-tool",
           toolName: "sentry_analyze_issue",
           toolCallId: "tc-1",
-          args: { issueId: "123" },
-          output: "NullPointerException at line 42",
-          status: "success"
-        }
-      ]
-    });
+          state: "output-available",
+          input: { issueId: "123" },
+          output: "NullPointerException at line 42"
+        },
+        { type: "text", text: "Found the bug", state: "done" }
+      ])
+    );
 
     const messages = messageRepo.findBySessionId(session.id);
     const assistantMsg = messages.find((m) => m.role === "assistant")!;
-    const parsed = JSON.parse(assistantMsg.content);
+    const toolPart = assistantMsg.message.parts.find((p) => p.type === "dynamic-tool")!;
 
-    expect(parsed).toHaveLength(3);
-    expect(parsed[0].type).toBe("tool_use");
-    expect(parsed[0].toolName).toBe("sentry_analyze_issue");
-    expect(parsed[1].type).toBe("tool_result");
-    expect(parsed[1].output).toBe("NullPointerException at line 42");
-    expect(parsed[2].type).toBe("text");
-    expect(parsed[2].text).toBe("Found the bug");
+    expect(toolPart).toBeDefined();
+    expect(toolPart.type).toBe("dynamic-tool");
+    if (toolPart.type === "dynamic-tool") {
+      expect(toolPart.toolName).toBe("sentry_analyze_issue");
+      expect(toolPart.state).toBe("output-available");
+      expect(toolPart.output).toBe("NullPointerException at line 42");
+    }
+    expect(uiMessageText(assistantMsg.message)).toBe("Found the bug");
   });
 
-  it("strips tool markers from flattened history for agent", () => {
-    const { session } = service.createSession("Analyze");
+  it("模型历史保留上一轮的工具轨迹", async () => {
+    const { session } = service.createSession(userMessage("读一下 a.ts"));
 
-    service.recordAssistantResult(session.id, {
-      text: "Done",
-      toolCalls: [
-        {
-          toolName: "web_search",
-          toolCallId: "tc-2",
-          args: { query: "test" },
-          output: "Search results here",
-          status: "success"
-        }
-      ]
-    });
-
-    const continued = service.continueSession(session.id, "Follow up")!;
-    const assistantHistory = continued.history.find((m) => m.role === "assistant")!;
-
-    expect(assistantHistory.content).toBe("Done");
-    expect(assistantHistory.content).not.toContain("[Called tool: web_search]");
-    expect(assistantHistory.content).not.toContain("[Tool web_search success:");
-  });
-
-  it("records assistant message with token usage", () => {
-    const { session } = service.createSession("Hi");
-    const tokenUsage = JSON.stringify({ promptTokens: 10, completionTokens: 5 });
-
-    const msg = service.recordAssistantResult(
+    service.recordAssistantMessage(
       session.id,
-      { text: "Response", toolCalls: [] },
-      tokenUsage
+      assistantMessage([
+        {
+          type: "dynamic-tool",
+          toolName: "read_file",
+          toolCallId: "tc-1",
+          state: "output-available",
+          input: { path: "a.ts" },
+          output: "export const x = 1;"
+        },
+        { type: "text", text: "读到了", state: "done" }
+      ])
     );
 
-    expect(msg.tokenUsage).toBe(tokenUsage);
+    const history = service.buildModelHistory(db, session.id);
+    const modelMessages = await convertToModelMessages([...history.messages], {
+      ignoreIncompleteToolCalls: true
+    });
+
+    // 关键:必须出现一条 role === "tool" 的消息,且里面有工具输出
+    expect(modelMessages.some((m) => m.role === "tool")).toBe(true);
+    expect(JSON.stringify(modelMessages)).toContain("export const x = 1;");
+  });
+
+  it("被 abort 的消息(工具没有结果)不会让历史转换失败", async () => {
+    const { session } = service.createSession(userMessage("做点事"));
+
+    service.recordAssistantMessage(
+      session.id,
+      assistantMessage([
+        {
+          type: "dynamic-tool",
+          toolName: "write_file",
+          toolCallId: "tc-2",
+          state: "input-available",
+          input: { path: "a.ts" }
+        }
+      ])
+    );
+
+    const history = service.buildModelHistory(db, session.id);
+
+    // ignoreIncompleteToolCalls 下不抛,且结果里没有孤儿 tool-call
+    const modelMessages = await convertToModelMessages([...history.messages], {
+      ignoreIncompleteToolCalls: true
+    });
+
+    expect(modelMessages.some((m) => m.role === "tool")).toBe(false);
+  });
+
+  it("records assistant message with usage metadata", () => {
+    const { session } = service.createSession(userMessage("Hi"));
+
+    const msg = service.recordAssistantMessage(
+      session.id,
+      {
+        ...assistantMessage([{ type: "text", text: "Response", state: "done" }]),
+        metadata: { usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } }
+      }
+    );
+
+    expect(msg.message.metadata?.usage).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15
+    });
   });
 
   it("keeps different sessions isolated", () => {
-    const a = service.createSession("Message A");
-    const b = service.createSession("Message B");
+    const a = service.createSession(userMessage("Message A"));
+    const b = service.createSession(userMessage("Message B"));
 
-    const a2 = service.continueSession(a.session.id, "Follow up A")!;
-    const b2 = service.continueSession(b.session.id, "Follow up B")!;
+    const a2 = service.continueSession(a.session.id, userMessage("Follow up A"))!;
+    const b2 = service.continueSession(b.session.id, userMessage("Follow up B"))!;
 
     expect(a2.session.id).not.toBe(b2.session.id);
-    expect(a2.history).toHaveLength(2);
-    expect(b2.history).toHaveLength(2);
+
+    const aHistory = service.buildModelHistory(db, a.session.id);
+    const bHistory = service.buildModelHistory(db, b.session.id);
+    expect(aHistory.messages).toHaveLength(2);
+    expect(bHistory.messages).toHaveLength(2);
+  });
+
+  it("版本树三件套按线性链写入", () => {
+    const { session } = service.createSession(userMessage("first"));
+    const first = messageRepo.findLastBySessionId(session.id)!;
+
+    service.recordAssistantMessage(
+      session.id,
+      assistantMessage([{ type: "text", text: "reply", state: "done" }])
+    );
+    const second = messageRepo.findLastBySessionId(session.id)!;
+
+    expect(first.parentId).toBeNull();
+    expect(first.depth).toBe(0);
+    expect(second.parentId).toBe(first.id);
+    expect(second.depth).toBe(1);
+    expect(first.slotId).toBeDefined();
+    expect(second.slotId).toBeDefined();
+    expect(first.slotId).not.toBe(second.slotId);
   });
 });

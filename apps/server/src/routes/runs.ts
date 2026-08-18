@@ -1,21 +1,32 @@
 import { randomUUID } from "node:crypto";
 
-import type { ModelMessage } from "ai";
+import { convertToModelMessages, type ModelMessage } from "ai";
 import type { RequestApproval } from "@eva/harness";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import type { RunStreamEvent, RunStreamFrame, StreamFinishReason } from "@eva/shared";
-import { toErrorMessage } from "@eva/shared";
+import type {
+  EvaUIMessage,
+  RunStreamEvent,
+  RunStreamFrame,
+  StreamFinishReason,
+  StreamTokenUsage
+} from "@eva/shared";
+import {
+  UiMessageBuilder,
+  createUserUIMessage,
+  toErrorMessage,
+  uiMessageText
+} from "@eva/shared";
 
 import {
   AgentUnavailableError,
   type ResolvedRuntimeModelBinding
 } from "../agent.js";
+import { DrizzleRunRepository, runStatusFor } from "../db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
 import { autoCompactIfNeeded, createAutoCompactConfig } from "../services/auto-compact.js";
 import { buildMemoryRuntimeSupport } from "../services/memory-runtime.js";
 import { loadAppSettings } from "../services/settings-store.js";
-import { runSchema } from "../types/runs.js";
-import type { RunInput, RunInputMessage, RunMessageContent } from "../types/runs.js";
+import { runRequestSchema, type RunRequest } from "../types/runs.js";
 
 const formatSseFrame = (event: string, data: unknown): string =>
   `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -24,161 +35,85 @@ const writeFrame = (reply: FastifyReply, frame: RunStreamFrame): void => {
   reply.raw.write(formatSseFrame(frame.type, frame));
 };
 
-// Normalize legacy LangChain roles (human/ai/function/generic/remove) and the
-// generic "developer" role down to the four Vercel ModelMessage roles.
-const normalizeRole = (role: RunInputMessage["role"]): ModelMessage["role"] => {
-  switch (role) {
-    case "human":
-      return "user";
-    case "ai":
-    case "function":
-    case "generic":
-    case "remove":
-      return "assistant";
-    case "developer":
-      return "system";
-    default:
-      return role;
-  }
-};
-
-const toAgentMessage = ({
-  role,
-  content
-}: RunInputMessage): ModelMessage => ({
-  role: normalizeRole(role),
-  content: content as RunMessageContent
-} as ModelMessage);
-
-const toAgentRunInput = (input: RunInput) => ({
-  messages: input.messages.map(toAgentMessage),
-  ...(input.context !== undefined ? { context: input.context } : {}),
-  ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
-  ...(input.additionalTools !== undefined ? { additionalTools: input.additionalTools } : {}),
-  ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {})
-});
+interface PreparedRun {
+  readonly sessionId: string;
+  readonly userMessageId: string;
+  readonly modelMessages: ModelMessage[];
+  readonly additionalTools: readonly import("@eva/harness").AgentTool[];
+  readonly context?: Record<string, unknown>;
+}
 
 /**
- * Extract the last user message content from the request body.
+ * 落库用户消息 → 必要时 compact → 组装模型可见的消息序列。
  */
-const extractUserContent = (
-  body: ReturnType<typeof runSchema.parse>
-): string => {
-  const lastMessage = body.messages[body.messages.length - 1];
-
-  return typeof lastMessage?.content === "string"
-    ? lastMessage.content
-    : JSON.stringify(lastMessage?.content ?? "");
-};
-
-/**
- * Resolve session context:
- * - No sessionId → create new session, return sessionId to client
- * - Has sessionId → continue existing session with history
- *
- * Returns enriched RunInput with model-visible history + the session ID.
- */
-const resolveSessionInput = async (
+const prepareRun = async (
   app: FastifyInstance,
-  body: ReturnType<typeof runSchema.parse>,
+  body: RunRequest,
+  runId: string,
   mainModel: ResolvedRuntimeModelBinding
-): Promise<{ input: RunInput; sessionId: string }> => {
-  const userContent = extractUserContent(body);
+): Promise<PreparedRun> => {
+  const userMessage = createUserUIMessage(randomUUID(), body.text, {
+    runId,
+    model: mainModel.qualifiedModelId
+  });
 
   const resolved = body.sessionId
-    ? app.services.session.continueSession(body.sessionId, userContent)
+    ? app.services.session.continueSession(body.sessionId, userMessage, runId)
     : undefined;
 
-  // If sessionId was provided but not found, or no sessionId → create new
-  const { session, history: rawHistory } = resolved
-    ?? app.services.session.createSession(userContent);
+  // sessionId 传了但查不到 → 当成新会话(旧行为,保持)
+  const { session, userMessage: storedUser } =
+    resolved ?? app.services.session.createSession(userMessage, runId);
 
-  // Auto-compact if context is too large (before building agent messages)
-  const appSettings = loadAppSettings(app.infra.db, app.infra.config);
-  const compactConfig = createAutoCompactConfig(appSettings.chat);
-  autoCompactIfNeeded(
-    app.infra.db, session.id, rawHistory, compactConfig
-  );
+  new DrizzleSessionRepository(app.infra.db)
+    .updateModel(session.id, mainModel.qualifiedModelId);
+
+  const settings = loadAppSettings(app.infra.db, app.infra.config);
+  autoCompactIfNeeded(app.infra.db, session.id, createAutoCompactConfig(settings.chat));
 
   const history = app.services.session.buildModelHistory(app.infra.db, session.id);
 
-  const messages = history.map((m) => ({
-    role: m.role,
-    content: m.content
-  }));
+  // ignoreIncompleteToolCalls:上一轮被 abort 时可能留下没有结果的 tool part,
+  // 带着它去请求模型会被 provider 拒绝(tool_use 必须有配对的 tool_result)。
+  const converted = await convertToModelMessages([...history.messages], {
+    ignoreIncompleteToolCalls: true
+  });
 
-  // Record which model is being used on this session
-  const sessionRepo = new DrizzleSessionRepository(app.infra.db);
-  sessionRepo.updateModel(session.id, mainModel.qualifiedModelId);
+  const modelMessages: ModelMessage[] = history.summary
+    ? [{ role: "system", content: history.summary }, ...converted]
+    : converted;
 
   const memoryRuntime = await buildMemoryRuntimeSupport({
     db: app.infra.db,
     config: app.infra.config,
-    userMessage: userContent,
-    modelHistory: history,
-    ...(body.context !== undefined
-      ? { baseContext: body.context }
-      : {}),
-    ...(
-      mainModel.contextWindow !== undefined
-        || mainModel.maxOutputTokens !== undefined
-        ? {
-          modelLimits: {
-            ...(mainModel.contextWindow !== undefined
-              ? { contextWindow: mainModel.contextWindow }
-              : {}),
-            ...(mainModel.maxOutputTokens !== undefined
-              ? { maxOutputTokens: mainModel.maxOutputTokens }
-              : {})
-          }
+    userMessage: body.text,
+    modelHistory: history.messages.map((m) => ({ content: uiMessageText(m) })),
+    ...(mainModel.contextWindow !== undefined || mainModel.maxOutputTokens !== undefined
+      ? {
+        modelLimits: {
+          ...(mainModel.contextWindow !== undefined
+            ? { contextWindow: mainModel.contextWindow }
+            : {}),
+          ...(mainModel.maxOutputTokens !== undefined
+            ? { maxOutputTokens: mainModel.maxOutputTokens }
+            : {})
         }
-        : {}
-    )
+      }
+      : {})
   });
 
   return {
-    input: {
-      ...body,
-      messages,
-      ...(memoryRuntime.additionalTools.length > 0
-        ? { additionalTools: [...memoryRuntime.additionalTools] }
-        : {}),
-      ...(memoryRuntime.memoryContext
-        ? { context: { ...body.context, memory: memoryRuntime.memoryContext } }
-        : {})
-    },
-    sessionId: session.id
+    sessionId: session.id,
+    userMessageId: storedUser.id,
+    modelMessages,
+    additionalTools: [...memoryRuntime.additionalTools],
+    ...(memoryRuntime.memoryContext
+      ? { context: { memory: memoryRuntime.memoryContext } }
+      : {})
   };
 };
 
 export const registerRunRoutes = (app: FastifyInstance): void => {
-  app.post("/api/v1/runs/wait", async (request, reply) => {
-    try {
-      const body = runSchema.parse(request.body ?? {});
-      const resolved = app.services.agents.resolve({
-        ...(body.modelId !== undefined
-          ? { requestedModelId: body.modelId }
-          : {})
-      });
-      const { input, sessionId } = await resolveSessionInput(app, body, resolved.mainModel);
-
-      const waitStart = Date.now();
-      const result = await resolved.agent.invoke(toAgentRunInput(input));
-      const waitDurationMs = Date.now() - waitStart;
-
-      app.services.session.recordAssistantResult(sessionId, result, undefined, waitDurationMs);
-
-      return { ...result, sessionId };
-    } catch (error) {
-      request.log.error({ err: error }, "failed to execute agent run");
-      reply.code(error instanceof AgentUnavailableError ? 503 : 400);
-
-      return {
-        error: toErrorMessage(error)
-      };
-    }
-  });
-
   app.post("/api/v1/runs/stream", async (request, reply) => {
     const runId = randomUUID();
     const controller = app.services.runRegistry.register(runId);
@@ -207,19 +142,22 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     };
 
     try {
-      const body = runSchema.parse(request.body ?? {});
+      const body = runRequestSchema.parse(request.body ?? {});
       const resolved = app.services.agents.resolve({
-        ...(body.modelId !== undefined
-          ? { requestedModelId: body.modelId }
-          : {}),
+        ...(body.modelId !== undefined ? { requestedModelId: body.modelId } : {}),
         requestApproval
       });
 
-      const { input, sessionId: resolvedSessionId } =
-        await resolveSessionInput(app, body, resolved.mainModel);
-      sessionId = resolvedSessionId;
+      const prepared = await prepareRun(app, body, runId, resolved.mainModel);
+      sessionId = prepared.sessionId;
 
-      input.abortSignal = controller.signal;
+      const runs = new DrizzleRunRepository(app.infra.db);
+      runs.start({
+        id: runId,
+        sessionId,
+        model: resolved.mainModel.qualifiedModelId,
+        userMessageId: prepared.userMessageId
+      });
 
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -243,57 +181,67 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         }
       });
 
-      let resultText = "";
+      const builder = new UiMessageBuilder(randomUUID());
       let finishReason: StreamFinishReason = "stop";
-      let thinkingDurationMs: number | undefined;
-      const streamStart = Date.now();
-      const toolCalls: Array<{
-        toolName: string;
-        toolCallId: string;
-        args: Record<string, unknown>;
-        output: string;
-        status: "success" | "error";
-        durationMs?: number;
-      }> = [];
+      let usage: StreamTokenUsage | undefined;
+      let streamError: string | undefined;
 
-      for await (const event of resolved.agent.stream(toAgentRunInput(input))) {
+      for await (const event of resolved.agent.stream({
+        messages: prepared.modelMessages,
+        abortSignal: controller.signal,
+        ...(prepared.additionalTools.length > 0
+          ? { additionalTools: [...prepared.additionalTools] }
+          : {}),
+        ...(prepared.context !== undefined ? { context: prepared.context } : {})
+      })) {
+        builder.push(event);
         emit(event);
 
-        if (event.type === "text-delta" && thinkingDurationMs === undefined) {
-          thinkingDurationMs = Date.now() - streamStart;
-        }
-
         if (event.type === "finish") {
-          resultText = event.text;
           finishReason = event.finishReason;
-          toolCalls.push(...event.toolCalls.map((tc) => ({
-            toolName: tc.toolName,
-            toolCallId: tc.toolCallId,
-            args: tc.args,
-            output: tc.output,
-            status: tc.status,
-            ...(tc.durationMs !== undefined ? { durationMs: tc.durationMs } : {})
-          })));
+          usage = event.usage;
         }
 
         if (event.type === "error") {
           finishReason = "error";
+          streamError = event.message;
         }
       }
 
-      app.services.session.recordAssistantResult(
+      const assistantMessage = builder.build({
+        runId,
+        model: resolved.mainModel.qualifiedModelId,
+        ...(finishReason === "aborted" ? { aborted: true } : {})
+      });
+
+      // assistantMessage 无论什么终态都落库(含 aborted / error)。丢一半的回复也比
+      // DB 里没痕迹强 —— metadata.aborted 标出来即可。
+      const stored = app.services.session.recordAssistantMessage(
         sessionId,
-        { text: resultText, toolCalls },
-        undefined,
-        thinkingDurationMs,
-        finishReason === "aborted" ? { aborted: true } : undefined
+        assistantMessage,
+        runId
       );
+
+      runs.settle(runId, {
+        status: runStatusFor(finishReason),
+        finishReason,
+        assistantMessageId: stored.id,
+        ...(usage !== undefined ? { usage } : {}),
+        ...(streamError !== undefined ? { error: streamError } : {})
+      });
 
       emit({ type: "end", finishReason });
       finished = true;
       reply.raw.end();
     } catch (error) {
-      request.log.error({ err: error }, "failed to stream agent run");
+      request.log.error({ err: error, runId }, "failed to stream agent run");
+
+      if (sessionId) {
+        new DrizzleRunRepository(app.infra.db).settle(runId, {
+          status: "error",
+          error: toErrorMessage(error)
+        });
+      }
 
       if (!reply.raw.headersSent) {
         reply.code(error instanceof AgentUnavailableError ? 503 : 400);
@@ -316,16 +264,19 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
   app.post("/api/v1/runs/:runId/abort", async (request, reply) => {
     const { runId } = request.params as { runId: string };
-    const sessionId = app.services.runRegistry.abort(runId);
+    const abortedSessionId = app.services.runRegistry.abort(runId);
 
-    if (sessionId === undefined) {
+    if (abortedSessionId === undefined) {
       reply.code(404);
       return { error: "run not found or already finished" };
     }
 
     // 中止时立刻拒绝该会话下 pending 的审批,否则 agent loop 会被吊住
-    app.services.approvals.cancelBySession(sessionId);
+    app.services.approvals.cancelBySession(abortedSessionId);
 
     return { ok: true };
   });
 };
+
+// 保留 EvaUIMessage 类型引用供未来 run 台账查询接口复用。
+export type { EvaUIMessage };
