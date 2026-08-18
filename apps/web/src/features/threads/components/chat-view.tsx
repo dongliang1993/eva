@@ -4,6 +4,7 @@ import type { PendingApproval } from "../api";
 import { MessageList } from "./message-list";
 import { ApprovalCard } from "./approval-card";
 import { ChatInput } from "./chat-input";
+import { ContextUsage } from "./context-usage";
 import { useStickToBottom } from "../hooks/use-stick-to-bottom";
 
 interface ChatViewProps {
@@ -16,6 +17,7 @@ interface ChatViewProps {
   readonly onSelectModel: (modelId: string) => void;
   readonly workspaceId: string | null;
   readonly onSelectWorkspace: (workspaceId: string | null) => void;
+  readonly sessionId: string | null;
   readonly pendingApprovals?: readonly PendingApproval[];
   readonly onApproveOnce?: (callId: string) => void;
   readonly onDeny?: (callId: string) => void;
@@ -32,6 +34,7 @@ export function ChatView({
   onSelectModel,
   workspaceId,
   onSelectWorkspace,
+  sessionId,
   pendingApprovals,
   onApproveOnce,
   onDeny,
@@ -41,6 +44,7 @@ export function ChatView({
 
   return (
     <div className="flex h-full flex-col bg-background">
+      <ContextUsage sessionId={sessionId} />
       <MessageList
         messages={messages}
         streamingMessage={streamingMessage}

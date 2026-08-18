@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { StreamFinishReason, StreamTokenUsage } from "@eva/shared";
 
 import type { AppDatabase } from "../index.js";
@@ -100,6 +100,68 @@ export class DrizzleRunRepository {
       .limit(limit)
       .all()
       .map(toRecord);
+  }
+
+  /** 该会话正在飞的 run(正常只会有 0 或 1 条)。 */
+  findRunningBySessionId(sessionId: string): RunRecord | undefined {
+    return this.db
+      .select()
+      .from(runs)
+      .where(and(eq(runs.sessionId, sessionId), eq(runs.status, "running")))
+      .orderBy(desc(runs.startedAt))
+      .limit(1)
+      .all()
+      .map(toRecord)[0];
+  }
+
+  /** 所有有 run 在飞的会话 id —— 侧栏列表一次查完,避免 N+1。 */
+  listRunningSessionIds(): readonly string[] {
+    return this.db
+      .select({ sessionId: runs.sessionId })
+      .from(runs)
+      .where(eq(runs.status, "running"))
+      .all()
+      .map((row) => row.sessionId);
+  }
+
+  /** 该会话所有 run 的 usage 累加(null usage 跳过)。 */
+  sumUsageBySessionId(sessionId: string): {
+    readonly usage: StreamTokenUsage;
+    readonly runCount: number;
+  } {
+    const rows = this.db
+      .select({ usage: runs.usage })
+      .from(runs)
+      .where(eq(runs.sessionId, sessionId))
+      .all();
+
+    const usage: StreamTokenUsage = {};
+    let runCount = 0;
+
+    for (const row of rows) {
+      runCount += 1;
+      if (!row.usage) continue;
+
+      const parsed = JSON.parse(row.usage) as StreamTokenUsage;
+      usage.inputTokens = (usage.inputTokens ?? 0) + (parsed.inputTokens ?? 0);
+      usage.outputTokens = (usage.outputTokens ?? 0) + (parsed.outputTokens ?? 0);
+      usage.totalTokens = (usage.totalTokens ?? 0) + (parsed.totalTokens ?? 0);
+      usage.reasoningTokens = (usage.reasoningTokens ?? 0) + (parsed.reasoningTokens ?? 0);
+      usage.cachedInputTokens = (usage.cachedInputTokens ?? 0) + (parsed.cachedInputTokens ?? 0);
+    }
+
+    return { usage, runCount };
+  }
+
+  findLastBySessionId(sessionId: string): RunRecord | undefined {
+    return this.db
+      .select()
+      .from(runs)
+      .where(eq(runs.sessionId, sessionId))
+      .orderBy(desc(runs.startedAt))
+      .limit(1)
+      .all()
+      .map(toRecord)[0];
   }
 
   /**

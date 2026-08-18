@@ -27,19 +27,6 @@ export const estimateTokens = (text: string): number => {
 
 export const MESSAGE_OVERHEAD_TOKENS = 4;
 
-/** Estimate total tokens for a list of legacy { content: string } history. */
-export const estimateHistoryTokens = (
-  messages: readonly { content: string }[]
-): number => {
-  let total = 0;
-
-  for (const m of messages) {
-    total += estimateTokens(m.content) + MESSAGE_OVERHEAD_TOKENS;
-  }
-
-  return total;
-};
-
 /**
  * 单条 UIMessage 的 token 估算。
  * 工具入参与输出必须计入 —— T1 之前它们被历史构建整个丢掉了,

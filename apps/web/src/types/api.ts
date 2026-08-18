@@ -19,8 +19,12 @@ export type {
   ProviderModelsPayload,
   Provider,
   ProviderModel,
+  RunStatus,
+  SessionStatus,
   ThreadMessage,
+  ThreadStatus,
   ThreadSummary,
+  ThreadUsage,
   Workspace,
   WorkspaceInput
 } from "@eva/shared";

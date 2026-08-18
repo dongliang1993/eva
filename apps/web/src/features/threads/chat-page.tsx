@@ -157,6 +157,7 @@ export function ChatPage() {
           onSelectModel={setSelectedModel}
           workspaceId={displayWorkspaceId}
           onSelectWorkspace={handleSelectWorkspace}
+          sessionId={sessionId}
           pendingApprovals={approvals.pending}
           onApproveOnce={(callId) => approvals.decide(callId, true)}
           onDeny={(callId) => approvals.decide(callId, false)}

@@ -161,9 +161,7 @@ describe("DrizzleMemoryRepository", () => {
 
   it("computes memory budget from remaining context headroom", () => {
     const budget = calculateMemoryContextTokenBudget({
-      modelHistory: [
-        { content: "A short chat history entry." }
-      ],
+      historyTokens: 120,
       existingContext: {
         incident: "Sentry issue RCA"
       },
@@ -194,9 +192,7 @@ describe("DrizzleMemoryRepository", () => {
       db,
       config,
       userMessage: "Need project guidance for the next RCA reply",
-      modelHistory: [
-        { role: "user", content: "Summarize the latest issue." }
-      ],
+      historyTokens: 60,
       modelLimits: {
         contextWindow: 1_000,
         maxOutputTokens: 500

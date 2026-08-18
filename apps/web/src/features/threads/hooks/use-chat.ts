@@ -111,6 +111,13 @@ export function useChat(handlers: UseChatHandlers = {}): UseChatReturn {
           setStreaming(null);
           setIsStreaming(false);
           runIdRef.current = null;
+
+          // run 结束 → 用量与侧栏状态各刷一次(不在流式中途轮询,避免给 SQLite 加压力)。
+          const currentSessionId = sessionIdRef.current;
+          if (currentSessionId) {
+            queryClient.invalidateQueries({ queryKey: ["thread-usage", currentSessionId] });
+            queryClient.invalidateQueries({ queryKey: ["threads"] });
+          }
         }
       }
     );

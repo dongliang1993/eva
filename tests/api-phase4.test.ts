@@ -16,7 +16,9 @@ import {
 import { DrizzleMemoryRepository } from "../apps/server/src/db/repositories/memory-repository.js";
 import { DrizzleMessageRepository } from "../apps/server/src/db/repositories/message-repository.js";
 import { DrizzleSessionRepository } from "../apps/server/src/db/repositories/session-repository.js";
+import { ApprovalRepository } from "../apps/server/src/db/repositories/approval-repository.js";
 import { SessionService } from "../apps/server/src/services/session.js";
+import { ApprovalGateway } from "../apps/server/src/services/approval-gateway.js";
 import { registerMemoryRoutes } from "../apps/server/src/routes/memories.js";
 import { registerSearchRoutes } from "../apps/server/src/routes/search.js";
 import { registerSkillRoutes } from "../apps/server/src/routes/skills.js";
@@ -37,9 +39,8 @@ beforeEach(async () => {
   app = Fastify();
   app.decorate("infra", {
     config: loadConfig({ env: {}, cwd: "/tmp" }),
-    sentryClient: {} as never,
-    waveClient: undefined,
     db,
+    logger: {} as never,
     skills: [
       {
         name: "memory-management",
@@ -50,7 +51,27 @@ beforeEach(async () => {
       }
     ]
   });
-  app.decorate("services", {} as never);
+  const approvals = new ApprovalGateway(new ApprovalRepository(db));
+  app.decorate("services", {
+    approvals,
+    session: new SessionService(
+      new DrizzleSessionRepository(db),
+      new DrizzleMessageRepository(db)
+    ),
+    agents: {
+      invalidate() {},
+      resolveModels() {
+        throw new Error("chat 模型未配置");
+      }
+    } as never,
+    workspaces: {} as never,
+    runRegistry: {} as never,
+    mcp: {
+      describe() {
+        return [];
+      }
+    } as never
+  } as never);
 
   registerSearchRoutes(app);
   registerMemoryRoutes(app);

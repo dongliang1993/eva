@@ -1,9 +1,11 @@
 import type { AppDatabase } from "../db/index.js";
 import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
-import { compactSession, type CompactResult } from "./compact.js";
+import { compactSession, type CompactResult, type CompactOptions } from "./compact.js";
 import { estimateModelHistoryTokens } from "./token-estimator.js";
 import { SessionService } from "./session.js";
+
+export type { CompactOptions };
 
 const DEFAULT_TOKEN_THRESHOLD = 80_000;
 const DEFAULT_MESSAGE_THRESHOLD = 30;
@@ -41,11 +43,12 @@ export interface AutoCompactResult {
  * The caller should use `buildModelHistory()` after this to get the
  * compacted context view for the agent.
  */
-export const autoCompactIfNeeded = (
+export const autoCompactIfNeeded = async (
   db: AppDatabase,
   sessionId: string,
-  config: AutoCompactConfig
-): AutoCompactResult => {
+  config: AutoCompactConfig,
+  options: { readonly summarize?: CompactOptions["summarize"] } = {}
+): Promise<AutoCompactResult> => {
   if (!config.enabled) {
     return { compacted: false };
   }
@@ -66,10 +69,11 @@ export const autoCompactIfNeeded = (
     return { compacted: false, estimatedTokensBefore: estimatedTokens };
   }
 
-  const compactResult = compactSession(db, {
+  const compactResult = await compactSession(db, {
     sessionId,
     keepRecentMessages: config.keepRecentMessages,
-    trigger: "proactive"
+    trigger: "proactive",
+    ...(options.summarize ? { summarize: options.summarize } : {})
   });
 
   return {

@@ -12,9 +12,12 @@ import {
   migrateDb,
   type AppDatabase
 } from "../apps/server/src/db/index.js";
+import { ApprovalRepository } from "../apps/server/src/db/repositories/approval-repository.js";
 import { DrizzleMemoryRepository } from "../apps/server/src/db/repositories/memory-repository.js";
 import { DrizzleMessageRepository } from "../apps/server/src/db/repositories/message-repository.js";
 import { DrizzleSessionRepository } from "../apps/server/src/db/repositories/session-repository.js";
+import { ApprovalGateway } from "../apps/server/src/services/approval-gateway.js";
+import { SessionService } from "../apps/server/src/services/session.js";
 import { registerHealthRoutes } from "../apps/server/src/routes/health.js";
 import { registerMemoryRoutes } from "../apps/server/src/routes/memories.js";
 import { registerModelRoutes } from "../apps/server/src/routes/models.js";
@@ -32,13 +35,20 @@ beforeEach(async () => {
   app = Fastify();
   app.decorate("infra", {
     config: loadConfig({ env: {}, cwd: "/tmp" }),
-    sentryClient: {} as never,
-    waveClient: undefined,
     db,
+    logger: {} as never,
     skills: []
   });
   app.decorate("services", {
-    agents: { invalidate() { /* no-op in this fixture */ } }
+    approvals: new ApprovalGateway(new ApprovalRepository(db)),
+    session: new SessionService(
+      new DrizzleSessionRepository(db),
+      new DrizzleMessageRepository(db)
+    ),
+    agents: { invalidate() { /* no-op in this fixture */ } },
+    workspaces: {} as never,
+    runRegistry: {} as never,
+    mcp: {} as never
   } as never);
 
   registerHealthRoutes(app);

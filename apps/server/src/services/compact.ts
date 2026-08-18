@@ -10,13 +10,14 @@ import {
   estimateTokens,
   estimateUiMessageTokens
 } from "./token-estimator.js";
+import type { SummarizeMessages } from "./summarize-with-model.js";
 
 const DEFAULT_KEEP_RECENT = 8;
 const MAX_SUMMARY_BULLETS = 4;
 const MAX_SUMMARY_TEXT_LENGTH = 220;
 
 // ---------------------------------------------------------------------------
-// Summary generation (deterministic, no LLM)
+// Deterministic summary (fallback, no LLM)
 // ---------------------------------------------------------------------------
 
 const normalizeSummaryText = (text: string): string => {
@@ -51,7 +52,7 @@ const messageToSummaryText = (message: StoredMessage): string => {
 const estimateStoredTokens = (messages: readonly StoredMessage[]): number =>
   messages.reduce((sum, m) => sum + estimateUiMessageTokens(m.message), 0);
 
-const generateSummaryText = (
+const composeDeterministicSummary = (
   coveredMessages: readonly StoredMessage[],
   existingSummary?: string
 ): string => {
@@ -92,6 +93,27 @@ const generateSummaryText = (
   return lines.join("\n");
 };
 
+/**
+ * 有注入的 summarizer 就用它;抛错就回落确定性拼接 —— 摘要质量可以降级,run 不能挂。
+ * 回落时不在这里 warn —— compact.ts 没有 logger,由 createModelSummarizer 自己先 warn 再抛。
+ */
+const resolveSummary = async (
+  messages: readonly StoredMessage[],
+  previousSummary: string | undefined,
+  summarize: SummarizeMessages | undefined
+): Promise<string> => {
+  if (!summarize) {
+    return composeDeterministicSummary(messages, previousSummary);
+  }
+
+  try {
+    const text = (await summarize(messages, previousSummary)).trim();
+    return text || composeDeterministicSummary(messages, previousSummary);
+  } catch {
+    return composeDeterministicSummary(messages, previousSummary);
+  }
+};
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -109,18 +131,24 @@ export interface CompactOptions {
   readonly sessionId: string;
   readonly keepRecentMessages?: number;
   readonly trigger?: string;
+  /** 缺省用确定性拼接。注入而非内建 —— compact 不认识模型,只认识"给我一段摘要"。 */
+  readonly summarize?: SummarizeMessages;
 }
 
 /**
- * Non-destructive compact: generates a summary snapshot in `session_compactions`.
- * Does NOT delete any messages from the DB.
- * The summary is used by `buildModelHistory()` to construct the agent's context view.
+ * 非破坏性 compact:在 `session_compactions` 里写摘要快照,不删消息。
+ * 摘要供 `buildModelHistory()` 构造 agent 的上下文视图用。
  */
-export const compactSession = (
+export const compactSession = async (
   db: AppDatabase,
   options: CompactOptions
-): CompactResult => {
-  const { sessionId, keepRecentMessages = DEFAULT_KEEP_RECENT, trigger = "auto" } = options;
+): Promise<CompactResult> => {
+  const {
+    sessionId,
+    keepRecentMessages = DEFAULT_KEEP_RECENT,
+    trigger = "auto",
+    summarize
+  } = options;
   const messageRepo = new DrizzleMessageRepository(db);
   const compactionRepo = new SessionCompactionRepository(db);
 
@@ -155,7 +183,7 @@ export const compactSession = (
     messagesToSummarize = covered;
   }
 
-  const summary = generateSummaryText(messagesToSummarize, existingSummary);
+  const summary = await resolveSummary(messagesToSummarize, existingSummary, summarize);
 
   const estimatedTokensBefore = estimateStoredTokens(allMessages);
   const estimatedTokensAfter = estimateTokens(summary) + estimateStoredTokens(tail);

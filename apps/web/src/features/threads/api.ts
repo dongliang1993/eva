@@ -1,4 +1,11 @@
 import { apiFetch } from "../../shared/api/fetch";
+import type { ThreadStatus, ThreadUsage } from "../../types/api";
+
+export const fetchThreadStatus = async (threadId: string): Promise<ThreadStatus> =>
+  apiFetch<ThreadStatus>(`/api/v1/threads/${threadId}/status`);
+
+export const fetchThreadUsage = async (threadId: string): Promise<ThreadUsage> =>
+  apiFetch<ThreadUsage>(`/api/v1/threads/${threadId}/usage`);
 
 export interface PendingApproval {
   readonly callId: string;

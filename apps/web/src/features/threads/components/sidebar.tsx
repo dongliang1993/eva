@@ -3,6 +3,7 @@ import { PanelLeftClose, PanelLeft, SquarePen, Settings } from "lucide-react";
 
 import { apiFetch } from "../../../shared/api/fetch";
 import type { ThreadSummary } from "../../../types/api";
+import { SessionStatusDot } from "./session-status-dot";
 
 interface SidebarProps {
   readonly collapsed: boolean;
@@ -100,6 +101,7 @@ export function Sidebar({
                   }`}
                 onClick={() => onSelectThread(thread.id)}
               >
+                <SessionStatusDot status={thread.status} />
                 <span className="flex-1 truncate">{thread.title}</span>
               </button>
             ))}

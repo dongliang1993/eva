@@ -29,7 +29,8 @@ export interface BuildMemoryRuntimeSupportOptions {
   readonly db: AppDatabase;
   readonly config: AppConfig;
   readonly userMessage: string;
-  readonly modelHistory: readonly { readonly content: string }[];
+  /** 模型这轮可见历史的 token 估算(工具轨迹计入)。 */
+  readonly historyTokens: number;
   readonly baseContext?: Record<string, unknown>;
   readonly modelLimits?: MemoryRuntimeModelLimits;
 }
@@ -85,7 +86,7 @@ const createMemoryStore = (
 export const buildMemoryRuntimeSupport = async (
   options: BuildMemoryRuntimeSupportOptions
 ): Promise<MemoryRuntimeSupport> => {
-  const { db, config, userMessage, modelHistory, baseContext, modelLimits } = options;
+  const { db, config, userMessage, historyTokens, baseContext, modelLimits } = options;
   const settings = loadAppSettings(db, config);
 
   if (!settings.memory.enabled) {
@@ -103,7 +104,7 @@ export const buildMemoryRuntimeSupport = async (
   ];
   const memoryBudgetTokens = settings.memory.autoRetrieve
     ? calculateMemoryContextTokenBudget({
-      modelHistory,
+      historyTokens,
       ...(baseContext !== undefined
         ? { existingContext: baseContext }
         : {}),

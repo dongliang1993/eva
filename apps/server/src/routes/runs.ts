@@ -13,8 +13,7 @@ import type {
 import {
   UiMessageBuilder,
   createUserUIMessage,
-  toErrorMessage,
-  uiMessageText
+  toErrorMessage
 } from "@eva/shared";
 
 import {
@@ -25,8 +24,10 @@ import { DrizzleRunRepository, runStatusFor } from "../db/repositories/run-repos
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
 import { autoCompactIfNeeded, createAutoCompactConfig } from "../services/auto-compact.js";
 import { buildMemoryRuntimeSupport } from "../services/memory-runtime.js";
-import { loadAppSettings } from "../services/settings/app-settings.js";
 import type { ModelBinding } from "../services/providers/model-resolver.js";
+import { loadAppSettings } from "../services/settings/app-settings.js";
+import { createModelSummarizer } from "../services/summarize-with-model.js";
+import { estimateModelHistoryTokens } from "../services/token-estimator.js";
 import { loadProjectDocsSection } from "../services/workspaces/project-docs.js";
 import { resolveWorkspaceForSession } from "../services/workspaces/workspace-store.js";
 import { runRequestSchema, type RunRequest } from "../types/runs.js";
@@ -107,13 +108,16 @@ const openSessionTurn = async (
 const buildRunContext = async (
   app: FastifyInstance,
   open: OpenTurn,
-  mainModel: ModelBinding,
+  resolved: { readonly mainModel: ModelBinding; readonly toolModel: ModelBinding },
   body: RunRequest
 ): Promise<PreparedRun> => {
+  const { mainModel } = resolved;
   new DrizzleSessionRepository(app.infra.db).updateModel(open.sessionId, mainModel.qualifiedModelId);
 
   const settings = loadAppSettings(app.infra.db, app.infra.config);
-  autoCompactIfNeeded(app.infra.db, open.sessionId, createAutoCompactConfig(settings.chat));
+  await autoCompactIfNeeded(app.infra.db, open.sessionId, createAutoCompactConfig(settings.chat), {
+    summarize: createModelSummarizer(resolved.toolModel, app.log)
+  });
 
   const history = app.services.session.buildModelHistory(app.infra.db, open.sessionId);
 
@@ -131,7 +135,7 @@ const buildRunContext = async (
     db: app.infra.db,
     config: app.infra.config,
     userMessage: body.text,
-    modelHistory: history.messages.map((m) => ({ content: uiMessageText(m) })),
+    historyTokens: estimateModelHistoryTokens(history),
     ...(mainModel.contextWindow !== undefined || mainModel.maxOutputTokens !== undefined
       ? {
         modelLimits: {
@@ -212,7 +216,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       });
 
       // 阶段③:模型这轮看见什么(需要 mainModel 的窗口信息)。
-      const prepared = await buildRunContext(app, open, resolved.mainModel, body);
+      const prepared = await buildRunContext(app, open, resolved, body);
 
       const runs = new DrizzleRunRepository(app.infra.db);
       runs.start({

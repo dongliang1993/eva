@@ -10,7 +10,7 @@ import type { IMemoryRepository } from "../db/repositories/memory-repository.js"
 import type { IMessageSearchRepository, MessageSearchHit } from "../db/repositories/message-search-repository.js";
 import { memories } from "../db/schema.js";
 import { generateEmbedding } from "./memory-embedding.js";
-import { estimateHistoryTokens, estimateTokens } from "./token-estimator.js";
+import { estimateTokens } from "./token-estimator.js";
 import { resolveModelSlot } from "./providers/model-resolver.js";
 
 const QUERY_REWRITE_SYSTEM_PROMPT = `You are a query rewriting assistant. Your task is to rewrite conversational user messages into concise search queries optimized for semantic memory retrieval.
@@ -50,7 +50,7 @@ export interface RenderRecallPromptContextResult {
 }
 
 export interface CalculateMemoryContextBudgetOptions {
-  readonly modelHistory: readonly { content: string }[];
+  readonly historyTokens: number;
   readonly contextWindow?: number;
   readonly reservedOutputTokens?: number;
   readonly existingContext?: Record<string, unknown>;
@@ -149,7 +149,7 @@ export const calculateMemoryContextTokenBudget = (
     DEFAULT_RESERVED_OUTPUT_TOKENS
   );
   const usedTokens =
-    estimateHistoryTokens(options.modelHistory)
+    options.historyTokens
     + estimateContextRecordTokens(options.existingContext);
   const remainingContext = Math.max(0, contextWindow - reservedOutputTokens - usedTokens);
 

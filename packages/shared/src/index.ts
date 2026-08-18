@@ -1,3 +1,5 @@
+import type { StreamTokenUsage } from "./stream-events.js";
+
 export type UnknownRecord = Record<string, unknown>;
 
 /**
@@ -129,6 +131,43 @@ export interface ThreadSummary {
   updatedAt: string;
   messageCount: number;
   workspaceId: string | null;
+  status: SessionStatus;
+}
+
+/** 会话状态 —— 算出来的,不是存下来的(docs 14 §5.2 原则 8)。 */
+export type SessionStatus = "requires_action" | "running" | "idle";
+
+/** run 终态。与 server 侧 schema.RunStatus 结构一致(runs 表)。 */
+export type RunStatus = "running" | "completed" | "aborted" | "error";
+
+export interface PendingApprovalSummary {
+  callId: string;
+  toolName: string;
+  args: unknown;
+}
+
+export interface ThreadStatus {
+  status: SessionStatus;
+  activeRunId: string | null;
+  pendingApprovals: readonly PendingApprovalSummary[];
+}
+
+export interface ThreadUsage {
+  /** 当前模型可见历史(含摘要)的估算。 */
+  contextTokens: number;
+  /** chat 槽位模型的窗口;未知则 null。 */
+  contextWindow: number | null;
+  /** contextTokens / contextWindow;只有后者非 null 时才有。 */
+  contextRatio: number | null;
+  runCount: number;
+  /** 该会话所有 run 的用量累加。 */
+  totalUsage: StreamTokenUsage;
+  lastRun: {
+    id: string;
+    status: RunStatus;
+    finishReason: string | null;
+    endedAt: string | null;
+  } | null;
 }
 
 export interface Workspace {
