@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Eva is a local-first AI agent desktop assistant built as a pnpm monorepo. An Electron desktop shell forks an embedded Fastify server (localhost-only), and a LangChain-based agent harness handles tool calling, subagents, skills, and memory.
+Eva is a local-first AI agent desktop assistant built as a pnpm monorepo. An Electron desktop shell forks an embedded Fastify server (localhost-only), and a **Vercel AI SDK v7** agent harness (`packages/harness`) handles tool calling, skills, and memory.
 
 ## Architecture
 
@@ -12,8 +12,8 @@ apps/
   desktop/         # Electron shell (forks server as UtilityProcess)
   web/             # React 19 + Vite frontend
 packages/
-  harness/         # AI agent framework (model, agent loop, tools, prompts)
-  shared/          # Shared types and utilities
+  harness/         # AI agent framework (model, agent loop, tools, prompts) — Vercel AI SDK v7
+  shared/          # Shared types and utilities (server / web / harness)
 tests/             # Vitest test suite
 ```
 
@@ -21,135 +21,121 @@ tests/             # Vitest test suite
 
 Three-layer dependency structure (modeled after DeerFlow):
 
-- **`deps.ts`** — Infrastructure only: config loading, low-level clients. Getter functions for route access.
-- **`services/index.ts`** — Business service assembly: wires infrastructure into API services (RunApiService, SessionService) and the main agent.
+- **`deps.ts`** — Infrastructure only: config loading, DB, skills, observer, work-root. Getter functions for route access.
+- **`services/index.ts`** — Business service assembly: wires infrastructure into `AppServices` (`agents`, `session`, `approvals`, `runRegistry`).
 - **`app.ts`** — Fastify lifecycle: creates the app, decorates with `infra` and `services`, registers routes.
 
 Fastify decorators:
-- `app.infra` — `AppInfrastructure` (config, db, skills)
-- `app.services` — `AppServices` (runs, session)
+- `app.infra` — `AppInfrastructure` (config, db, skills, observer?, soulSection?, workRoot?)
+- `app.services` — `AppServices` (agents, session, approvals, runRegistry)
+
+**`AgentFactory`** (`services/agent-factory.ts`) resolves the agent **per run** and caches `LanguageModel` instances keyed on (providerType, providerId, baseURL, modelId, apiKey); temperature/maxOutputTokens are call settings, not part of the cache key. Provider/settings mutation routes call `agents.invalidate()` so the next run picks up the new config. Resolution failures throw `AgentUnavailableError` at request time (→ 503), so a fresh install with no API key still boots.
 
 ### Harness Layer (`packages/harness/src/`)
 
-- **`AgentModel`** interface with `invoke()` and `stream()` methods
-- **`WorkMiAgent`** interface with `run()` (sync) and `stream()` (SSE) methods
-- **`LeadAgent`** implements the agent loop with tool calling
-- Streaming uses manual tool_call metadata tracking to handle LangChain `concat` compatibility issues with non-standard OpenAI-compatible APIs
+- **`AgentModel`** is `LanguageModel` from the AI SDK. `LeadAgent` drives the tool loop with `streamText({ stopWhen, prepareStep })` (the SDK drives the loop; `prepareStep` applies tool-result budget + proactive compact and hoists system messages into `instructions`).
+- `stream-part-mapper.ts` translates SDK stream parts → `AgentStreamEvent`; `context-strategy.ts` builds `prepareStep`.
+- Subagents were a half-built scaffold and have been **removed**; fork-join will be rebuilt from scratch in S7.
 
-### Tool Convention (`apps/server/src/tools/`)
+### Tool Convention (`packages/harness/src/tools/<kebab-case>/`)
 
-Each tool is a **folder** named in PascalCase:
+Each tool is a **folder** named in kebab-case:
 
 ```
 tools/
-└── MyTool/
-    ├── constants.ts      # TOOL_NAME and shared constants
-    ├── description.ts    # getDescription() — structured tool description for LLM guidance
-    └── index.ts          # createXxxTool() factory function
+└── my-tool/
+    ├── tool.ts          # createMyTool(config) factory — returns an AgentTool via buildTool()
+    ├── client.ts        # (when needed) provider-specific client
+    ├── types.ts         # (when needed) local types
+    └── index.ts         # re-export
 ```
 
-Rules:
-- Folder name matches the tool concept in PascalCase (e.g. `WebSearch`, `ReadFile`)
-- `constants.ts` exports `TOOL_NAME` (snake_case string used as the tool identifier)
-- `description.ts` exports `getDescription()` returning a multi-line string with "When to use" guidance and output format
-- `index.ts` exports the `createXxxTool(config, ...deps)` factory function
-- Tool schema uses Zod with `.describe()` on parameters that accept multiple input formats
+- Tools are built with `buildTool({ name, description, schema, execute, readOnly?, requiresApproval? })` (Zod schema, `execute` returns `string`).
+- Dangerous tools set `requiresApproval: true`; `createAgent` wraps their `execute` with `withApproval` so the approval gate lives at execute time (one model call, `cancelBySession` can reject pending approvals on abort).
 
 ### SSE Streaming
 
-`POST /api/v1/runs/stream` returns Server-Sent Events:
+`POST /api/v1/runs/stream` returns Server-Sent Events. The canonical event names live in `packages/shared/src/stream-events.ts`:
 
 ```
-event: text_chunk        — LLM token fragments
-event: tool_call_start   — tool invocation begins
-event: tool_call_end     — tool invocation completes
-event: result            — final agent result
-event: error             — error occurred
-event: end               — stream complete
+event: run_start          — first frame: { runId, sessionId }
+event: text-delta         — LLM token fragment
+event: reasoning-delta    — reasoning token fragment
+event: tool-input-start   — tool input streaming begins
+event: tool-input-delta   — tool input streaming fragment
+event: tool-call          — complete tool call (input available)
+event: tool-result        — tool execution result
+event: step-start         — a new model step begins
+event: finish             — agent run finished { text, toolCalls, finishReason, usage? }
+event: approval_request   — dangerous tool awaiting user decision
+event: approval_resolved  — approval decided (user / auto / abort)
+event: error              — error occurred
+event: end                — stream complete (always after finish/error)
 ```
+
+Every frame carries a `seq` that is strictly monotonic within a run.
 
 ## Frontend (`apps/web/`)
 
-Vite + React 19 SPA, Tailwind CSS.
-
-### Component Naming & Organization
-
-- **File naming**: kebab-case — `message-bubble.tsx`, `chat-input.tsx`, `tool-call-block.tsx`
-- **Simple components**: single file — `components/message-bubble.tsx`
-- **Complex components** (>200 lines or multiple sub-files): folder with index —
-  ```
-  components/chat-view/
-    index.tsx           # main component, re-exported
-    use-scroll-anchor.ts  # local hook
-    types.ts            # local types
-  ```
-- **Hooks**: `hooks/use-chat.ts` (kebab-case, `use-` prefix)
-- **API layer**: `api/client.ts`
-
-### React Best Practices
-
-Follow Vercel React performance guidelines (`~/.claude/skills/vercel-react-best-practices/`):
-- `async-parallel` — Use `Promise.all()` for independent operations
-- `bundle-barrel-imports` — Import directly, avoid barrel files
-- `rerender-defer-reads` — Don't subscribe to state only used in callbacks
-- `rerender-functional-setstate` — Use functional setState for stable callbacks
-- `rerender-no-inline-components` — Don't define components inside components
-- `rendering-conditional-render` — Use ternary, not `&&` for conditionals
-- `js-early-exit` — Return early from functions
-
-### Directory Structure
+Vite + React 19 SPA, Tailwind CSS. Feature-sliced layout (see `docs/architecture/10-frontend-conventions.md` for the conventions; Eva's `apps/web/src` maps to 10's `src/renderer/`):
 
 ```
 src/
-  pages/                    # Page-level layout + routing (one folder per route)
-    settings/index.tsx
-    <new-route>/index.tsx
-  components/               # Reusable UI components
-    ui/                     # Radix-based base components (popover, tooltip, etc.)
-    settings/               # Settings-specific components
-    chat-input/             # Complex component folder (>200 lines)
-      index.tsx
-      select-model/index.tsx
-    message-bubble.tsx      # Simple component (single file)
-  hooks/                    # Custom hooks
-  api/                      # API client + fetch wrapper
-  styles/                   # CSS (Tailwind + theme tokens)
+  features/
+    threads/             # chat page, message list/bubble/block, sidebar, chat-input,
+                         #   use-chat/use-approvals/use-stick-to-bottom, threads api
+    settings/            # settings page + components/hooks
+  shared/
+    api/                 # fetch wrapper, run-stream client (SSE)
+    ui/                  # Radix-based base components (popover, tooltip, resizable-sidebar)
+    hooks/               # cross-feature hooks (use-models)
+    markdown/            # Streamdown markdown renderer
+    streaming/           # SSE accumulator + smooth-stream hook
+  types/api.ts           # re-export from @eva/shared
+  app.tsx                # routes
+  main.tsx               # entry
 ```
 
-- **`pages/`** — page-level components that compose layout + sub-components. One folder per route.
-- **`components/`** — reusable, route-agnostic components. Pages import from here.
-- Never put page routing logic in `components/`.
+### Rendering performance
 
-### SSE Streaming
+- `useChat` holds `committed` (`EvaUIMessage[]`) and `streaming` (single message | null) separately. Each token only updates `streaming`; `committed`'s reference is untouched. `CommittedMessages`, `MessageBubble`, `ToolCallBlock` are `memo`'d, so streaming re-renders only the in-flight bubble.
+- `useStickToBottom` follows the bottom within 80px via instant `scrollTop` (not `scrollIntoView({behavior:"smooth"})`, which jitters under per-token growth); smooth scroll only on send. A "back to bottom" button appears when scrolled away.
+- `@tanstack/react-virtual` dynamic-size virtualization kicks in above 40 committed messages; the in-flight message stays outside the virtualizer.
 
-Use `fetch` + `ReadableStream` for SSE (not `EventSource`, because we need POST).
-Events: `text_chunk`, `tool_call_start`, `tool_call_end`, `result`, `error`, `end`.
+### Approvals
+
+Approvals are driven by the SSE `approval_request` / `approval_resolved` events (no polling). `useApprovals` calls `listApprovals()` once on mount to recover a pending approval across a refresh.
 
 ### Session
 
-- First request: no `sessionId` → server creates session → returns `sessionId` in response
-- Subsequent requests: send `sessionId` → server loads history
-- Frontend stores `sessionId` in `useState`; new conversation = clear it
+- First request: no `sessionId` → server creates session → `run_start` frame carries the new `sessionId`.
+- Subsequent requests: send `sessionId` → server loads history.
+- Frontend stores `sessionId` in `useState`; new conversation clears it.
 
 ## Commands
 
 ```bash
-pnpm build    # Build the server (tsup)
-pnpm test     # Run all tests (vitest)
-pnpm web:dev  # Start frontend dev server (Vite, port 5173)
-pnpm web:build # Build frontend for production
+pnpm build        # Build server + desktop shell
+pnpm serve:dev    # Run the server (tsx watch)
+pnpm typecheck    # tsc -p across workspaces
+pnpm test         # Run all tests (vitest)
+pnpm web:dev      # Start frontend dev server (Vite, port 5173)
+pnpm web:build    # Build frontend for production
+pnpm desktop:dev  # Run the Electron shell in dev
+pnpm desktop:build# Build the desktop app
+pnpm desktop:pack # Pack the desktop app for distribution
 ```
 
 ## Configuration
 
-Environment variables loaded from `.env.local` at workspace root:
+> **Model configuration does not go through environment variables.** Providers and API keys live in the `providers` table in SQLite (`~/.eva/eva.db`), managed via the Settings page; the DB is the single source of truth. Environment variables only govern process-level concerns.
+
+Environment variables loaded from `.env.local` at workspace root (`apps/server/src/config.ts`):
 
 | Variable | Purpose |
 |----------|---------|
-| `LLM_API_KEY` | LLM API key |
-| `LLM_BASE_URL` | LLM API base URL (for non-OpenAI providers) |
-| `LLM_MODEL` | Model name (default: `gpt-4.1-mini`) |
-| `LLM_TEMPERATURE` | Temperature (default: `0.1`) |
-| `WEB_FETCH_MODEL` | Model used for web-fetch summarization |
-| `TARGET_REPO_ROOT` | Repository root for code context matching |
-| `INTERNAL_IM_SIGNING_SECRET` | HMAC signing secret for IM webhooks |
+| `PORT` | Server port (default 8082) |
+| `HOST` | Server host (default 127.0.0.1) |
+| `LOG_LEVEL` | pino log level (default info) |
+| `TARGET_REPO_ROOT` | Work root for fs tools (read/write/edit/bash/grep/list). Must be an explicit project dir; empty = no fs tools; `$HOME`/`/` rejected. |
+| `DB_PATH` | SQLite DB path (default `~/.eva/eva.db`) |

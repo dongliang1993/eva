@@ -12,7 +12,7 @@ interface ListApprovalsResponse {
 
 /** 拉取当前待审批的危险工具请求。 */
 export const listApprovals = async (): Promise<readonly PendingApproval[]> => {
-  const data = await apiFetch<ListApprovalsResponse>("/api/tool-approvals");
+  const data = await apiFetch<ListApprovalsResponse>("/api/v1/tool-approvals");
   return data.approvals;
 };
 
@@ -21,7 +21,7 @@ export const decideApproval = async (
   callId: string,
   allowed: boolean
 ): Promise<void> => {
-  await apiFetch(`/api/tool-approvals/${callId}`, {
+  await apiFetch(`/api/v1/tool-approvals/${callId}`, {
     method: "POST",
     body: JSON.stringify({ allowed })
   });

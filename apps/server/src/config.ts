@@ -15,7 +15,6 @@ const envSchema = z.object({
   // 显式工作区:未设置则不注入 fs 工具(见 deps.ts resolveWorkRoot)。不给
   // process.cwd() 默认值 —— 桌面端 cwd 是 app 资源目录,agent 写文件会落在 App 包里。
   TARGET_REPO_ROOT: z.string().default(""),
-  INTERNAL_IM_SIGNING_SECRET: z.string().default(""),
   DB_PATH: z.string().default("")
 });
 
