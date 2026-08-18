@@ -224,6 +224,7 @@ export const approvalRequests = sqliteTable(
   {
     id: text("id").primaryKey(), // tool callId
     sessionId: text("session_id").notNull(),
+    runId: text("run_id"),
     tool: text("tool").notNull(),
     args: text("args").notNull(), // JSON
     status: text("status", { enum: ["pending", "granted", "denied"] })
@@ -236,6 +237,7 @@ export const approvalRequests = sqliteTable(
   },
   (table) => [
     index("idx_approval_requests_session").on(table.sessionId),
-    index("idx_approval_requests_status").on(table.status)
+    index("idx_approval_requests_status").on(table.status),
+    index("idx_approval_requests_run").on(table.runId)
   ]
 );

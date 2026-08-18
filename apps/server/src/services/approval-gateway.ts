@@ -1,11 +1,27 @@
 import { ApprovalRepository } from "../db/repositories/approval-repository.js";
 
 interface PendingRequest {
+  readonly runId: string;
   readonly sessionId: string;
   readonly tool: string;
   readonly args: unknown;
   resolve: (allowed: boolean) => void;
   timer: NodeJS.Timeout;
+}
+
+/** 一次审批请求的归属与内容。 */
+export interface ApprovalAskInput {
+  readonly runId: string;
+  readonly sessionId: string;
+  readonly tool: string;
+  readonly args: unknown;
+}
+
+export interface PendingApprovalView {
+  readonly callId: string;
+  readonly runId: string;
+  readonly tool: string;
+  readonly args: unknown;
 }
 
 /**
@@ -26,8 +42,8 @@ export class ApprovalGateway {
   constructor(private readonly repo: ApprovalRepository) {}
 
   /** 发起一次审批请求,返回解析为「是否允许」的 Promise。 */
-  ask(callId: string, sessionId: string, tool: string, args: unknown): Promise<boolean> {
-    this.repo.create({ id: callId, sessionId, tool, args });
+  ask(callId: string, input: ApprovalAskInput): Promise<boolean> {
+    this.repo.create({ id: callId, ...input });
 
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
@@ -36,7 +52,7 @@ export class ApprovalGateway {
         resolve(false);
       }, PENDING_TIMEOUT_MS);
 
-      this.pending.set(callId, { sessionId, tool, args, resolve, timer });
+      this.pending.set(callId, { ...input, resolve, timer });
     });
   }
 
@@ -53,15 +69,17 @@ export class ApprovalGateway {
   }
 
   /**
-   * 取消某会话下所有未决审批(abort / run 结束 / 进程收尾时调用)。
+   * 取消某次 run 下所有未决审批(abort / run 结束 / 进程收尾时调用)。
    * docs 14 §4.4:「abort / run 结束 / destroy 时 cancelAll 统一 reject(不会永远吊着)」。
+   * 归属键是 runId 而不是 sessionId —— runId 在 run 的第一行就存在,
+   * 不像 sessionId 有一段「还不知道」的窗口(那个窗口是 P0.1 的根因)。
    * @returns 被取消的数量
    */
-  cancelBySession(sessionId: string): number {
+  cancelByRun(runId: string): number {
     let cancelled = 0;
 
     for (const [callId, entry] of [...this.pending]) {
-      if (entry.sessionId !== sessionId) {
+      if (entry.runId !== runId) {
         continue;
       }
       clearTimeout(entry.timer);
@@ -75,15 +93,11 @@ export class ApprovalGateway {
   }
 
   /** 当前未决的审批请求(供前端 SSE/轮询恢复)。 */
-  listPending(sessionId?: string): ReadonlyArray<{
-    callId: string;
-    tool: string;
-    args: unknown;
-  }> {
-    const out: Array<{ callId: string; tool: string; args: unknown }> = [];
+  listPending(sessionId?: string): readonly PendingApprovalView[] {
+    const out: PendingApprovalView[] = [];
     for (const [callId, entry] of this.pending) {
       if (sessionId && entry.sessionId !== sessionId) continue;
-      out.push({ callId, tool: entry.tool, args: entry.args });
+      out.push({ callId, runId: entry.runId, tool: entry.tool, args: entry.args });
     }
     return out;
   }

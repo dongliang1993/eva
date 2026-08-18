@@ -13,7 +13,7 @@ const deniedMessage = (toolName: string): string =>
  * 为什么包在 execute 外层而不用 SDK 的 toolApproval 两轮调用:两轮调用需要手工
  * 缝 assistant(tool-call) + tool(approval-response) 消息序列,缝错会重复正文甚至
  * 死循环;而且每次审批要多付一次完整模型调用。包装法只有一次模型调用,
- * abort 时能被 cancelBySession 统一 reject。
+ * abort 时能被 cancelByRun 统一 reject。
  */
 export const withApproval = (
   agentTool: AgentTool,

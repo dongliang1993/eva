@@ -135,7 +135,12 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       }
 
       emit({ type: "approval_request", callId: toolCallId, toolName, args });
-      const approved = await app.services.approvals.ask(toolCallId, sessionId, toolName, args);
+      const approved = await app.services.approvals.ask(toolCallId, {
+        runId,
+        sessionId,
+        tool: toolName,
+        args
+      });
       emit({ type: "approval_resolved", callId: toolCallId, approved });
 
       return approved;
@@ -173,11 +178,9 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       // "response.end() 之前 socket 被关闭"的语义。
       reply.raw.on("close", () => {
         if (!finished) {
-          const abortedSessionId = app.services.runRegistry.abort(runId);
-          // 别让 pending 审批吊住 agent loop
-          if (abortedSessionId) {
-            app.services.approvals.cancelBySession(abortedSessionId);
-          }
+          app.services.runRegistry.abort(runId);
+          // 别让 pending 审批吊住 agent loop —— 归属键是 runId,不需要先知道会话
+          app.services.approvals.cancelByRun(runId);
         }
       });
 
@@ -255,24 +258,21 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       reply.raw.end();
     } finally {
       app.services.runRegistry.unregister(runId);
-      // pending 审批要么已被决策、要么被上面 cancelBySession 清掉;这里兜底。
-      if (sessionId) {
-        app.services.approvals.cancelBySession(sessionId);
-      }
+      // pending 审批要么已被决策、要么被上面 cancelByRun 清掉;这里兜底。
+      app.services.approvals.cancelByRun(runId);
     }
   });
 
   app.post("/api/v1/runs/:runId/abort", async (request, reply) => {
     const { runId } = request.params as { runId: string };
-    const abortedSessionId = app.services.runRegistry.abort(runId);
 
-    if (abortedSessionId === undefined) {
+    if (!app.services.runRegistry.abort(runId)) {
       reply.code(404);
       return { error: "run not found or already finished" };
     }
 
-    // 中止时立刻拒绝该会话下 pending 的审批,否则 agent loop 会被吊住
-    app.services.approvals.cancelBySession(abortedSessionId);
+    // 中止时立刻拒绝该 run 下 pending 的审批,否则 agent loop 会被吊住
+    app.services.approvals.cancelByRun(runId);
 
     return { ok: true };
   });

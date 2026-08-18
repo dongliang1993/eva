@@ -203,7 +203,7 @@ describe("agent 级回归(只读工具全链路)", () => {
   });
 });
 
-describe("ApprovalGateway.cancelBySession", () => {
+describe("ApprovalGateway.cancelByRun", () => {
   let db: AppDatabase;
 
   beforeEach(() => {
@@ -215,11 +215,16 @@ describe("ApprovalGateway.cancelBySession", () => {
     closeDb(db);
   });
 
-  it("cancelBySession 让 pending 审批立刻按拒绝返回,repo 状态为 denied", async () => {
+  it("cancelByRun 让 pending 审批立刻按拒绝返回,repo 状态为 denied", async () => {
     const gateway = new ApprovalGateway(new ApprovalRepository(db));
-    const askPromise = gateway.ask("c1", "session-1", "dangerous_a", {});
+    const askPromise = gateway.ask("c1", {
+      runId: "run-1",
+      sessionId: "session-1",
+      tool: "dangerous_a",
+      args: {}
+    });
 
-    const cancelled = gateway.cancelBySession("session-1");
+    const cancelled = gateway.cancelByRun("run-1");
     expect(cancelled).toBe(1);
     await expect(askPromise).resolves.toBe(false);
 
@@ -227,14 +232,17 @@ describe("ApprovalGateway.cancelBySession", () => {
     expect(repo.getById("c1")?.status).toBe("denied");
   });
 
-  it("只取消目标会话的 pending,其他会话不动", () => {
+  it("只取消目标 run 的 pending,其他 run 不动", () => {
     const gateway = new ApprovalGateway(new ApprovalRepository(db));
-    // other 会话的审批故意不 resolve(靠超时兜底),这里不 await
-    gateway.ask("c-other", "session-2", "x", {});
-    gateway.ask("c-target", "session-1", "y", {});
+    // other run 的审批故意不 resolve(靠超时兜底),这里不 await
+    gateway.ask("c-other", { runId: "run-2", sessionId: "session-2", tool: "x", args: {} });
+    gateway.ask("c-target", { runId: "run-1", sessionId: "session-1", tool: "y", args: {} });
 
-    expect(gateway.cancelBySession("session-1")).toBe(1);
+    expect(gateway.cancelByRun("run-1")).toBe(1);
     expect(gateway.listPending("session-1")).toHaveLength(0);
     expect(gateway.listPending("session-2")).toHaveLength(1);
+
+    // 收尾:清掉未 resolve 的 timer,别挂住 vitest
+    gateway.cancelByRun("run-2");
   });
 });

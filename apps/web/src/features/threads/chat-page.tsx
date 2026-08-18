@@ -37,6 +37,9 @@ export function ChatPage() {
     loadSession
   } = useChat({ onApproval: approvals.applyStreamEvent });
 
+  // 会话切换/新会话时,从服务端对齐一次该会话下的待审批(不轮询)。事实源仍是 SSE。
+  useEffect(() => approvals.refresh(sessionId), [sessionId, approvals.refresh]);
+
   // Load session from URL on mount (once)
   const threadIdFromUrl = searchParams.get("threadId");
   const initialLoadDone = useRef(false);

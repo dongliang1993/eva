@@ -8,6 +8,7 @@ export type ApprovalStatus = "pending" | "granted" | "denied";
 export interface ApprovalRequestRow {
   readonly id: string;
   readonly sessionId: string;
+  readonly runId: string | null;
   readonly tool: string;
   readonly args: string; // JSON stringified
   readonly status: ApprovalStatus;
@@ -18,6 +19,7 @@ export interface ApprovalRequestRow {
 export interface CreateApprovalInput {
   readonly id: string; // tool callId
   readonly sessionId: string;
+  readonly runId: string;
   readonly tool: string;
   readonly args: unknown;
 }
@@ -31,6 +33,7 @@ export class ApprovalRepository {
       .values({
         id: input.id,
         sessionId: input.sessionId,
+        runId: input.runId,
         tool: input.tool,
         args: JSON.stringify(input.args)
       })
@@ -51,6 +54,7 @@ export class ApprovalRepository {
     return {
       id: row.id,
       sessionId: row.sessionId,
+      runId: row.runId,
       tool: row.tool,
       args: row.args,
       status: row.status as ApprovalStatus,

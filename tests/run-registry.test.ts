@@ -10,18 +10,18 @@ describe("RunRegistry", () => {
     expect(controller.signal.aborted).toBe(false);
   });
 
-  it("abort trips the registered controller and returns the bound sessionId", () => {
+  it("abort trips the registered controller", () => {
     const registry = new RunRegistry();
-    const controller = registry.register("run-1", "session-1");
+    const controller = registry.register("run-1");
 
-    expect(registry.abort("run-1")).toBe("session-1");
+    expect(registry.abort("run-1")).toBe(true);
     expect(controller.signal.aborted).toBe(true);
   });
 
-  it("abort returns undefined for unknown or finished runs", () => {
+  it("abort returns false for unknown or finished runs", () => {
     const registry = new RunRegistry();
 
-    expect(registry.abort("missing")).toBeUndefined();
+    expect(registry.abort("missing")).toBe(false);
   });
 
   it("unregister removes the run so later abort is a no-op", () => {
@@ -30,7 +30,7 @@ describe("RunRegistry", () => {
 
     registry.unregister("run-1");
 
-    expect(registry.abort("run-1")).toBeUndefined();
+    expect(registry.abort("run-1")).toBe(false);
     expect(controller.signal.aborted).toBe(false);
   });
 

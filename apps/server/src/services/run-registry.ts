@@ -1,28 +1,34 @@
-interface RunHandle {
-  readonly controller: AbortController;
-  readonly sessionId: string;
-}
-
+/**
+ * run 级 AbortController 注册表。
+ *
+ * 只做一件事:runId → controller。**不持有 sessionId** ——
+ * 审批的归属键是 runId(见 ApprovalGateway.cancelByRun),
+ * 让这个注册表知道会话只会诱惑调用方把它当归属源用。
+ */
 export class RunRegistry {
-  private readonly runs = new Map<string, RunHandle>();
+  private readonly runs = new Map<string, AbortController>();
 
-  register(runId: string, sessionId = ""): AbortController {
+  register(runId: string): AbortController {
     const controller = new AbortController();
-    this.runs.set(runId, { controller, sessionId });
+    this.runs.set(runId, controller);
     return controller;
   }
 
-  /**
-   * 中止一次 run。
-   * @returns 该 run 绑定的 sessionId(路由据此取消该会话下 pending 的审批);找不到返回 undefined。
-   */
-  abort(runId: string): string | undefined {
-    const handle = this.runs.get(runId);
-    if (!handle) {
-      return undefined;
+  /** @returns 是否真的中止了一次在飞的 run(未注册/已结束返回 false)。 */
+  abort(runId: string): boolean {
+    const controller = this.runs.get(runId);
+
+    if (!controller) {
+      return false;
     }
-    handle.controller.abort();
-    return handle.sessionId;
+
+    controller.abort();
+    return true;
+  }
+
+  /** 该 run 是否仍在飞(T8 的 deriveSessionStatus 会用)。 */
+  isRunning(runId: string): boolean {
+    return this.runs.has(runId);
   }
 
   unregister(runId: string): void {
