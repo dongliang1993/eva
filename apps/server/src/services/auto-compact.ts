@@ -1,9 +1,8 @@
 import type { AppDatabase } from "../db/index.js";
 import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
-import { SessionCompactionRepository } from "../db/repositories/session-compaction-repository.js";
 import { compactSession, type CompactResult } from "./compact.js";
-import { estimateHistoryTokens } from "./token-estimator.js";
+import { estimateModelHistoryTokens } from "./token-estimator.js";
 import { SessionService } from "./session.js";
 
 const DEFAULT_TOKEN_THRESHOLD = 80_000;
@@ -45,26 +44,19 @@ export interface AutoCompactResult {
 export const autoCompactIfNeeded = (
   db: AppDatabase,
   sessionId: string,
-  history: readonly { content: string }[],
   config: AutoCompactConfig
 ): AutoCompactResult => {
   if (!config.enabled) {
     return { compacted: false };
   }
 
-  const compactionRepo = new SessionCompactionRepository(db);
-  const existingCompaction = compactionRepo.findBySessionId(sessionId);
-  const sessionService = existingCompaction
-    ? new SessionService(
-      new DrizzleSessionRepository(db),
-      new DrizzleMessageRepository(db)
-    )
-    : undefined;
-  const historyForThreshold = existingCompaction
-    ? sessionService!.buildModelHistory(db, sessionId)
-    : history;
-  const estimatedTokens = estimateHistoryTokens(historyForThreshold);
-  const messageCount = historyForThreshold.length;
+  const sessionService = new SessionService(
+    new DrizzleSessionRepository(db),
+    new DrizzleMessageRepository(db)
+  );
+  const history = sessionService.buildModelHistory(db, sessionId);
+  const estimatedTokens = estimateModelHistoryTokens(history);
+  const messageCount = history.messages.length;
 
   const shouldCompact =
     estimatedTokens > config.tokenThreshold ||

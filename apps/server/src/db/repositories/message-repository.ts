@@ -1,43 +1,64 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
+import { parseUIMessage, uiMessageSearchText } from "@eva/shared";
 
 import type { AppDatabase } from "../index.js";
 import { messages } from "../schema.js";
 import type {
-  Message,
   CreateMessageInput,
   GetMessagesOptions,
-  IMessageRepository
+  IMessageRepository,
+  StoredMessage
 } from "./types.js";
 
 const DEFAULT_LIMIT = 100;
 
+const toStored = (row: typeof messages.$inferSelect): StoredMessage => ({
+  id: row.id,
+  sessionId: row.sessionId,
+  runId: row.runId,
+  role: row.role,
+  message: parseUIMessage(row.message, { id: row.id, role: row.role }),
+  parentId: row.parentId,
+  slotId: row.slotId,
+  depth: row.depth,
+  createdAt: row.createdAt
+});
+
 export class DrizzleMessageRepository implements IMessageRepository {
   constructor(private readonly db: AppDatabase) {}
 
-  create(input: CreateMessageInput): Message {
-    const values = {
-      id: input.id,
-      sessionId: input.sessionId,
-      role: input.role,
-      content: input.content,
-      ...(input.searchText !== undefined ? { searchText: input.searchText } : {}),
-      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      ...(input.tokenUsage !== undefined ? { tokenUsage: input.tokenUsage } : {})
-    };
+  create(input: CreateMessageInput): StoredMessage {
+    const { message } = input;
 
-    this.db.insert(messages).values(values).run();
+    if (message.role !== "user" && message.role !== "assistant") {
+      // system 消息不落库:compaction 摘要是运行时拼进 ModelMessage 的。
+      throw new Error(`Cannot persist message with role "${message.role}"`);
+    }
 
-    return this.db
-      .select()
-      .from(messages)
-      .where(eq(messages.id, input.id))
-      .get()!;
+    this.db
+      .insert(messages)
+      .values({
+        id: message.id,
+        sessionId: input.sessionId,
+        role: message.role,
+        message: JSON.stringify(message),
+        searchText: uiMessageSearchText(message),
+        ...(input.runId !== undefined ? { runId: input.runId } : {}),
+        ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+        ...(input.slotId !== undefined ? { slotId: input.slotId } : {}),
+        ...(input.depth !== undefined ? { depth: input.depth } : {})
+      })
+      .run();
+
+    return toStored(
+      this.db.select().from(messages).where(eq(messages.id, message.id)).get()!
+    );
   }
 
   findBySessionId(
     sessionId: string,
     options: GetMessagesOptions = {}
-  ): readonly Message[] {
+  ): readonly StoredMessage[] {
     const limit = options.limit ?? DEFAULT_LIMIT;
 
     return this.db
@@ -46,7 +67,20 @@ export class DrizzleMessageRepository implements IMessageRepository {
       .where(eq(messages.sessionId, sessionId))
       .orderBy(asc(messages.createdAt), sql`rowid`)
       .limit(limit)
-      .all();
+      .all()
+      .map(toStored);
+  }
+
+  findLastBySessionId(sessionId: string): StoredMessage | undefined {
+    const row = this.db
+      .select()
+      .from(messages)
+      .where(eq(messages.sessionId, sessionId))
+      .orderBy(desc(messages.createdAt), sql`rowid DESC`)
+      .limit(1)
+      .get();
+
+    return row ? toStored(row) : undefined;
   }
 
   deleteBySessionId(sessionId: string): number {

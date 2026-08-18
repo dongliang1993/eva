@@ -1,65 +1,32 @@
 import { z } from "zod";
 
-// Loose role enum: accepts legacy LangChain roles (human/ai/function/generic/remove)
-// from older clients at the API boundary, normalized to Vercel ModelMessage roles
-// in services/runs.ts before reaching the agent.
-export const runMessageRoleSchema = z.enum([
-  "user",
-  "assistant",
-  "system",
-  "developer",
-  "tool",
-  "human",
-  "ai",
-  "function",
-  "generic",
-  "remove"
-]);
+import type { AgentTool } from "@eva/harness";
 
-export type RunMessageRole = z.infer<typeof runMessageRoleSchema>;
+/** 单条用户输入的长度上限 —— 超过这个量应该走文件附件,不是聊天框。 */
+const MAX_TEXT_LENGTH = 100_000;
 
-// Content block shape compatible with Vercel AI SDK prompt parts.
-// Kept permissive (passthrough) so provider-specific part fields survive.
-const runMessageContentBlockSchema = z.object({}).passthrough();
-
-export const runMessageContentSchema = z.union([
-  z.string(),
-  z.array(runMessageContentBlockSchema)
-]);
-
-export type RunMessageContent = z.infer<typeof runMessageContentSchema>;
-
-export interface RunInputMessage extends Record<string, unknown> {
-  role: RunMessageRole;
-  content: RunMessageContent;
-  name?: string | undefined;
-}
-
-export const runMessageSchema: z.ZodType<RunInputMessage> = z
-  .object({
-    role: runMessageRoleSchema,
-    content: runMessageContentSchema,
-    name: z.string().optional()
-  })
-  .passthrough();
-
-export const runSchema = z.object({
-  messages: z.array(runMessageSchema).min(1),
-  context: z.record(z.unknown()).optional(),
-  maxSteps: z.coerce.number().int().positive().max(12).optional(),
+/**
+ * 一次执行的请求体。
+ *
+ * 旧契约收一个完整 messages 数组(还兼容 5 个 LangChain 遗留 role),
+ * 但服务端会用自己的历史整个覆盖掉,只取最后一条的 content —— 实际语义
+ * 就是"一句话 + 会话 id"。这里让 schema 说实话。
+ */
+export const runRequestSchema = z.object({
+  text: z.string().min(1).max(MAX_TEXT_LENGTH),
+  /** 缺省 = 新建会话,响应的 run_start 帧会带回新 sessionId。 */
   sessionId: z.string().optional(),
+  /** "providerId:modelId";缺省用 settings 里的默认模型。 */
   modelId: z.string().optional()
 });
 
-type RunSchemaData = z.infer<typeof runSchema>;
-
-import type { AgentTool } from "@eva/harness";
+export type RunRequest = z.infer<typeof runRequestSchema>;
 
 export interface RunInput {
-  messages: RunInputMessage[];
-  context?: RunSchemaData["context"];
-  maxSteps?: RunSchemaData["maxSteps"];
-  modelId?: RunSchemaData["modelId"];
+  text: string;
+  sessionId?: string;
+  modelId?: string;
+  context?: Record<string, unknown>;
   additionalTools?: AgentTool[];
   abortSignal?: AbortSignal;
 }

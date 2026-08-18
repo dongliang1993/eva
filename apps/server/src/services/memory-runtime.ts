@@ -19,7 +19,6 @@ import {
   renderRecallPromptContext
 } from "./memory-recall.js";
 import { loadAppSettings } from "./settings-store.js";
-import type { HistoryMessage } from "./session.js";
 
 export interface MemoryRuntimeModelLimits {
   readonly contextWindow?: number;
@@ -30,7 +29,7 @@ export interface BuildMemoryRuntimeSupportOptions {
   readonly db: AppDatabase;
   readonly config: AppConfig;
   readonly userMessage: string;
-  readonly modelHistory: readonly HistoryMessage[];
+  readonly modelHistory: readonly { readonly content: string }[];
   readonly baseContext?: Record<string, unknown>;
   readonly modelLimits?: MemoryRuntimeModelLimits;
 }

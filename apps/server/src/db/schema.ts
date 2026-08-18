@@ -144,18 +144,55 @@ export const messages = sqliteTable(
     sessionId: text("session_id")
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
+    runId: text("run_id"),
     role: text("role", { enum: ["user", "assistant"] }).notNull(),
-    content: text("content").notNull(),
+    /** 完整 UIMessage JSON —— 这条消息的唯一事实源。 */
+    message: text("message").notNull(),
+    /** FTS5 索引源,由 uiMessageSearchText(message) 派生。 */
     searchText: text("search_text").notNull().default(""),
-    metadata: text("metadata").notNull().default("{}"),
-    tokenUsage: text("token_usage"),
+    // 版本树三件套(docs 14 §7.2)。T1 只按线性链写入,分支 UI 留到后续切片。
+    parentId: text("parent_id"),
+    slotId: text("slot_id"),
+    depth: integer("depth").notNull().default(0),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`)
   },
   (table) => [
     index("idx_messages_session_id").on(table.sessionId),
-    index("idx_messages_created_at").on(table.createdAt)
+    index("idx_messages_created_at").on(table.createdAt),
+    index("idx_messages_run_id").on(table.runId)
+  ]
+);
+
+export const runStatuses = ["running", "completed", "aborted", "error"] as const;
+
+export type RunStatus = (typeof runStatuses)[number];
+
+export const runs = sqliteTable(
+  "runs",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    status: text("status", { enum: runStatuses }).notNull().default("running"),
+    /** "providerId:modelId"。 */
+    model: text("model"),
+    userMessageId: text("user_message_id"),
+    assistantMessageId: text("assistant_message_id"),
+    finishReason: text("finish_reason"),
+    /** StreamTokenUsage JSON。 */
+    usage: text("usage"),
+    error: text("error"),
+    startedAt: text("started_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    endedAt: text("ended_at")
+  },
+  (table) => [
+    index("idx_runs_session_id").on(table.sessionId),
+    index("idx_runs_status").on(table.status)
   ]
 );
 

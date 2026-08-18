@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 
+import { isDynamicToolPart, isTextPart, toolPartOutput } from "@eva/shared";
+
 import type { AppDatabase } from "../db/index.js";
 import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
 import { SessionCompactionRepository } from "../db/repositories/session-compaction-repository.js";
-import type { Message } from "../db/repositories/types.js";
-import { parseMessageContent } from "../db/repositories/types.js";
-import { estimateTokens, estimateHistoryTokens } from "./token-estimator.js";
+import type { StoredMessage } from "../db/repositories/types.js";
+import {
+  estimateTokens,
+  estimateUiMessageTokens
+} from "./token-estimator.js";
 
 const DEFAULT_KEEP_RECENT = 8;
 const MAX_SUMMARY_BULLETS = 4;
@@ -23,37 +27,32 @@ const normalizeSummaryText = (text: string): string => {
     : `${compact.slice(0, MAX_SUMMARY_TEXT_LENGTH - 3)}...`;
 };
 
-const messageToSummaryText = (message: Message): string => {
-  const blocks = parseMessageContent(message.content);
-  const parts: string[] = [];
+const messageToSummaryText = (message: StoredMessage): string => {
+  const chunks: string[] = [];
 
-  for (const block of blocks) {
-    switch (block.type) {
-      case "text":
-        if (block.text.trim().length > 0) {
-          parts.push(normalizeSummaryText(block.text));
-        }
-        break;
-      case "tool_use":
-        parts.push(`[Called tool: ${block.toolName}]`);
-        break;
-      case "tool_result":
-        parts.push(
-          normalizeSummaryText(
-            `[Tool ${block.toolName} ${block.status}: ${block.output}]`
-          )
-        );
-        break;
-      case "thinking":
-        break;
+  for (const part of message.message.parts) {
+    if (isTextPart(part)) {
+      if (part.text.trim().length > 0) {
+        chunks.push(normalizeSummaryText(part.text));
+      }
+      continue;
+    }
+
+    if (isDynamicToolPart(part)) {
+      chunks.push(
+        normalizeSummaryText(`[${part.toolName}] ${toolPartOutput(part)}`)
+      );
     }
   }
 
-  return parts.join(" ").trim();
+  return chunks.join(" ").trim();
 };
 
+const estimateStoredTokens = (messages: readonly StoredMessage[]): number =>
+  messages.reduce((sum, m) => sum + estimateUiMessageTokens(m.message), 0);
+
 const generateSummaryText = (
-  coveredMessages: readonly Message[],
+  coveredMessages: readonly StoredMessage[],
   existingSummary?: string
 ): string => {
   if (coveredMessages.length === 0) {
@@ -132,8 +131,8 @@ export const compactSession = (
       compacted: false,
       coveredMessageCount: 0,
       preservedTailMessageCount: allMessages.length,
-      estimatedTokensBefore: estimateHistoryTokens(allMessages),
-      estimatedTokensAfter: estimateHistoryTokens(allMessages)
+      estimatedTokensBefore: estimateStoredTokens(allMessages),
+      estimatedTokensAfter: estimateStoredTokens(allMessages)
     };
   }
 
@@ -146,7 +145,7 @@ export const compactSession = (
   const existingSummary = existing?.summary;
 
   // Only summarize messages that are NEW since last compaction
-  let messagesToSummarize: readonly Message[];
+  let messagesToSummarize: readonly StoredMessage[];
   if (existing) {
     const coveredUntilIdx = covered.findIndex((m) => m.id === existing.coveredUntilMessageId);
     messagesToSummarize = coveredUntilIdx >= 0
@@ -158,8 +157,8 @@ export const compactSession = (
 
   const summary = generateSummaryText(messagesToSummarize, existingSummary);
 
-  const estimatedTokensBefore = estimateHistoryTokens(allMessages);
-  const estimatedTokensAfter = estimateTokens(summary) + estimateHistoryTokens(tail);
+  const estimatedTokensBefore = estimateStoredTokens(allMessages);
+  const estimatedTokensAfter = estimateTokens(summary) + estimateStoredTokens(tail);
 
   if (
     existing &&

@@ -11,6 +11,7 @@ import { loadConfig, type AppConfig } from "./config.js";
 import {
   initializeDatabase
 } from "./db/index.js";
+import { DrizzleRunRepository } from "./db/repositories/run-repository.js";
 import { createPinoObserver } from "./observability.js";
 import { findWorkspaceRoot } from "./services/workspace/index.js";
 import type { AppInfrastructure, AppServices } from "./types/common.js";
@@ -40,6 +41,13 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   }
 
   const db = initializeDatabase(config, logger);
+
+  // 进程重启时把上次没跑完的 run 收成 error —— 否则崩溃留下的 running 行会永远挂着。
+  const staleRuns = new DrizzleRunRepository(db).failStale();
+  if (staleRuns > 0) {
+    logger.warn({ staleRuns }, "marked in-flight runs as error after restart");
+  }
+
   const workRoot = resolveWorkRoot(config.TARGET_REPO_ROOT, logger);
 
   return {

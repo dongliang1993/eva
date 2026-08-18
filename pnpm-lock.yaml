@@ -197,7 +197,11 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
 
-  packages/shared: {}
+  packages/shared:
+    dependencies:
+      ai:
+        specifier: ^7.0.64
+        version: 7.0.64(zod@3.25.76)
 
 packages:
 

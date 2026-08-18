@@ -141,12 +141,14 @@ export interface ThreadSearchResult {
   snippet?: string;
 }
 
+import type { EvaUIMessage } from "./ui-message.js";
+
 export interface ThreadMessage {
   id: string;
   role: "user" | "assistant";
-  content: string;
+  message: EvaUIMessage;
+  runId: string | null;
   createdAt: string;
-  metadata: string;
 }
 
 export type MemoryCategory =
@@ -207,3 +209,5 @@ export const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : "Unknown error";
 
 export * from "./stream-events.js";
+export * from "./ui-message.js";
+export * from "./ui-message-builder.js";

@@ -161,9 +161,9 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
     return messageRepo.findBySessionId(id, { limit: query.limit ?? 200 }).map((message) => ({
       id: message.id,
       role: message.role,
-      content: message.content,
-      createdAt: message.createdAt,
-      metadata: message.metadata
+      message: message.message,
+      runId: message.runId,
+      createdAt: message.createdAt
     }));
   });
 };
