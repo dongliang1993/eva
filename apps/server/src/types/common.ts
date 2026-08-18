@@ -10,6 +10,7 @@ import type { AgentFactory } from "../services/agent-factory.js";
 import type { ApprovalGateway } from "../services/approval-gateway.js";
 import type { RunRegistry } from "../services/run-registry.js";
 import type { SessionService } from "../services/session.js";
+import type { WorkspaceStore } from "../services/workspaces/workspace-store.js";
 
 export interface AppInfrastructure {
   config: AppConfig;
@@ -17,8 +18,6 @@ export interface AppInfrastructure {
   skills: readonly Skill[];
   observer?: AgentObserver | undefined;
   soulSection?: PromptSection | undefined;
-  /** fs 工具的工作区根;undefined = 不注入 fs 工具(见 T0.3)。 */
-  workRoot?: string | undefined;
 }
 
 export interface AppServices {
@@ -26,6 +25,7 @@ export interface AppServices {
   session: SessionService;
   approvals: ApprovalGateway;
   runRegistry: RunRegistry;
+  workspaces: WorkspaceStore;
 }
 
 declare module "fastify" {

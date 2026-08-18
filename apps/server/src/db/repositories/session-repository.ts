@@ -12,7 +12,8 @@ export class DrizzleSessionRepository implements ISessionRepository {
       id: input.id,
       sessionKey: input.sessionKey,
       ...(input.title !== undefined ? { title: input.title } : {}),
-      ...(input.origin !== undefined ? { origin: input.origin } : {})
+      ...(input.origin !== undefined ? { origin: input.origin } : {}),
+      ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {})
     };
 
     this.db.insert(sessions).values(values).run();
@@ -69,6 +70,16 @@ export class DrizzleSessionRepository implements ISessionRepository {
       .set({ model })
       .where(eq(sessions.id, id))
       .run();
+  }
+
+  updateWorkspace(id: string, workspaceId: string | null): Session | undefined {
+    this.db
+      .update(sessions)
+      .set({ workspaceId })
+      .where(eq(sessions.id, id))
+      .run();
+
+    return this.findById(id);
   }
 
   deleteById(id: string): boolean {

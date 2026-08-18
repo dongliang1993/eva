@@ -131,6 +131,20 @@ export interface ThreadSummary {
   origin: string;
   updatedAt: string;
   messageCount: number;
+  workspaceId: string | null;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  path: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceInput {
+  path: string;
+  name?: string;
 }
 
 export interface ThreadSearchResult {

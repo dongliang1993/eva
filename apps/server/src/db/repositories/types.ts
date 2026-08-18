@@ -11,6 +11,7 @@ export interface Session {
   readonly skillPolicy: string;
   readonly memoryPolicy: string;
   readonly metadata: string;
+  readonly workspaceId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -20,6 +21,7 @@ export interface CreateSessionInput {
   readonly sessionKey: string;
   readonly title?: string;
   readonly origin?: string;
+  readonly workspaceId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +62,7 @@ export interface ISessionRepository {
   updateTimestamp(id: string): void;
   updateTitle(id: string, title: string): void;
   updateModel(id: string, model: string): void;
+  updateWorkspace(id: string, workspaceId: string | null): Session | undefined;
   deleteById(id: string): boolean;
 }
 

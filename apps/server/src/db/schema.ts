@@ -14,6 +14,7 @@ export const sessions = sqliteTable(
     skillPolicy: text("skill_policy").notNull().default("auto"),
     memoryPolicy: text("memory_policy").notNull().default("auto"),
     metadata: text("metadata").notNull().default("{}"),
+    workspaceId: text("workspace_id"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),
@@ -24,8 +25,25 @@ export const sessions = sqliteTable(
   (table) => [
     index("idx_sessions_session_key").on(table.sessionKey),
     index("idx_sessions_updated_at").on(table.updatedAt),
-    index("idx_sessions_origin").on(table.origin)
+    index("idx_sessions_origin").on(table.origin),
+    index("idx_sessions_workspace_id").on(table.workspaceId)
   ]
+);
+
+export const workspaces = sqliteTable(
+  "workspaces",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    path: text("path").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`(datetime('now'))`)
+  },
+  (table) => [uniqueIndex("idx_workspaces_path").on(table.path)]
 );
 
 export const providers = sqliteTable("providers", {

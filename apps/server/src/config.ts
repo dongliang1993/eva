@@ -4,7 +4,7 @@ import path from "node:path";
 import { parse } from "dotenv";
 import { z } from "zod";
 
-import { findWorkspaceRoot } from "./services/workspace/index.js";
+import { findMonorepoRoot } from "./services/monorepo-root.js";
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8082),
@@ -12,9 +12,6 @@ const envSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
-  // 显式工作区:未设置则不注入 fs 工具(见 deps.ts resolveWorkRoot)。不给
-  // process.cwd() 默认值 —— 桌面端 cwd 是 app 资源目录,agent 写文件会落在 App 包里。
-  TARGET_REPO_ROOT: z.string().default(""),
   DB_PATH: z.string().default("")
 });
 
@@ -36,7 +33,7 @@ const loadEnvFile = (filePath: string): Record<string, string> => {
 };
 
 const listEnvFilePaths = (cwd: string): string[] => {
-  const workspaceRoot = findWorkspaceRoot(cwd);
+  const workspaceRoot = findMonorepoRoot(cwd);
   const dirs = workspaceRoot === cwd ? [workspaceRoot] : [workspaceRoot, cwd];
   const seen = new Set<string>();
 
