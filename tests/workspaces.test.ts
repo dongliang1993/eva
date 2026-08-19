@@ -161,4 +161,24 @@ describe("loadProjectDocsSection", () => {
     const section = await loadProjectDocsSection(dir);
     expect(section?.body).toContain("truncated at 16KB");
   });
+
+  it("按 DSH 格式包成 <system-reminder> 块", async () => {
+    const dir = makeDir();
+    writeFileSync(path.join(dir, "AGENTS.md"), "# AGENTS.md\n\nsome rules");
+    const section = await loadProjectDocsSection(dir);
+    expect(section?.body.startsWith("<system-reminder>\n")).toBe(true);
+    expect(section?.body.endsWith("\n</system-reminder>")).toBe(true);
+    expect(section?.body).toContain(
+      "The following workspace instructions may be relevant to your work."
+    );
+    expect(section?.body).toContain("Instructions from: AGENTS.md");
+  });
+
+  it("截断后 </system-reminder> 仍然闭合", async () => {
+    const dir = makeDir();
+    writeFileSync(path.join(dir, "CLAUDE.md"), "x".repeat(20 * 1024));
+    const section = await loadProjectDocsSection(dir);
+    expect(section?.body).toContain("truncated at 16KB");
+    expect(section?.body.endsWith("</system-reminder>")).toBe(true);
+  });
 });

@@ -16,7 +16,27 @@ const TRUNCATION_MARKER =
   "\n\n[truncated at 16KB — read the file with the read_file tool for the rest]";
 
 /**
- * 把工作区根下的项目约定文件读成一个 prompt section。
+ * 与 DSH 注入 workspace 指令时逐字一致的引导语:项目约定只是 guidance,
+ * 不覆盖 system/developer 指令(语义上比旧的 "override your defaults" 更弱,
+ * 也更符合文件的实际地位)。
+ */
+const SYSTEM_REMINDER_PREAMBLE = [
+  "The following workspace instructions may be relevant to your work.",
+  "Use them as guidance when applicable.",
+  "More specific instructions take precedence over broader ones.",
+  "They do not override system, developer, or direct user instructions."
+].join(" ");
+
+const SYSTEM_REMINDER_OPEN = "<system-reminder>";
+const SYSTEM_REMINDER_CLOSE = "</system-reminder>";
+
+/** 标签自身的字节开销:开闭标签 + 两个换行。 */
+const REMINDER_TAG_BYTES =
+  SYSTEM_REMINDER_OPEN.length + SYSTEM_REMINDER_CLOSE.length + 2;
+
+/**
+ * 把工作区根下的项目约定文件读成一个 prompt section,按 DSH 的
+ * `<system-reminder>` 格式注入:引导语 + 逐文件 "Instructions from: X"。
  * 一个文件都没有 → 返回 undefined(不要注入空标题,那是给模型的噪音)。
  */
 export const loadProjectDocsSection = async (
@@ -37,16 +57,24 @@ export const loadProjectDocsSection = async (
     return undefined;
   }
 
-  const header =
-    `The user's workspace is \`${workspaceRoot}\`. The project ships the following conventions —\n` +
-    `follow them; they override your defaults.\n`;
+  // 截断只作用于标签内部,保证 `</system-reminder>` 永远闭合 ——
+  // 否则未闭合的 reminder 块会把后面的 prompt 内容也吞进指令区。
+  const innerBudget = MAX_PROJECT_DOCS_BYTES - REMINDER_TAG_BYTES;
 
-  const bodies = loaded.map(({ name, content }) => `### ${name}\n${content}`);
-  let body = header + bodies.join("\n\n");
+  const blocks = loaded.map(
+    ({ name, content }) => `Instructions from: ${name}\n\n${content}`
+  );
 
-  if (Buffer.byteLength(body, "utf-8") > MAX_PROJECT_DOCS_BYTES) {
-    body = truncateToBytes(body, MAX_PROJECT_DOCS_BYTES) + TRUNCATION_MARKER;
+  let inner = `${SYSTEM_REMINDER_PREAMBLE}\n\n${blocks.join("\n\n")}`;
+
+  if (Buffer.byteLength(inner, "utf-8") > innerBudget) {
+    inner = truncateToBytes(inner, innerBudget) + TRUNCATION_MARKER;
   }
+
+  const body =
+    `${SYSTEM_REMINDER_OPEN}\n` +
+    `${inner}\n` +
+    `${SYSTEM_REMINDER_CLOSE}`;
 
   return { heading: "Project Context", body };
 };
