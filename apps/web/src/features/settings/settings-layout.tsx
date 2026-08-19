@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { SettingsHeader } from "./components/settings-header";
 import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
+import { ThemeToggle } from "../../shared/ui/theme-toggle";
 
 const NAV_ITEMS = [
   { to: "/settings/models", label: "Models", icon: SettingsIcon },
@@ -21,16 +22,19 @@ export function SettingsLayout() {
 
   const settingsNav = (
     <div className="flex h-full flex-col bg-sidebar">
-      <div className="flex items-center gap-2 px-3 py-3">
-        <button
-          type="button"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          onClick={() => navigate("/chat")}
-          title="Back to chat"
-        >
-          <ArrowLeft size={18} />
-        </button>
-        <span className="text-sm font-medium text-foreground">Settings</span>
+      <div className="flex items-center justify-between px-3 py-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            onClick={() => navigate("/chat")}
+            title="Back to chat"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <span className="text-sm font-medium text-foreground">Settings</span>
+        </div>
+        <ThemeToggle />
       </div>
 
       <nav className="flex-1 px-2 py-2 space-y-1">

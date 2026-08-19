@@ -4,6 +4,7 @@ import { PanelLeftClose, PanelLeft, SquarePen, Settings } from "lucide-react";
 import { apiFetch } from "../../../shared/api/fetch";
 import type { ThreadSummary } from "../../../types/api";
 import { SessionStatusDot } from "./session-status-dot";
+import { ThemeToggle } from "../../../shared/ui/theme-toggle";
 
 interface SidebarProps {
   readonly collapsed: boolean;
@@ -51,6 +52,9 @@ export function Sidebar({
           <SquarePen size={18} />
         </button>
         <div className="flex-1" />
+        <div className="theme-toggle-compact flex flex-col items-center gap-2">
+          <ThemeToggle />
+        </div>
         <button
           type="button"
           className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
@@ -109,11 +113,12 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Bottom: settings */}
-      <div className="px-2 py-2">
+      {/* Bottom: theme toggle + settings */}
+      <div className="flex items-center justify-between px-2 py-2">
+        <ThemeToggle />
         <button
           type="button"
-          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          className="flex flex-1 items-center justify-start gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
           onClick={onOpenSettings}
         >
           <Settings size={16} />

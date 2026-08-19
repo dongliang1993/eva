@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
+import { ThemeProvider } from "./shared/hooks/use-theme";
 import { ChatPage } from "./features/threads/chat-page";
 import { SettingsLayout } from "./features/settings/settings-layout";
 import { ModelSettings } from "./features/settings/components/model-settings";
@@ -19,8 +20,9 @@ const queryClient = new QueryClient({
 
 export function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
         <Routes>
           <Route path="/" element={<Navigate to="/chat" replace />} />
           <Route path="/chat" element={<ChatPage />} />
@@ -33,6 +35,7 @@ export function App() {
           </Route>
         </Routes>
       </BrowserRouter>
-    </QueryClientProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }

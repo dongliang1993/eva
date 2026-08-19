@@ -13,10 +13,10 @@ export function SessionStatusDot({ status }: { readonly status: SessionStatus })
     return (
       <span
         title="正在运行"
-        className="h-2 w-2 shrink-0 rounded-full bg-blue-500 animate-pulse"
+        className="h-2 w-2 shrink-0 rounded-full bg-brand-focus animate-pulse"
       />
     );
   }
 
-  return <span title="等待操作" className="h-2 w-2 shrink-0 rounded-full bg-orange-500" />;
+  return <span title="等待操作" className="h-2 w-2 shrink-0 rounded-full bg-warning" />;
 }

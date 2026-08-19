@@ -1,70 +1,233 @@
 @import "tailwindcss";
 
 /* ------------------------------------------------------------------ */
-/* Theme tokens — Light mode (GitHub-style, from CodePilot)           */
-/* Override @theme block to switch themes.                            */
+/* Design tokens — DeepSeek Harness palette (light + dark)            */
+/*                                                                     */
+/* 三层结构 (对齐 harness 设计系统):                                    */
+/*   :root            浅色默认 + static 色板(浅暗共用)                  */
+/*   .dark           深色覆盖 (html class, 由 use-theme 切换)          */
+/*   @theme inline   把语义变量映射成 Tailwind color utilities         */
+/*                                                                     */
+/* Token 命名不带 dsw/ds 前缀, 分层:                                    */
+/*   --stat-*        static 色板 (浅暗共用)                             */
+/*   --bg-*          背景层级                                          */
+/*   --fg-*          文字层级                                          */
+/*   --brand-*       品牌色 (近黑主按钮 + deepseek 蓝 accent)           */
+/*   --border-*      边框层级                                          */
+/*   --component-*   组件专属 (sidebar / user-bubble / terminal)        */
 /* ------------------------------------------------------------------ */
 
-@theme {
-  /* Base */
-  --color-background: oklch(1 0 0);
-  --color-foreground: oklch(0.254 0.011 254);
+/* 暗色由 html.dark class 驱动 (见 use-theme), 不是 prefers-color-scheme */
+@custom-variant dark (&:where(.dark, .dark *));
 
-  /* Surfaces */
-  --color-card: oklch(1 0 0);
-  --color-sidebar: oklch(0.985 0.001 106.423);
-  --color-popover: oklch(1 0 0);
+:root {
+  color-scheme: light;
 
-  /* Primary (blue-purple) */
-  --color-primary: oklch(0.540 0.191 257.5);
-  --color-primary-foreground: oklch(0.985 0.001 106.423);
+  /* ---- static: neutral-bluish 冷调灰阶 (浅/暗共用) ---- */
+  --stat-neutral-50: #f9fafb;
+  --stat-neutral-60: #f5f6f7;
+  --stat-neutral-75: #f1f3f5;
+  --stat-neutral-100: #ebeef2;
+  --stat-neutral-200: #e1e5ee;
+  --stat-neutral-300: #cfd3d6;
+  --stat-neutral-400: #adb2b8;
+  --stat-neutral-500: #979da6;
+  --stat-neutral-600: #818590;
+  --stat-neutral-700: #61666b;
+  --stat-neutral-800: #353638;
+  --stat-neutral-850: #2c2c2e;
+  --stat-neutral-875: #232324;
+  --stat-neutral-900: #1b1b1c;
+  --stat-neutral-950: #151517;
+  --stat-neutral-1000: #0f1115;
 
-  /* Secondary */
-  --color-secondary: oklch(0.97 0.001 106.424);
-  --color-secondary-foreground: oklch(0.216 0.006 56.043);
+  /* ---- static: deepseek brand blues ---- */
+  --stat-deepseek-50: #edf3fe;
+  --stat-deepseek-100: #e4edfd;
+  --stat-deepseek-200: #d3e2ff;
+  --stat-deepseek-300: #b7c8fe;
+  --stat-deepseek-400: #679efe;
+  --stat-deepseek-450: #5686fe;
+  --stat-deepseek-500: #4176e6;
+  --stat-deepseek-600: #4868b2;
+  --stat-deepseek-800: #34415b;
+  --stat-deepseek-900: #283142;
 
-  /* Muted */
-  --color-muted: oklch(0.97 0.001 106.424);
-  --color-muted-foreground: oklch(0.553 0.013 58.071);
+  /* ---- static: semantic status 色 ---- */
+  --stat-success-500: #22c55e;
+  --stat-success-400: #4ed27e;
+  --stat-success-100: #e6faed;
+  --stat-error-600: #ec1313;
+  --stat-error-500: #ef4444;
+  --stat-error-400: #f25a5a;
+  --stat-error-50: #fef2f2;
+  --stat-error-100: #fee2e2;
+  --stat-warning-500: #f59e0b;
+  --stat-warning-400: #f7ad31;
+  --stat-warning-600: #dd8629;
+  --stat-warning-100: #fef5e7;
 
-  /* Accent */
-  --color-accent: oklch(0.97 0.001 106.424);
-  --color-accent-foreground: oklch(0.216 0.006 56.043);
+  /* ---- semantic: 背景层级 ---- */
+  --bg-app: var(--stat-neutral-60);        /* 页面底 */
+  --bg-surface: #ffffff;                  /* card / layer-1 */
+  --bg-surface-2: #ffffff;                /* layer-2 */
+  --bg-surface-3: #ffffff;                /* menu / popover / layer-3 */
+  --bg-hover: var(--stat-neutral-75);     /* 可交互 hover 底 */
+  --bg-overlay: #e9ecf2;                  /* 浮层底 */
+  --bg-sidebar: var(--stat-neutral-50);
+  --bg-code: var(--stat-neutral-50);
+  --bg-code-banner: var(--stat-neutral-50);
 
-  /* Borders */
-  --color-border: oklch(0.923 0.003 48.717);
-  --color-input: oklch(0.923 0.003 48.717);
-  --color-ring: oklch(0.540 0.191 257.5);
+  /* ---- semantic: 文字层级 ---- */
+  --fg-primary: var(--stat-neutral-1000);
+  --fg-secondary: var(--stat-neutral-700);
+  --fg-tertiary: var(--stat-neutral-600);
+  --fg-caption: var(--stat-neutral-400);
+  --fg-disabled: var(--stat-neutral-500);
+  --fg-on-primary: #ffffff;
+  --fg-on-bubble: #ffffff;
 
-  /* Semantic */
-  --color-destructive: oklch(0.577 0.245 27.325);
-  --color-success: oklch(0.527 0.154 150.069);
-  --color-warning: oklch(0.705 0.213 47.604);
+  /* ---- semantic: 品牌 ---- */
+  --brand-primary: var(--stat-neutral-1000); /* 主按钮面 = 近黑 */
+  --brand-on-primary: var(--stat-neutral-50);
+  --brand-focus: var(--stat-deepseek-500);   /* accent 蓝 */
+  --brand-focus-strong: var(--stat-deepseek-450);
 
-  /* User bubble (dark teal, like CodePilot screenshot) */
-  --color-user-bubble: oklch(0.45 0.08 220);
-  --color-user-bubble-foreground: oklch(0.985 0.001 106.423);
+  /* ---- borders (浅色用黑透明) ---- */
+  --border-l1: rgba(0, 0, 0, 0.04);
+  --border-l2: rgba(0, 0, 0, 0.1);
+  --border-l3: rgba(0, 0, 0, 0.12);
+  --border-l4: rgba(0, 0, 0, 0.16);
 
-  /* Sidebar active item */
-  --color-sidebar-active: oklch(0.540 0.191 257.5 / 10%);
-  --color-sidebar-active-foreground: oklch(0.540 0.191 257.5);
+  /* ---- component ---- */
+  --component-user-bubble: var(--stat-deepseek-500);
+  --component-user-bubble-fg: #ffffff;
+  --component-nav-active: var(--stat-neutral-100);
+  --component-nav-active-fg: var(--stat-neutral-1000);
+  --component-nav-hover: var(--stat-neutral-75);
+  --component-ongoing: var(--stat-deepseek-450);
+}
 
-  /* Terminal / code */
-  --color-terminal: oklch(0.97 0.001 106.424);
-  --color-terminal-foreground: oklch(0.254 0.011 254);
+/* ------------------------------------------------------------------
+ * Dark theme — 覆盖 semantic + component 层 (static 色板共用)
+ * ------------------------------------------------------------------ */
+.dark {
+  color-scheme: dark;
 
-  /* Radius */
+  --bg-app: var(--stat-neutral-950);
+  --bg-surface: var(--stat-neutral-875);
+  --bg-surface-2: var(--stat-neutral-850);
+  --bg-surface-3: var(--stat-neutral-800);
+  --bg-hover: var(--stat-neutral-850);
+  --bg-overlay: var(--stat-neutral-700);
+  --bg-sidebar: var(--stat-neutral-900);
+  --bg-code: var(--stat-neutral-900);
+  --bg-code-banner: var(--stat-neutral-850);
+
+  --fg-primary: var(--stat-neutral-50);
+  --fg-secondary: var(--stat-neutral-300);
+  --fg-tertiary: var(--stat-neutral-400);
+  --fg-caption: var(--stat-neutral-600);
+  --fg-disabled: var(--stat-neutral-500);
+  --fg-on-primary: var(--stat-neutral-1000);
+
+  --brand-primary: var(--stat-neutral-50);
+  --brand-on-primary: var(--stat-neutral-1000);
+  --brand-focus: var(--stat-deepseek-400);
+  --brand-focus-strong: var(--stat-deepseek-450);
+
+  /* borders (暗色用白透明) */
+  --border-l1: rgba(255, 255, 255, 0.06);
+  --border-l2: rgba(255, 255, 255, 0.12);
+  --border-l3: rgba(255, 255, 255, 0.16);
+  --border-l4: rgba(255, 255, 255, 0.2);
+
+  --component-user-bubble: var(--stat-deepseek-600);
+  --component-user-bubble-fg: var(--stat-neutral-50);
+  --component-nav-active: var(--stat-neutral-750);
+  --component-nav-active-fg: var(--stat-neutral-50);
+  --component-nav-hover: var(--stat-neutral-850);
+  --component-ongoing: var(--stat-deepseek-400);
+}
+
+/* ------------------------------------------------------------------
+   Tailwind v4: 暴露成 color utilities (bg-background / text-foreground…)
+   @theme inline 让工具类直接引用上面 :root/.dark 变量的实时值
+   ------------------------------------------------------------------ */
+@theme inline {
+  /* Backgrounds */
+  --color-background: var(--bg-app);
+  --color-card: var(--bg-surface);
+  --color-surface: var(--bg-surface);
+  --color-surface-2: var(--bg-surface-2);
+  --color-surface-3: var(--bg-surface-3);
+  --color-popover: var(--bg-surface-3);
+  --color-sidebar: var(--bg-sidebar);
+  --color-code: var(--bg-code);
+
+  /* Radius — 保持项目既有圆角规格 */
   --radius-sm: 0.5rem;
   --radius-md: 0.625rem;
   --radius-lg: 0.75rem;
   --radius-xl: 1rem;
   --radius-2xl: 1.25rem;
+
+  /* Text */
+  --color-foreground: var(--fg-primary);
+  --color-muted-foreground: var(--fg-tertiary);
+  --color-secondary-foreground: var(--fg-primary);
+  --color-caption: var(--fg-caption);
+
+  /* Muted / hover surface (兼容既有 bg-muted / bg-accent) */
+  --color-muted: var(--bg-hover);
+  --color-secondary: var(--bg-overlay);
+  --color-accent: var(--bg-hover);
+  --color-accent-foreground: var(--fg-primary);
+
+  /* Primary — 近黑品牌主按钮 (对准 harness) */
+  --color-primary: var(--brand-primary);
+  --color-primary-foreground: var(--brand-on-primary);
+  --color-ring: var(--brand-focus);
+  --color-brand-focus: var(--brand-focus-strong);
+
+  /* Semantic status */
+  --color-success: var(--stat-success-500);
+  --color-warning: var(--stat-warning-500);
+  --color-destructive: var(--stat-error-500);
+
+  /* Borders */
+  --color-border: var(--border-l2);
+  --color-border-strong: var(--border-l3);
+  --color-input: var(--border-l2);
+
+  /* Component */
+  --color-user-bubble: var(--component-user-bubble);
+  --color-user-bubble-foreground: var(--component-user-bubble-fg);
+  --color-sidebar-active: var(--component-nav-active);
+  --color-sidebar-active-foreground: var(--component-nav-active-fg);
+  --color-terminal: var(--bg-code);
 }
 
 /* ------------------------------------------------------------------ */
-/* Electron titlebar drag region                                      */
+/* Base                                                                */
 /* ------------------------------------------------------------------ */
+html,
+body,
+#root {
+  height: 100%;
+}
 
+body {
+  background-color: var(--bg-app);
+  color: var(--fg-primary);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Electron titlebar drag region                                       */
+/* ------------------------------------------------------------------ */
 .titlebar-drag {
   -webkit-app-region: drag;
 }
@@ -77,18 +240,8 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Base styles                                                        */
+/* Global scrollbar — thin                                            */
 /* ------------------------------------------------------------------ */
-
-body {
-  background-color: var(--color-background);
-  color: var(--color-foreground);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  -webkit-font-smoothing: antialiased;
-  font-size: 14px;
-}
-
-/* Global scrollbar — thin, transparent by default */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -96,11 +249,17 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: oklch(0.553 0.013 58.071 / 25%);
+  background: rgba(0, 0, 0, 0.25);
   border-radius: 3px;
 }
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+}
 ::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.553 0.013 58.071 / 40%);
+  background: rgba(0, 0, 0, 0.4);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
 }
 
 /*
@@ -122,5 +281,5 @@ body {
 
 /* Text selection */
 ::selection {
-  background: oklch(0.540 0.191 257.5 / 20%);
+  background: color-mix(in oklab, var(--brand-focus) 20%, transparent);
 }
