@@ -22,3 +22,4 @@ export * from "./tools/web-fetch/index.js";
 export * from "./prompts/sections/web-fetch.js";
 export * from "./tools/memory/index.js";
 export * from "./tools/fs/index.js";
+export * from "./tools/risk.js";
