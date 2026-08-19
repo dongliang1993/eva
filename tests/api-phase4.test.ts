@@ -194,12 +194,24 @@ describe("Phase 4 API routes", () => {
       ["assistant", "Sixth assistant reply"]
     ];
 
+    let parentId: string | undefined;
+    let depth = 0;
+
     for (const [role, content] of contents) {
-      messageRepo.create({
+      // 线性对话:每条消息一个新 slot(位置),parent 指向上一条。
+      const stored = messageRepo.create({
         sessionId: thread.id,
-        message: textMessage(role, content)
+        message: textMessage(role, content),
+        ...(parentId !== undefined ? { parentId } : {}),
+        slotId: randomUUID(),
+        depth
       });
+      parentId = stored.id;
+      depth += 1;
     }
+
+    // T12 起会话有 active_leaf 指针;GET messages 只返回激活链。
+    sessionRepo.updateActiveLeaf(thread.id, parentId!);
 
     const compactResponse = await app.inject({
       method: "POST",

@@ -10,6 +10,8 @@ export const sessions = sqliteTable(
     origin: text("origin").notNull().default("chat"),
     metadata: text("metadata").notNull().default("{}"),
     workspaceId: text("workspace_id"),
+    /** 会话当前激活分支的叶子消息。为空(老会话)→ 读路径退化用时间上最后一条。 */
+    activeLeafId: text("active_leaf_id"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),

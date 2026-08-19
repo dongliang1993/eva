@@ -12,15 +12,18 @@ import type {
 import {
   UiMessageBuilder,
   createUserUIMessage,
-  toErrorMessage
+  toErrorMessage,
+  uiMessageText
 } from "@eva/shared";
 
 import {
   AgentUnavailableError,
   type ResolvedWorkspaceContext
 } from "../agent.js";
+import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
 import { DrizzleRunRepository, runStatusFor } from "../db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
+import type { MessagePosition } from "../services/session.js";
 import { autoCompactIfNeeded, createAutoCompactConfig } from "../services/auto-compact.js";
 import { buildMemoryRuntimeSupport } from "../services/memory-runtime.js";
 import type { ModelBinding } from "../services/providers/model-resolver.js";
@@ -48,7 +51,16 @@ interface PreparedRun {
 
 interface OpenTurn {
   readonly sessionId: string;
+  /** runs 台账的 user_message_id,同时也是模型可见历史的末端。 */
   readonly userMessageId: string;
+  /** 本轮人工输入文本(send = body.text;retry = 被重试那条 user 消息文本)。 */
+  readonly humanText: string;
+  /** 本轮 assistant 消息在树里的落点。 */
+  readonly assistantPosition: MessagePosition;
+  /**
+   * 模型历史从哪回溯。send = 刚落库的用户消息;retry = 被重试消息的父(不含被重试那条 v1)。
+   */
+  readonly historyLeafId: string;
   readonly workspace?: ResolvedWorkspaceContext | undefined;
   /** 本次请求新建了会话时非空 —— 供 503 回滚用。 */
   readonly createdSessionId?: string | undefined;
@@ -57,13 +69,72 @@ interface OpenTurn {
 /**
  * 阶段①:建/取会话 + 落用户消息 + 解析工作区(含 project docs)。
  * 只回答「这次对话发生在哪」。不碰模型 —— 模型是阶段②(工作区确定后)才知道的。
+ *
+ * 分 send / retry 两支,返回同一个 OpenTurn:
+ * - send:落一条用户消息,assistant 位置 = activeLeaf 之后(slot 新 UUID);
+ * - retry:不落任何新消息,assistant 位置沿被重试消息的 parent/slot/depth
+ *   (同槽位 v2)。校验见下。
  */
 const openSessionTurn = async (
   app: FastifyInstance,
   body: RunRequest,
   runId: string
 ): Promise<OpenTurn> => {
-  const userMessage = createUserUIMessage(randomUUID(), body.text, { runId });
+  if (body.retryMessageId !== undefined) {
+    // ---------------- retry 分支 ----------------
+    const messageRepo = new DrizzleMessageRepository(app.infra.db);
+    const target = messageRepo.findById(body.retryMessageId);
+
+    if (!target) {
+      throw new Error("要重新生成的消息不存在");
+    }
+
+    if (target.sessionId !== body.sessionId) {
+      throw new Error("不能跨会话重新生成");
+    }
+
+    if (target.role !== "assistant") {
+      throw new Error("只能重新生成 assistant 回复");
+    }
+
+    const current = new DrizzleSessionRepository(app.infra.db).findById(target.sessionId);
+    if (!current || current.activeLeafId !== target.id) {
+      throw new Error("只能重新生成最后一条回复");
+    }
+
+    const workspace = resolveWorkspaceForSession(
+      app.services.workspaces,
+      current,
+      app.log
+    );
+
+    const docsSection = workspace
+      ? await loadProjectDocsSection(workspace.path)
+      : undefined;
+
+    const workspaceContext: ResolvedWorkspaceContext | undefined = workspace
+      ? {
+        id: workspace.id,
+        root: workspace.path,
+        ...(docsSection !== undefined ? { docsSection } : {})
+      }
+      : undefined;
+
+    const parentMessage =
+      target.parentId !== null ? messageRepo.findById(target.parentId) : undefined;
+
+    return {
+      sessionId: target.sessionId,
+      userMessageId: target.parentId!,
+      humanText: parentMessage ? uiMessageText(parentMessage.message) : "",
+      assistantPosition: app.services.session.positionAlongside(target),
+      historyLeafId: target.parentId!,
+      ...(workspaceContext !== undefined ? { workspace: workspaceContext } : {})
+    };
+  }
+
+  // ---------------- send 分支 ----------------
+  const userMessage = createUserUIMessage(randomUUID(), body.text!, { runId });
 
   const resolved = body.sessionId
     ? app.services.session.continueSession(body.sessionId, userMessage, runId)
@@ -94,6 +165,9 @@ const openSessionTurn = async (
   return {
     sessionId: session.id,
     userMessageId: storedUser.id,
+    humanText: body.text!,
+    assistantPosition: app.services.session.positionAfterActiveLeaf(session.id),
+    historyLeafId: storedUser.id,
     ...(resolved === undefined ? { createdSessionId: session.id } : {}),
     ...(workspaceContext !== undefined ? { workspace: workspaceContext } : {})
   };
@@ -107,8 +181,7 @@ const openSessionTurn = async (
 const buildRunContext = async (
   app: FastifyInstance,
   open: OpenTurn,
-  resolved: { readonly mainModel: ModelBinding; readonly toolModel: ModelBinding },
-  body: RunRequest
+  resolved: { readonly mainModel: ModelBinding; readonly toolModel: ModelBinding }
 ): Promise<PreparedRun> => {
   const { mainModel } = resolved;
   new DrizzleSessionRepository(app.infra.db).updateModel(open.sessionId, mainModel.qualifiedModelId);
@@ -118,7 +191,11 @@ const buildRunContext = async (
     summarize: createModelSummarizer(resolved.toolModel, app.log)
   });
 
-  const history = app.services.session.buildModelHistory(app.infra.db, open.sessionId);
+  const history = app.services.session.buildModelHistory(
+    app.infra.db,
+    open.sessionId,
+    open.historyLeafId
+  );
 
   // ignoreIncompleteToolCalls:上一轮被 abort 时可能留下没有结果的 tool part,
   // 带着它去请求模型会被 provider 拒绝(tool_use 必须有配对的 tool_result)。
@@ -133,7 +210,7 @@ const buildRunContext = async (
   const memoryRuntime = await buildMemoryRuntimeSupport({
     db: app.infra.db,
     config: app.infra.config,
-    userMessage: body.text,
+    userMessage: open.humanText,
     historyTokens: estimateModelHistoryTokens(history),
     ...(mainModel.contextWindow !== undefined || mainModel.maxOutputTokens !== undefined
       ? {
@@ -215,7 +292,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       });
 
       // 阶段③:模型这轮看见什么(需要 mainModel 的窗口信息)。
-      const prepared = await buildRunContext(app, open, resolved, body);
+      const prepared = await buildRunContext(app, open, resolved);
 
       const runs = new DrizzleRunRepository(app.infra.db);
       runs.start({
@@ -283,6 +360,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       const stored = app.services.session.recordAssistantMessage(
         sessionId,
         assistantMessage,
+        open.assistantPosition,
         runId
       );
 

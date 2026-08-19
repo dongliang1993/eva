@@ -25,6 +25,9 @@ interface VirtualizedMessagesProps {
 }
 
 function VirtualizedMessages({ messages, scrollRef }: VirtualizedMessagesProps) {
+  const lastAssistantId = [...messages]
+    .reverse()
+    .find((m) => m.role === "assistant")?.id;
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollRef.current,
@@ -56,7 +59,10 @@ function VirtualizedMessages({ messages, scrollRef }: VirtualizedMessagesProps) 
               transform: `translateY(${virtualItem.start}px)`
             }}
           >
-            <MessageBubble message={message} />
+            <MessageBubble
+              message={message}
+              isLastAssistant={message.id === lastAssistantId}
+            />
           </div>
         );
       })}

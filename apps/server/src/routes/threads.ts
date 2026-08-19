@@ -8,6 +8,7 @@ import type { ThreadMessage, ThreadStatus, ThreadSummary, ThreadUsage } from "@e
 import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
 import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
+import { buildActiveChain, resolveLeafFrom } from "../services/message-tree.js";
 import { compactSession } from "../services/compact.js";
 import { deriveSessionStatus, readSessionRuntimeStatus } from "../services/session-status.js";
 import { readSessionUsage } from "../services/session-usage.js";
@@ -237,13 +238,67 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
     }
 
     const messageRepo = new DrizzleMessageRepository(app.infra.db);
+    const all = messageRepo.findBySessionId(id, { limit: query.limit ?? 200 });
+    const chain = buildActiveChain(all, thread.activeLeafId);
 
-    return messageRepo.findBySessionId(id, { limit: query.limit ?? 200 }).map((message) => ({
+    // 每个 slot 的版本 id 列表(创建序)→ ThreadMessage.siblingIds。
+    const siblingsBySlot = new Map<string, string[]>();
+    for (const message of all) {
+      if (message.slotId !== null) {
+        const list = siblingsBySlot.get(message.slotId) ?? [];
+        list.push(message.id);
+        siblingsBySlot.set(message.slotId, list);
+      }
+    }
+
+    return chain.map((message) => ({
       id: message.id,
       role: message.role,
       message: message.message,
       runId: message.runId,
-      createdAt: message.createdAt
+      createdAt: message.createdAt,
+      siblingIds: message.slotId !== null
+        ? (siblingsBySlot.get(message.slotId) ?? [message.id])
+        : [message.id]
+    }));
+  });
+
+  app.post("/api/v1/messages/:id/switch-version", async (request, reply): Promise<readonly ThreadMessage[] | { error: string }> => {
+    const { id } = request.params as { id: string };
+    const messageRepo = new DrizzleMessageRepository(app.infra.db);
+    const message = messageRepo.findById(id);
+
+    if (!message) {
+      reply.code(404);
+      return { error: "Message not found" };
+    }
+
+    // 切版本:activeLeafId = 从 target 向下探到分支末端(该分支的后续对话一并恢复)。
+    const all = messageRepo.findBySessionId(message.sessionId, { limit: 2000 });
+    const sessionRepo = new DrizzleSessionRepository(app.infra.db);
+    const session = sessionRepo.findById(message.sessionId)!;
+    const leafId = resolveLeafFrom(all, id);
+    sessionRepo.updateActiveLeaf(session.id, leafId);
+
+    const chain = buildActiveChain(all, leafId);
+    const siblingsBySlot = new Map<string, string[]>();
+    for (const m of all) {
+      if (m.slotId !== null) {
+        const list = siblingsBySlot.get(m.slotId) ?? [];
+        list.push(m.id);
+        siblingsBySlot.set(m.slotId, list);
+      }
+    }
+
+    return chain.map((m) => ({
+      id: m.id,
+      role: m.role,
+      message: m.message,
+      runId: m.runId,
+      createdAt: m.createdAt,
+      siblingIds: m.slotId !== null
+        ? (siblingsBySlot.get(m.slotId) ?? [m.id])
+        : [m.id]
     }));
   });
 };

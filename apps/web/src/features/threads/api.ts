@@ -1,11 +1,28 @@
 import { apiFetch } from "../../shared/api/fetch";
-import type { ThreadStatus, ThreadUsage } from "../../types/api";
+import type { ThreadMessage, ThreadStatus, ThreadUsage } from "../../types/api";
 
 export const fetchThreadStatus = async (threadId: string): Promise<ThreadStatus> =>
   apiFetch<ThreadStatus>(`/api/v1/threads/${threadId}/status`);
 
 export const fetchThreadUsage = async (threadId: string): Promise<ThreadUsage> =>
   apiFetch<ThreadUsage>(`/api/v1/threads/${threadId}/usage`);
+
+/** 拉取该会话激活链上的全部消息(含 siblingIds 版本信息)。 */
+export const fetchThreadMessages = async (
+  threadId: string
+): Promise<readonly ThreadMessage[]> =>
+  apiFetch<readonly ThreadMessage[]>(`/api/v1/threads/${threadId}/messages`);
+
+/**
+ * 把会话切到以 messageId 为"位置"那条分支的叶子(下探到分支末端)。
+ * 返回切换后的激活链,前端直接替换。
+ */
+export const switchVersion = async (
+  messageId: string
+): Promise<readonly ThreadMessage[]> =>
+  apiFetch<readonly ThreadMessage[]>(`/api/v1/messages/${messageId}/switch-version`, {
+    method: "POST"
+  });
 
 export interface PendingApproval {
   readonly callId: string;

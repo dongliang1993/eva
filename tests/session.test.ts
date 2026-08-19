@@ -155,7 +155,8 @@ describe("SessionService", () => {
 
     service.recordAssistantMessage(
       first.session.id,
-      assistantMessage([{ type: "text", text: "Bot reply", state: "done" }])
+      assistantMessage([{ type: "text", text: "Bot reply", state: "done" }]),
+      service.positionAfterActiveLeaf(first.session.id)
     );
 
     const second = service.continueSession(first.session.id, userMessage("Second message"));
@@ -190,7 +191,8 @@ describe("SessionService", () => {
           output: "NullPointerException at line 42"
         },
         { type: "text", text: "Found the bug", state: "done" }
-      ])
+      ]),
+      service.positionAfterActiveLeaf(session.id)
     );
 
     const messages = messageRepo.findBySessionId(session.id);
@@ -222,7 +224,8 @@ describe("SessionService", () => {
           output: "export const x = 1;"
         },
         { type: "text", text: "读到了", state: "done" }
-      ])
+      ]),
+      service.positionAfterActiveLeaf(session.id)
     );
 
     const history = service.buildModelHistory(db, session.id);
@@ -248,7 +251,8 @@ describe("SessionService", () => {
           state: "input-available",
           input: { path: "a.ts" }
         }
-      ])
+      ]),
+      service.positionAfterActiveLeaf(session.id)
     );
 
     const history = service.buildModelHistory(db, session.id);
@@ -269,7 +273,8 @@ describe("SessionService", () => {
       {
         ...assistantMessage([{ type: "text", text: "Response", state: "done" }]),
         metadata: { usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } }
-      }
+      },
+      service.positionAfterActiveLeaf(session.id)
     );
 
     expect(msg.message.metadata?.usage).toMatchObject({
@@ -300,7 +305,8 @@ describe("SessionService", () => {
 
     service.recordAssistantMessage(
       session.id,
-      assistantMessage([{ type: "text", text: "reply", state: "done" }])
+      assistantMessage([{ type: "text", text: "reply", state: "done" }]),
+      service.positionAfterActiveLeaf(session.id)
     );
     const second = messageRepo.findLastBySessionId(session.id)!;
 

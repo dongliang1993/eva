@@ -83,6 +83,16 @@ export class DrizzleMessageRepository implements IMessageRepository {
     return row ? toStored(row) : undefined;
   }
 
+  findById(id: string): StoredMessage | undefined {
+    const row = this.db
+      .select()
+      .from(messages)
+      .where(eq(messages.id, id))
+      .get();
+
+    return row ? toStored(row) : undefined;
+  }
+
   deleteBySessionId(sessionId: string): number {
     const result = this.db
       .delete(messages)

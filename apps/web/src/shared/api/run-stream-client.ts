@@ -31,9 +31,12 @@ export interface StreamCallbacks {
 }
 
 export interface StreamRequest {
-  readonly text: string;
+  /** 新消息。与 retryMessageId 二选一;retry 模式不传。 */
+  readonly text?: string;
   readonly sessionId?: string;
   readonly modelId?: string;
+  /** 重新生成这条 assistant 消息(同槽位落新版本)。必须同时给 sessionId。 */
+  readonly retryMessageId?: string;
 }
 
 /**

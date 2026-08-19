@@ -7,6 +7,8 @@ export interface Session {
   readonly origin: string;
   readonly metadata: string;
   readonly workspaceId: string | null;
+  /** 当前激活分支的叶子消息 id;老会话可能为 null(退化成时间序最后一条)。 */
+  readonly activeLeafId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -56,6 +58,8 @@ export interface ISessionRepository {
   updateTitle(id: string, title: string): void;
   updateModel(id: string, model: string): void;
   updateWorkspace(id: string, workspaceId: string | null): Session | undefined;
+  /** 会话的激活分支叶子。允许悬空(id 可指向已删消息) —— 读路径已处理。 */
+  updateActiveLeaf(id: string, messageId: string): void;
   deleteById(id: string): boolean;
 }
 
@@ -66,6 +70,8 @@ export interface IMessageRepository {
     options?: GetMessagesOptions
   ): readonly StoredMessage[];
   findLastBySessionId(sessionId: string): StoredMessage | undefined;
+  /** 按 id 取任意消息(不限制会话)。切版本/重生成要定位目标消息。 */
+  findById(id: string): StoredMessage | undefined;
   deleteBySessionId(sessionId: string): number;
 }
 

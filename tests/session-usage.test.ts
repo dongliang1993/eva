@@ -76,18 +76,25 @@ describe("readSessionUsage", () => {
     sessionRepo.create({ id: "s-msg" });
     const messageRepo = new DrizzleMessageRepository(db);
 
-    messageRepo.create({
+    const first = messageRepo.create({
       sessionId: "s-msg",
-      message: createUserUIMessage(randomUUID(), "这是一段很长的中文用户消息用于估算")
+      message: createUserUIMessage(randomUUID(), "这是一段很长的中文用户消息用于估算"),
+      slotId: randomUUID(),
+      depth: 0
     });
+    sessionRepo.updateActiveLeaf("s-msg", first.id);
 
     const sessionService = new SessionService(sessionRepo, messageRepo);
     const before = readSessionUsage(db, config, sessionService, "s-msg").contextTokens;
 
-    messageRepo.create({
+    const second = messageRepo.create({
       sessionId: "s-msg",
-      message: createUserUIMessage(randomUUID(), "又多了一条消息")
+      message: createUserUIMessage(randomUUID(), "又多了一条消息"),
+      parentId: first.id,
+      slotId: randomUUID(),
+      depth: 1
     });
+    sessionRepo.updateActiveLeaf("s-msg", second.id);
     const after = readSessionUsage(db, config, sessionService, "s-msg").contextTokens;
 
     expect(after).toBeGreaterThan(before);

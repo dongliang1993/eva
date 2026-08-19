@@ -72,6 +72,14 @@ export class DrizzleSessionRepository implements ISessionRepository {
     return this.findById(id);
   }
 
+  updateActiveLeaf(id: string, messageId: string): void {
+    this.db
+      .update(sessions)
+      .set({ activeLeafId: messageId })
+      .where(eq(sessions.id, id))
+      .run();
+  }
+
   deleteById(id: string): boolean {
     const result = this.db
       .delete(sessions)

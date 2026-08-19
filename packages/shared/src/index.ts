@@ -199,6 +199,11 @@ export interface ThreadMessage {
   message: EvaUIMessage;
   runId: string | null;
   createdAt: string;
+  /**
+   * 同槽位的全部版本 id,按创建顺序。长度 > 1 时前端显示 ‹ n/m › 切换器。
+   * 不额外给 index/count —— 前端用 siblingIds.indexOf(id) 就能算,避免三份冗余。
+   */
+  siblingIds: readonly string[];
 }
 
 export type MemoryCategory =

@@ -9,6 +9,7 @@ import { setThreadWorkspace } from "../workspaces/api";
 import { useSettings } from "../settings/hooks/use-settings";
 import { Sidebar } from "./components/sidebar";
 import { ChatView } from "./components/chat-view";
+import { VersionActionsProvider } from "./components/version-actions-context";
 import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
 import type { ThreadSummary } from "../../types/api";
 
@@ -36,7 +37,10 @@ export function ChatPage() {
     streamingMessage,
     isStreaming,
     sessionId,
+    siblingIdsById,
     sendMessage,
+    regenerate,
+    switchVersion,
     stopStreaming,
     newConversation,
     loadSession
@@ -149,22 +153,24 @@ export function ChatPage() {
           />
         }
       >
-        <ChatView
-          messages={messages}
-          streamingMessage={streamingMessage}
-          isStreaming={isStreaming}
-          selectedModel={selectedModel}
-          onSend={(text) => sendMessage(text, selectedModel ?? undefined)}
-          onStop={stopStreaming}
-          onSelectModel={setSelectedModel}
-          workspaceId={displayWorkspaceId}
-          onSelectWorkspace={handleSelectWorkspace}
-          sessionId={sessionId}
-          pendingApprovals={approvals.pending}
-          onApproveOnce={(callId) => approvals.decide(callId, true)}
-          onDeny={(callId) => approvals.decide(callId, false)}
-          onAllowAlways={(callId) => approvals.allowAlways(callId)}
-        />
+        <VersionActionsProvider value={{ siblingIdsById, isStreaming, onRegenerate: regenerate, onSwitchVersion: switchVersion }}>
+          <ChatView
+            messages={messages}
+            streamingMessage={streamingMessage}
+            isStreaming={isStreaming}
+            selectedModel={selectedModel}
+            onSend={(text) => sendMessage(text, selectedModel ?? undefined)}
+            onStop={stopStreaming}
+            onSelectModel={setSelectedModel}
+            workspaceId={displayWorkspaceId}
+            onSelectWorkspace={handleSelectWorkspace}
+            sessionId={sessionId}
+            pendingApprovals={approvals.pending}
+            onApproveOnce={(callId) => approvals.decide(callId, true)}
+            onDeny={(callId) => approvals.decide(callId, false)}
+            onAllowAlways={(callId) => approvals.allowAlways(callId)}
+          />
+        </VersionActionsProvider>
       </ResizableSidebar>
     </div>
   );
