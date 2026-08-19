@@ -32,10 +32,10 @@
 | 任务 | 状态 | 实证 |
 |---|---|---|
 | S0 地基 | ✅ 完成 | desktop fork server UtilityProcess + 动态端口 + 健康探测 + shell-env + 代理 |
-| S1 harness 迁 SDK | ⚙️ 主体完成 | `ai@^7` + `@ai-sdk/anthropic` 在依赖里，`lead-agent.ts` 用 `streamText`；LangChain 手写 tool_call 重组已删 |
-| S1 SSE 协议 | ❌ 未对齐 | 仍是自定义 `text_chunk / tool_call_start / tool_call_end / result / error / end` |
-| S1.1 前端三红线 | ❌ 未达标（13 §4 实证） | 无 seq 字段直接 append；chunk 到达即全量 setState；Streamdown 全篇重解析；列表无虚拟化 |
-| S2 存储+版本树 | ⚠️ 半 | `sessions/messages` 平铺表（role/content/searchText），无 UIMessage parts、无 parent/slot/depth |
+| S1 harness 迁 SDK | ✅ 完成（R1 T2） | `lead-agent.ts` 用 `streamText({ stopWhen, prepareStep })`，无手写 step 循环；`grep -rn "@langchain" packages apps` 无结果 |
+| S1 SSE 协议 | ✅ 已对齐（R1） | `packages/shared/src/stream-events.ts` 用 `text-delta / reasoning-delta / tool-input-start / tool-call / tool-result / step-start / finish` |
+| S1.1 前端三红线 | ✅ 达标（R1 T3） | `shared/streaming/{delta-accumulator,use-smooth-stream}.ts`；`markdown.tsx` 的 `parseMarkdownIntoBlocks` + `memo`；`message-list.tsx` 的 `useVirtualizer` |
+| S2 存储+版本树 | ⚙️ 数据地基完成（R1 T1），版本切换 UI 见 R3 T12 | `schema.ts` 的 `messages` 有 `message`(UIMessage JSON) / `parent_id` / `slot_id` / `depth`；`grep -rn "switch-version\|regenerate" apps/server/src apps/web/src` 有实现 |
 | S3 工作区 | ✅ 完成（R2 T6） | `workspaces` 表 + 会话绑定 + per-run 注入 + CLAUDE.md 注入；TARGET_REPO_ROOT 已删 |
 | S4 工具+审批 | ⚙️ 大部分在 | fs 工具组 + tool-overflow ✅；审批归属收敛到 run（R2 T5）✅；per-tool 白名单/危险命令标注待补 |
 | S5 Skill | ✅ 基本完成 | loader/parser/prompt/read-skill-tool 三级渐进披露 |
@@ -47,6 +47,10 @@
 
 > **改因（R2 T10）**：进度按 R1+R2 实际完成情况重算。S8（MCP）提前到 S6/S7 之前的理由
 > 见 `docs/plans/r2/00-overview.md` §2.1。
+>
+> **改因（R3 T13）**：R2 T10 重算时漏掉 R1 时代那四行，此处按代码逐条校正 —— S1/S1 SSE/S1.1
+> 早已随 R1 完成，S2 数据地基（parent/slot/depth）也在 R1 落地，仅版本切换 UI 待 R3 T12 补全。
+> 依据命令见 `docs/plans/r3/T13-chores.md` §3。当前关键路径：`S6 → S9 → S7 → S11`。
 
 **结论：Eva 完成 Phase A（S3/S4 主链）。剩余关键路径：`S6 → S9 → S7 → S11`。**
 
