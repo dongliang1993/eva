@@ -135,3 +135,37 @@ T9 只支持静态 token（`headers` 里塞 Bearer）。`docs 14 §4.7` 计划�
 `Resources/server/dist/bundled` 但不存在。当前 `bundled/` 是空目录所以今天没坏,
 第一个内置 skill 加进去那天会静默失效。修法二选一:随 `copy-migrations.mjs` 拷进 dist,
 或走 extraResources。没在 T11 顺手修 —— 没有内置 skill 就没有验收对象。
+
+### S7 子代理:pull 改 push,推翻 spec 的 fork-join 两件套 `[r4]`(T15)
+
+`T15-subagents.md` §2.1 定的是 `Task` + `TaskOutput` 两个原语、**默认前台**,模型靠
+`TaskOutput` 拉结果。按 spec 实现后真机一跑就翻车:模型对同一个 taskId 反复 join,
+每次 ~2ms 返回 "still running",刷出一屏零信息细行却始终拿不到结果。
+
+第一轮我把 `block` 缺省改 true、又在返回文案里写"不要再调了"——**这是用 prompt 压制
+结构问题**。病根是 pull 通道本身:给模型一个可反复调用的查询接口,它就会轮询。
+
+改成 push(对照 dsh 的 session 实证):只留一个 `subagent` 工具(缺省后台),**删掉 join
+工具**;子代理用 `report` 主动交付结论,runtime 在主 loop 收尾前 drain 一次,有通知就
+注入为一条主链消息后续跑一圈。轮询于是在结构上不存在。
+
+**教训**:能力边界比 prompt 约束可靠。想让模型"别做某件事",最稳的做法是不给它那个
+工具,而不是在工具描述里写禁令。文案连否定式提及("no need to poll")都会种下念头 ——
+最终措辞里彻底不提"轮询/查询"这类词。
+
+三个连带的偏离与坑:
+- **§2.1 的"默认前台"也被推翻**。spec 的论点(可见性=成本熔断器,`docs 08 §6.4`)仍成立,
+  但改由卡片实时流 + report 帧承担,而不是靠前台阻塞。
+- **`description` 一直是 spec 要求的(§2.1),第一版漏实现**。后果是并行派出的多个子代理
+  在 UI 上全叫 `Subagent · explorer`,人分不出谁是谁。它同时是通知文本的一部分。
+- **注入条件不能写 `finishReason === "stop"`**。SDK 给的是原始值,真实供应商常给 `"other"`
+  —— 那样整个 push 机制会**静默永不触发**。测试先抓到的,否则真机上无声失效。
+
+`waiting` 第四态仍未落地:只做 in-run 注入,超过宽限期(20s)才报的子代理结果只落库,
+模型不主动回应。要支持长任务唤起新 turn,需要"无用户输入的 run"模式 + 客户端自动触发。
+
+### `Agent.invoke` 已有生产调用方 `[r4]`(T15,回答 T15 §6 坑 7)
+
+spec 让做完后复核 `invoke` 是否仍无生产调用方、若是则删。**结论:不能删** ——
+`packages/harness/src/subagents/run-subagent.ts:30` 在用它跑子代理。
+子代理只需要终态(finish/error 两个信封事件),不需要逐 delta 转发,`invoke` 正合适。
