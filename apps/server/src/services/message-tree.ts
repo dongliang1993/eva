@@ -21,11 +21,20 @@ export const buildActiveChain = (
     return [];
   }
 
-  const byId = new Map(rows.map((row) => [row.id, row]));
+  // S7 隔离红线:子代理进程消息挂 parent_tool_call_id,不属主链。这里先滤掉,
+  // 否则它们(以及它们之间可能存在的 parent 链接)会被误拼进主上下文 ——
+  // 子代理的中间过程会无声污染主模型。主链 = parent_tool_call_id IS NULL。
+  const mainRows = rows.filter((row) => row.parentToolCallId === null);
+
+  if (mainRows.length === 0) {
+    return [];
+  }
+
+  const byId = new Map(mainRows.map((row) => [row.id, row]));
 
   if (activeLeafId === null) {
     // 退化路径:时间序最后一条(= 数组末尾,rows 按 createdAt,rowid 升序)。
-    const last = rows[rows.length - 1]!;
+    const last = mainRows[mainRows.length - 1]!;
     return buildChain(byId, last.id);
   }
 

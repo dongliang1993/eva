@@ -21,6 +21,7 @@ const toStored = (row: typeof messages.$inferSelect): StoredMessage => ({
   parentId: row.parentId,
   slotId: row.slotId,
   depth: row.depth,
+  parentToolCallId: row.parentToolCallId,
   createdAt: row.createdAt
 });
 
@@ -46,7 +47,8 @@ export class DrizzleMessageRepository implements IMessageRepository {
         ...(input.runId !== undefined ? { runId: input.runId } : {}),
         ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
         ...(input.slotId !== undefined ? { slotId: input.slotId } : {}),
-        ...(input.depth !== undefined ? { depth: input.depth } : {})
+        ...(input.depth !== undefined ? { depth: input.depth } : {}),
+        ...(input.parentToolCallId !== undefined ? { parentToolCallId: input.parentToolCallId } : {})
       })
       .run();
 
@@ -91,6 +93,16 @@ export class DrizzleMessageRepository implements IMessageRepository {
       .get();
 
     return row ? toStored(row) : undefined;
+  }
+
+  findBySubagentToolCallId(parentToolCallId: string): readonly StoredMessage[] {
+    return this.db
+      .select()
+      .from(messages)
+      .where(eq(messages.parentToolCallId, parentToolCallId))
+      .orderBy(asc(messages.createdAt), sql`rowid`)
+      .all()
+      .map(toStored);
   }
 
   deleteBySessionId(sessionId: string): number {

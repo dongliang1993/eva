@@ -20,6 +20,7 @@ const msg = (id: string, parentId: string | null = null, slotId = "s"): StoredMe
   parentId,
   slotId,
   depth: 0,
+  parentToolCallId: null,
   createdAt: ""
 });
 
@@ -86,5 +87,49 @@ describe("resolveLeafFrom", () => {
 
   it("消息不存在 → 返回该 id(不抛)", () => {
     expect(resolveLeafFrom([msg("m1")], "missing")).toBe("missing");
+  });
+});
+describe("buildActiveChain 子代理隔离 (S7)", () => {
+  // 挂 parent_tool_call_id 的子代理进程消息,带第三个参数塞 mark。
+  const subMsg = (id: string, parentId: string | null, mark: unknown): StoredMessage => ({
+    id,
+    sessionId: "session-1",
+    runId: null,
+    role: id.startsWith("u") ? ("user" as const) : ("assistant" as const),
+    message: {
+      id,
+      role: id.startsWith("u") ? ("user" as const) : ("assistant" as const),
+      parts: [{ type: "text", text: id, state: "done" as const }]
+    },
+    parentId,
+    slotId: "s",
+    depth: 1,
+    parentToolCallId: `task-${id}` as string,
+    createdAt: ""
+  });
+
+  it("子代理消息存在时,主链长度与内容都不变", () => {
+    const main = [msg("m1"), msg("m2", "m1"), msg("m3", "m2")];
+    // 子代理进程消息插在中间,甚至引用主链消息做 parent —— 都不该进主链。
+    const withSub = [
+      main[0]!,
+      subMsg("u-sub-1", "m1", "user sub msg"),
+      subMsg("a-sub-1", "u-sub-1", "assistant sub output"),
+      main[1]!,
+      main[2]!
+    ];
+    const chain = buildActiveChain(withSub, "m3");
+    expect(chain.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+  });
+
+  it("主链过滤后为空(全会话只有子代理消息) → 返回空,不抛", () => {
+    const subOnly = [subMsg("a-sub-only", null, "x")];
+    expect(buildActiveChain(subOnly, null)).toEqual([]);
+  });
+
+  it("退化路径(无 activeLeaf)同样忽略子代理消息", () => {
+    const rows = [msg("m1"), subMsg("a-sub", null, "x"), msg("m2", "m1")];
+    const chain = buildActiveChain(rows, null);
+    expect(chain.map((m) => m.id)).toEqual(["m1", "m2"]);
   });
 });

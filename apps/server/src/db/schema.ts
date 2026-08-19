@@ -129,6 +129,8 @@ export const messages = sqliteTable(
     parentId: text("parent_id"),
     slotId: text("slot_id"),
     depth: integer("depth").notNull().default(0),
+    /** S7:子代理进程消息的挂点;主链构建时按 IS NULL 过滤(见 message-tree.ts)。 */
+    parentToolCallId: text("parent_tool_call_id"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`)
@@ -136,7 +138,34 @@ export const messages = sqliteTable(
   (table) => [
     index("idx_messages_session_id").on(table.sessionId),
     index("idx_messages_created_at").on(table.createdAt),
-    index("idx_messages_run_id").on(table.runId)
+    index("idx_messages_run_id").on(table.runId),
+    index("idx_messages_parent_tool_call").on(table.parentToolCallId)
+  ]
+);
+
+// 后台子代理任务事实表(S7)。transcript 在 messages 表,这里只存任务状态与结局。
+export const backgroundTasks = sqliteTable(
+  "background_tasks",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    parentToolCallId: text("parent_tool_call_id").notNull(),
+    subagentType: text("subagent_type").notNull(),
+    depth: integer("depth").notNull().default(0),
+    status: text("status", { enum: ["running", "done", "failed"] })
+      .notNull()
+      .default("running"),
+    result: text("result"),
+    error: text("error"),
+    startedAt: text("started_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    endedAt: text("ended_at")
+  },
+  (table) => [
+    index("idx_background_tasks_session").on(table.sessionId)
   ]
 );
 

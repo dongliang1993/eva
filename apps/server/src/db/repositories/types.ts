@@ -33,6 +33,8 @@ export interface StoredMessage {
   readonly parentId: string | null;
   readonly slotId: string | null;
   readonly depth: number;
+  /** S7:子代理进程消息的挂点;主链上应为 null。 */
+  readonly parentToolCallId: string | null;
   readonly createdAt: string;
 }
 
@@ -44,6 +46,8 @@ export interface CreateMessageInput {
   readonly parentId?: string;
   readonly slotId?: string;
   readonly depth?: number;
+  /** S7:子代理挂点;不传即主链消息。 */
+  readonly parentToolCallId?: string;
 }
 
 export interface GetMessagesOptions {
@@ -70,8 +74,10 @@ export interface IMessageRepository {
     options?: GetMessagesOptions
   ): readonly StoredMessage[];
   findLastBySessionId(sessionId: string): StoredMessage | undefined;
-  /** 按 id 取任意消息(不限制会话)。切版本/重生成要定位目标消息。 */
+  /** 按 id 取任意消息(不限制会话)。切版本/重分支要定位目标消息。 */
   findById(id: string): StoredMessage | undefined;
+  /** S7:取某个子代理 toolCallId 下挂的全部消息(该子代理进程的上下文)。 */
+  findBySubagentToolCallId(parentToolCallId: string): readonly StoredMessage[];
   deleteBySessionId(sessionId: string): number;
 }
 
