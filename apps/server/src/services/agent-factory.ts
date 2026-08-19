@@ -1,8 +1,10 @@
 import type { LanguageModel } from "ai";
 import type { Agent, AgentTool, RequestApproval } from "@eva/harness";
+import { createAgent, filterToolsForRole, SUBAGENT_MAX_STEPS } from "@eva/harness";
 
 import {
   AgentUnavailableError,
+  buildBaseTools,
   createConfiguredAgent,
   toAgentModel,
   type ResolvedWorkspaceContext
@@ -129,5 +131,47 @@ export class AgentFactory {
     const model = toAgentModel(binding);
     this.models.set(key, model);
     return model;
+  }
+
+  /**
+   * 装配一个子代理(S7):工具槽模型 + 角色白名单工具 + 角色 system prompt。
+   *
+   * 阀1(便宜):子代理用 tool 槽位模型,不走 chat。
+   * 阀4(收窄):只在 buildBaseTools 的基础集上按角色的 allowedTools 过滤 ——
+   *   角色能拿到的永远是进程里真实存在的工具,白名单只是让写工具/执行工具缺席。
+   *   一个 fork 是全新装配(不是复用主 agent),所以深度/委托闸在 Task 里判。
+   * @throws AgentUnavailableError 没配好 provider 时(与主 agent 同一路径)。
+   */
+  buildSubagent(options: {
+    readonly role: import("@eva/harness").SubagentRole;
+    readonly workspace?: ResolvedWorkspaceContext | undefined;
+    readonly extraTools?: readonly AgentTool[] | undefined;
+    readonly temperature?: number | undefined;
+  }): Agent {
+    const models = this.resolveModels();
+    const baseTools = buildBaseTools(
+      {
+        skills: [...this.infra.skills],
+        ...(options.workspace !== undefined ? { workspace: options.workspace } : {}),
+        ...(options.extraTools !== undefined ? { extraTools: options.extraTools } : {})
+      },
+      (binding) => this.getModel(binding),
+      models.tool
+    );
+
+    const tools = [...filterToolsForRole(baseTools, options.role)];
+
+    return createAgent({
+      model: this.getModel(models.tool),
+      tools,
+      systemPrompt: options.role.systemPrompt,
+      maxSteps: options.role.maxSteps ?? SUBAGENT_MAX_STEPS,
+      callSettings: {
+        ...(options.temperature !== undefined
+          ? { temperature: options.temperature }
+          : {})
+      },
+      ...(this.infra.observer !== undefined ? { observer: this.infra.observer } : {})
+    });
   }
 }

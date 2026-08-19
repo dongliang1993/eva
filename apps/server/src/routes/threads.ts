@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { ThreadMessage, ThreadStatus, ThreadSummary, ThreadUsage } from "@eva/shared";
+import type { SubagentMessage, ThreadMessage, ThreadStatus, ThreadSummary, ThreadUsage } from "@eva/shared";
 
+import { BackgroundTaskRepository } from "../db/repositories/background-task-repository.js";
 import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
 import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
@@ -21,6 +22,11 @@ const listThreadsQuerySchema = z.object({
 
 const getThreadMessagesQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(500).optional()
+});
+
+const getSubagentMessagesQuerySchema = z.object({
+  /** 子代理进程的挂点 —— 即 Task 工具那次调用的 toolCallId。 */
+  toolCallId: z.string().min(1)
 });
 
 const createThreadSchema = z.object({
@@ -261,6 +267,49 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
         ? (siblingsBySlot.get(message.slotId) ?? [message.id])
         : [message.id]
     }));
+  });
+
+  // S7:某次 Task 调用页面的子代理消息流 —— 刷新后任务卡片展开区的数据源。
+  // 子代理进程与主链共表,靠 parent_tool_call_id 隔离;这里按 toolCallId 取那棵子树。
+  app.get("/api/v1/threads/:id/subagent-messages", async (request, reply): Promise<SubagentMessage | { error: string }> => {
+    const { id } = request.params as { id: string };
+    const query = getSubagentMessagesQuerySchema.parse(request.query ?? {});
+
+    const sessionRepo = new DrizzleSessionRepository(app.infra.db);
+    const thread = sessionRepo.findById(id);
+    if (!thread) {
+      reply.code(404);
+      return { error: "Thread not found" };
+    }
+
+    const task = new BackgroundTaskRepository(app.infra.db).findByParentToolCallId(query.toolCallId);
+    if (!task || task.sessionId !== id) {
+      reply.code(404);
+      return { error: "Subagent task not found for this tool call" };
+    }
+
+    // 该任务下挂的消息(任务书 user + 子代理 assistant),按创建顺序排好。
+    const messageRepo = new DrizzleMessageRepository(app.infra.db);
+    const rows = messageRepo.findBySubagentToolCallId(query.toolCallId);
+
+    return {
+      taskId: task.id,
+      parentToolCallId: task.parentToolCallId,
+      subagentType: task.subagentType,
+      status: task.status,
+      result: task.result,
+      error: task.error,
+      startedAt: task.startedAt,
+      endedAt: task.endedAt,
+      messages: rows.map((message) => ({
+        id: message.id,
+        role: message.role,
+        message: message.message,
+        runId: message.runId,
+        createdAt: message.createdAt,
+        siblingIds: [message.id]
+      }))
+    };
   });
 
   app.post("/api/v1/messages/:id/switch-version", async (request, reply): Promise<readonly ThreadMessage[] | { error: string }> => {

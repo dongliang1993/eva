@@ -2,6 +2,7 @@ export { CrewRegistry, filterToolsForRole, canDelegate, canSpawnAtDepth, MAX_DEP
 export { InMemoryTaskStore } from "./in-memory-task-store.js";
 export { runSubagent } from "./run-subagent.js";
 export { createTaskTools } from "./task-tools.js";
+export type { ForkInvocation, ForkRunner, TaskToolContext } from "./task-tools.js";
 export type { SubagentRole } from "./crew.js";
 export type { TaskRecord, TaskStore, CreateTaskInput } from "./task-store.js";
 export type { RunSubagentInput } from "./run-subagent.js";

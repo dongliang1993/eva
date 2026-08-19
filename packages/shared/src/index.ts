@@ -207,6 +207,22 @@ export interface ThreadMessage {
   siblingIds: readonly string[];
 }
 
+/** 后台子代理任务帮助信息(状态 + 归属 toolCallId)—— 前端 Task 卡片的展开区契约。 */
+export interface SubagentMessage {
+  taskId: string;
+  parentToolCallId: string;
+  subagentType: string;
+  status: "running" | "done" | "failed";
+  /** done 时的最终答案(阀2:只有 final answer,不含中间过程)。 */
+  result: string | null;
+  /** failed 时的错误透出。 */
+  error: string | null;
+  /** 该子代理进程的完整消息流(按时间序,含工具调用轨迹)。 */
+  messages: readonly ThreadMessage[];
+  startedAt: string;
+  endedAt: string | null;
+}
+
 export type MemoryCategory =
   | "user"
   | "preference"

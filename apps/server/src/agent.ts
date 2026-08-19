@@ -91,17 +91,26 @@ export const toAgentModel = (binding: ModelBinding): LanguageModel => {
     : createOpenAiCompatibleModel(options);
 };
 
-export const createConfiguredAgent = (
-  options: ConfiguredAgentOptions,
-  models: { readonly chat: ModelBinding; readonly tool: ModelBinding; readonly temperature: number },
-  getModel: (binding: ModelBinding) => LanguageModel
-): Agent => {
-  const { skills, soulSection, observer, workspace, requestApproval, extraTools, memoryFilesSection } = options;
+/**
+ * 主 agent 与子代理共用的基础工具集(不含记忆/审批那层)。
+ * 子代理按角色白名单 filter 这个结果,而不是重建一套 —— 角色能拿什么工具,
+ * 只能从这批"进程里真实存在的工具"里选(阀4)。
+ */
+export const buildBaseTools = (
+  options: {
+    readonly skills: readonly Skill[];
+    readonly workspace?: ResolvedWorkspaceContext | undefined;
+    readonly extraTools?: readonly AgentTool[] | undefined;
+  },
+  getToolModel: (binding: ModelBinding) => LanguageModel,
+  toolBinding: ModelBinding
+): AgentTool[] => {
+  const { skills, workspace, extraTools } = options;
 
-  const tools = [
-    ...(skills.length > 0 ? [createReadSkillTool(skills)] : []),
+  const tools: AgentTool[] = [
+    ...(skills.length > 0 ? [createReadSkillTool([...skills] as Skill[])] : []),
     createDuckDuckGoWebSearchTool(),
-    createWebFetchTool({ summaryModel: getModel(models.tool) }),
+    createWebFetchTool({ summaryModel: getToolModel(toolBinding) }),
     ...(extraTools ?? [])
   ];
 
@@ -118,6 +127,22 @@ export const createConfiguredAgent = (
       createBashTool({ workRoot: workspace.root, overflowDir })
     );
   }
+
+  return tools;
+};
+
+export const createConfiguredAgent = (
+  options: ConfiguredAgentOptions,
+  models: { readonly chat: ModelBinding; readonly tool: ModelBinding; readonly temperature: number },
+  getModel: (binding: ModelBinding) => LanguageModel
+): Agent => {
+  const { soulSection, observer, workspace, requestApproval, extraTools, memoryFilesSection, skills } = options;
+
+  const tools = buildBaseTools(
+    { skills, workspace, extraTools },
+    getModel,
+    models.tool
+  );
 
   const sections: PromptSection[] = [
     ...(soulSection ? [soulSection] : []),

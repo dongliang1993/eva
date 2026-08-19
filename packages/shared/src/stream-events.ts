@@ -144,12 +144,26 @@ export interface RunApprovalResolvedEvent {
 
 export type RunApprovalEvent = RunApprovalRequestEvent | RunApprovalResolvedEvent;
 
+/**
+ * 子代理域事件(Eva 自有域,与主 SDK 命名空间隔离)。
+ * 信封(parentToolCallId/subagentType)在唯一入口 runSubagent 注入,前端据此把
+ * 子代理的内部流归到某个 Task 调用(卡片),而不是当主链 token 看待。
+ */
+export interface RunSubagentUpdateEvent {
+  type: "subagent_update";
+  taskId: string;
+  parentToolCallId: string;
+  subagentType: string;
+  event: RunAgentStreamEvent;
+}
+
 export type RunStreamEvent =
   | RunAgentStreamEvent
   | RunStartEvent
   | RunEndEvent
   | RunApprovalRequestEvent
-  | RunApprovalResolvedEvent;
+  | RunApprovalResolvedEvent
+  | RunSubagentUpdateEvent;
 
 /** 线上帧 = 事件 + seq；seq 单 run 内从 1 单调递增，含终态帧（accumulator 依赖此约定）。 */
 export type RunStreamFrame = RunStreamEvent & { seq: number };

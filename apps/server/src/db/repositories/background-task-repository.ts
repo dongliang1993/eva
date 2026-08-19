@@ -71,7 +71,18 @@ export class BackgroundTaskRepository {
     return row ? toTaskRecord(row) : undefined;
   }
 
-  /** settle:把一个运行中任务写终态。running 之外的重复 settle 无副作用(幂等)。 */
+  /** 按 toolCallId 挂点取任务 —— `/subagent-messages` 路由用 toolCallId 定位任务。 */
+  findByParentToolCallId(parentToolCallId: string): TaskRecord | undefined {
+    const row = this.db
+      .select()
+      .from(backgroundTasks)
+      .where(eq(backgroundTasks.parentToolCallId, parentToolCallId))
+      .get();
+
+    return row ? toTaskRecord(row) : undefined;
+  }
+
+  /** settle: 把一个运行中任务写终态。running 之外的重复 settle 无副作用(幂等)。 */
   settle(
     taskId: string,
     outcome: { readonly result?: string; readonly error?: string }

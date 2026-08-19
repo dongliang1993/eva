@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 
 import { convertToModelMessages, type ModelMessage } from "ai";
-import { classifyToolRisk, type RequestApproval } from "@eva/harness";
+import {
+  classifyToolRisk,
+  createTaskTools,
+  JOIN_TIMEOUT_MS,
+  type RequestApproval
+} from "@eva/harness";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type {
   RunStreamEvent,
@@ -34,6 +39,7 @@ import { estimateModelHistoryTokens } from "../services/token-estimator.js";
 import { loadMemoryFilesSection, todayString } from "../services/memory/index.js";
 import { loadProjectDocsSection } from "../services/workspaces/project-docs.js";
 import { resolveWorkspaceForSession } from "../services/workspaces/workspace-store.js";
+import { SubagentRunner } from "../services/subagents/subagent-runner.js";
 import { runRequestSchema, type RunRequest } from "../types/runs.js";
 
 const formatSseFrame = (event: string, data: unknown): string =>
@@ -320,6 +326,32 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
       emit({ type: "run_start", runId, sessionId });
 
+      // 阶段④:S7 子代理运行时 —— Task/TaskOutput 基元注入主 agent。
+      // sink 做两件事:① emit 推 SSE(前端子代理卡片拿流式过程);② recorder 攒
+      // 事件,子代理 finish 时落库(parentToolCallId 隔离卖力,见 subagent-recorder)。
+      // abortSignal 传给后台子代理:T15 §2.7 —— 用户点停止,子代理一起停,不留孤儿。
+      const subagentRunner = new SubagentRunner(
+        app.services.agents,
+        new DrizzleMessageRepository(app.infra.db),
+        {
+          sessionId,
+          db: app.infra.db,
+          runId,
+          model: resolved.mainModel.qualifiedModelId,
+          ...(open.workspace !== undefined ? { workspace: open.workspace } : {}),
+          extraTools: app.services.mcp.listTools(),
+          abortSignal: controller.signal,
+          onSubagentEvent: (event) => {
+            emit({ type: "subagent_update", ...event });
+          }
+        }
+      );
+      const taskTools = createTaskTools({
+        taskStore: subagentRunner.store,
+        runFork: subagentRunner.runFork,
+        joinTimeoutMs: JOIN_TIMEOUT_MS
+      });
+
       // 客户端断连检测必须挂在 response 上:Node ≥18 的 request "close"
       // 在请求体读完即触发(不等客户端断开),response "close" 才是
       // "response.end() 之前 socket 被关闭"的语义。
@@ -340,8 +372,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         messages: prepared.modelMessages,
         abortSignal: controller.signal,
         ...(prepared.additionalTools.length > 0
-          ? { additionalTools: [...prepared.additionalTools] }
-          : {}),
+          ? { additionalTools: [...prepared.additionalTools, ...taskTools] }
+          : { additionalTools: [...taskTools] }),
         ...(prepared.context !== undefined ? { context: prepared.context } : {})
       })) {
         builder.push(event);
