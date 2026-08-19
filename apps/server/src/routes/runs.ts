@@ -16,6 +16,7 @@ import type {
 import {
   UiMessageBuilder,
   createUserUIMessage,
+  stripReasoningParts,
   toErrorMessage,
   uiMessageText
 } from "@eva/shared";
@@ -212,7 +213,10 @@ const buildRunContext = async (
 
   // ignoreIncompleteToolCalls:上一轮被 abort 时可能留下没有结果的 tool part,
   // 带着它去请求模型会被 provider 拒绝(tool_use 必须有配对的 tool_result)。
-  const converted = await convertToModelMessages([...history.messages], {
+  // reasoning:渲染/落库保留,但回灌前剥离 —— 无 signature 的纯文本 reasoning
+  // 在部分 provider 的回灌请求里会被拒绝(UI 的 Think 块需要它,模型不需要)。
+  const strippedHistory = history.messages.map((m) => stripReasoningParts(m));
+  const converted = await convertToModelMessages([...strippedHistory], {
     ignoreIncompleteToolCalls: true
   });
 

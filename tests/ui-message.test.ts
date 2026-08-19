@@ -6,6 +6,7 @@ import {
   isDynamicToolPart,
   isTextPart,
   parseUIMessage,
+  stripReasoningParts,
   uiMessageSearchText,
   uiMessageText
 } from "../packages/shared/src/index.js";
@@ -133,6 +134,89 @@ describe("UiMessageBuilder", () => {
     });
 
     expect(builder.build().parts).toHaveLength(1);
+  });
+
+  it("reasoning-delta 累积进单个 reasoning part,与 text 并存", () => {
+    const builder = new UiMessageBuilder("m1");
+    pushAll(builder, [
+      { type: "reasoning-delta", textDelta: "先想一下" },
+      { type: "reasoning-delta", textDelta: "再想一下" },
+      { type: "text-delta", textDelta: "最后结论" }
+    ]);
+
+    const msg = builder.build();
+    const types = msg.parts.map((p) => p.type);
+    expect(types).toEqual(["reasoning", "text"]);
+    const reasoning = msg.parts[0]!;
+    expect(reasoning).toMatchObject({ type: "reasoning", text: "先想一下再想一下" });
+  });
+
+  it("build() 把 reasoning part 收成 done(与 text part 同一规则)", () => {
+    const builder = new UiMessageBuilder("m1");
+    builder.push({ type: "reasoning-delta", textDelta: "在思考" });
+
+    const snapshotReasoning = builder.snapshot().parts[0]!;
+    expect(snapshotReasoning).toMatchObject({ type: "reasoning", state: "streaming" });
+
+    const builtReasoning = builder.build().parts[0]!;
+    expect(builtReasoning).toMatchObject({ type: "reasoning", state: "done" });
+  });
+
+  it("step-start 之后的新 reasoning 另起一个 part(与 text 同一规则)", () => {
+    const builder = new UiMessageBuilder("m1");
+    pushAll(builder, [
+      { type: "reasoning-delta", textDelta: "第一步思考" },
+      { type: "step-start", step: 1 },
+      { type: "reasoning-delta", textDelta: "第二步思考" }
+    ]);
+
+    const reasoningParts = builder.build().parts.filter((p) => p.type === "reasoning");
+    expect(reasoningParts).toHaveLength(2);
+    expect(reasoningParts.map((p) => (p.type === "reasoning" ? p.text : ""))).toEqual([
+      "第一步思考",
+      "第二步思考"
+    ]);
+  });
+});
+
+describe("stripReasoningParts", () => {
+  it("剥离全部 reasoning part,保留其余 part 与 metadata", () => {
+    const msg: EvaUIMessage = {
+      id: "m1",
+      role: "assistant",
+      parts: [
+        { type: "reasoning", text: "不该回灌给模型", state: "done" },
+        { type: "text", text: "结论", state: "done" },
+        {
+          type: "dynamic-tool",
+          toolName: "read_file",
+          toolCallId: "tc-1",
+          state: "output-available",
+          input: {},
+          output: "x"
+        }
+      ],
+      metadata: { runId: "r1" }
+    };
+
+    const stripped = stripReasoningParts(msg);
+
+    expect(stripped.parts.map((p) => p.type)).toEqual(["text", "dynamic-tool"]);
+    // 元数据原样保留;原消息不被就地修改(不可变)。
+    expect(stripped.metadata?.runId).toBe("r1");
+    expect(msg.parts).toHaveLength(3);
+  });
+
+  it("无 reasoning 时返回等价消息(不新增对象开销可忽略)", () => {
+    const msg: EvaUIMessage = {
+      id: "m1",
+      role: "assistant",
+      parts: [{ type: "text", text: "hi", state: "done" }]
+    };
+
+    const stripped = stripReasoningParts(msg);
+    expect(stripped.parts).toHaveLength(1);
+    expect(stripped.parts[0]).toMatchObject({ type: "text" });
   });
 });
 

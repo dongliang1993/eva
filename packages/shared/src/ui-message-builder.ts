@@ -20,6 +20,7 @@ export class UiMessageBuilder {
   private readonly parts: EvaUIMessagePart[] = [];
   private readonly toolIndexByCallId = new Map<string, number>();
   private textIndex: number | undefined;
+  private reasoningIndex: number | undefined;
   private readonly startedAt: number;
   private firstTextAt: number | undefined;
   private usage: StreamTokenUsage | undefined;
@@ -35,13 +36,19 @@ export class UiMessageBuilder {
     switch (event.type) {
       case "step-start":
         this.parts.push({ type: "step-start" });
-        // 新 step 起新的 text part:工具调用前后的正文不该被粘成一段。
+        // 新 step 起新的 text / reasoning part:工具调用前后的推理不该被粘成一段。
         this.textIndex = undefined;
+        this.reasoningIndex = undefined;
         break;
 
       case "text-delta":
         this.firstTextAt ??= Date.now();
         this.appendText(event.textDelta);
+        break;
+
+      // reasoning 要进 part 渲染成 Think 块,但绝不能回灌给模型 —— 见 stripReasoningParts。
+      case "reasoning-delta":
+        this.appendReasoning(event.textDelta);
         break;
 
       case "tool-call":
@@ -65,9 +72,8 @@ export class UiMessageBuilder {
         this.usage = event.usage;
         break;
 
-      // reasoning-delta 只推前端不落库(无 signature 的 reasoning 回灌会被
-      // 部分 provider 拒绝);tool-input-start/-delta 是 input 的流式过程,
-      // tool-call 会带上完整 input;error 由调用方处理成 metadata。
+      // tool-input-start/-delta 是 input 的流式过程,tool-call 会带上完整 input;
+      // error 由调用方处理成 metadata。
       // notice-injected 是消息边界信号(S7),它自己会成为一条独立的主链消息 ——
       // 绝不能进 assistant 的 parts,否则通知文本会重复出现在回应里。
       default:
@@ -85,10 +91,10 @@ export class UiMessageBuilder {
     };
   }
 
-  /** 终态:把仍在 streaming 的 text part 收成 done。 */
+  /** 终态:把仍在 streaming 的 text / reasoning part 收成 done。 */
   build(metadata?: EvaMessageMetadata): EvaUIMessage {
     const parts = this.parts.map((part) =>
-      part.type === "text" && part.state === "streaming"
+      (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
         ? { ...part, state: "done" as const }
         : part
     );
@@ -109,6 +115,23 @@ export class UiMessageBuilder {
         : {}),
       ...(this.usage !== undefined ? { usage: this.usage } : {})
     };
+  }
+
+  private appendReasoning(delta: string): void {
+    if (this.reasoningIndex === undefined) {
+      this.reasoningIndex = this.parts.length;
+      this.parts.push({ type: "reasoning", text: delta, state: "streaming" });
+
+      return;
+    }
+
+    const current = this.parts[this.reasoningIndex];
+
+    if (current?.type !== "reasoning") {
+      return;
+    }
+
+    this.parts[this.reasoningIndex] = { ...current, text: current.text + delta };
   }
 
   private appendText(delta: string): void {

@@ -3,7 +3,7 @@ import { Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, RotateCcw, Us
 import "streamdown/styles.css";
 
 import type { EvaUIMessage } from "@eva/shared";
-import { isDynamicToolPart, isTextPart, uiMessageText } from "@eva/shared";
+import { isDynamicToolPart, isReasoningPart, isTextPart, uiMessageText } from "@eva/shared";
 import type { EvaDynamicToolPart, EvaTextPart, EvaUIMessagePart } from "@eva/shared";
 
 import { StreamMarkdown } from "../../../shared/markdown/markdown.js";
@@ -95,10 +95,11 @@ function ThinkingBadge({ durationMs }: { readonly durationMs: number }) {
   );
 }
 
-/** 渲染分组:一段文字,或一串连续的工具调用。 */
+/** 渲染分组:一段文字,一串连续的工具调用,或一段推理(Think 块)。 */
 type PartGroup =
   | { readonly kind: "text"; readonly part: EvaTextPart }
-  | { readonly kind: "tools"; readonly parts: readonly EvaDynamicToolPart[] };
+  | { readonly kind: "tools"; readonly parts: readonly EvaDynamicToolPart[] }
+  | { readonly kind: "reasoning"; readonly part: Extract<EvaUIMessagePart, { type: "reasoning" }> };
 
 /**
  * 把 parts 压成交替的「文字段 / 工具组」序列。
@@ -113,6 +114,10 @@ function groupParts(parts: readonly EvaUIMessagePart[]): readonly PartGroup[] {
   for (const part of parts) {
     if (isTextPart(part)) {
       groups.push({ kind: "text", part });
+      continue;
+    }
+    if (isReasoningPart(part)) {
+      groups.push({ kind: "reasoning", part });
       continue;
     }
     if (!isDynamicToolPart(part)) {
@@ -175,6 +180,8 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
               isStreaming={isStreaming === true && group.part.state === "streaming"}
             />
           </div>
+        ) : group.kind === "reasoning" ? (
+          <ThinkBlock key={`reasoning-${groupIndex}`} text={group.part.text} />
         ) : (
           // 一串连续工具调用收拢成一组:组内紧凑(space-y-1),组与文字之间才宽松。
           <div key={`tools-${groupIndex}`} className="my-4 space-y-1 first:mt-0 last:mb-0">
@@ -192,6 +199,44 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
           <VersionSwitcher messageId={message.id} />
           <RegenerateButton messageId={message.id} />
         </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Think 块 —— assistant 消息里的推理轨迹(对接 reasoning-delta),默认折叠成
+ * 一条可展开的目录行。样式对齐参考截图:左对齐标题行 + 大脑图标 + chevron。
+ * 折叠时只显示标题行;展开时显示推理全文(纯文本,不经过 markdown)。
+ */
+function ThinkBlock({ text }: { readonly text: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div
+      className="my-3 rounded-md border border-border bg-card/50 overflow-hidden"
+      data-variant="think"
+    >
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/50"
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+        aria-label={expanded ? "折叠思考过程" : "展开思考过程"}
+      >
+        <Brain size={14} className="shrink-0 text-muted-foreground" />
+        <span className="flex-1 font-medium text-foreground">Think</span>
+        {expanded ? (
+          <ChevronUp size={14} className="shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
+        )}
+      </button>
+
+      {expanded ? (
+        <div className="px-3 pb-3 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+          {text}
+        </div>
       ) : null}
     </div>
   );

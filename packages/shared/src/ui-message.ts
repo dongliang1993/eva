@@ -53,6 +53,32 @@ export const isDynamicToolPart = (
   part: EvaUIMessagePart
 ): part is EvaDynamicToolPart => part.type === "dynamic-tool";
 
+/** SDK 原生 reasoning part(对接 reasoning-delta,渲染成 Think 块)。 */
+export const isReasoningPart = (
+  part: EvaUIMessagePart
+): part is Extract<EvaUIMessagePart, { type: "reasoning" }> => part.type === "reasoning";
+
+/**
+ * 剥离一条消息里全部 reasoning part。
+ *
+ * 为什么:reasoning 是给用户看的"思考轨迹",不是给模型回灌的上下文 ——
+ * 无 signature 的纯文本 reasoning 在部分 provider 的回灌请求里会被拒绝
+ * (buildModelHistory 后用 convertToModelMessages 重新组装时,SDK 会把
+ * reasoning part 映射回 { type: "reasoning", text })。所以每次把历史喂回
+ * 模型前,都先剥掉 reasoning。渲染/落库则保留(Think 块需要它)。
+ */
+export const stripReasoningParts = (message: EvaUIMessage): EvaUIMessage => {
+  const hasReasoning = message.parts.some(isReasoningPart);
+  if (!hasReasoning) {
+    return message;
+  }
+
+  return {
+    ...message,
+    parts: message.parts.filter((part) => !isReasoningPart(part))
+  };
+};
+
 export const createUserUIMessage = (
   id: string,
   text: string,
