@@ -8,6 +8,7 @@ import { ModelSettings } from "./features/settings/components/model-settings";
 import { ProviderSettings } from "./features/settings/components/provider-settings";
 import { MemorySettings } from "./features/settings/components/memory-settings";
 import { McpSettings } from "./features/settings/components/mcp-settings";
+import { SecuritySettings } from "./features/settings/components/security-settings";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,6 +32,7 @@ export function App() {
             <Route path="models" element={<ModelSettings />} />
             <Route path="providers" element={<ProviderSettings />} />
             <Route path="memory" element={<MemorySettings />} />
+            <Route path="security" element={<SecuritySettings />} />
             <Route path="mcp" element={<McpSettings />} />
           </Route>
         </Routes>

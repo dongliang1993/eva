@@ -1,3 +1,6 @@
+import { classifyToolRisk } from "@eva/harness";
+import type { ToolRisk } from "@eva/shared";
+
 import { ApprovalRepository } from "../db/repositories/approval-repository.js";
 
 interface PendingRequest {
@@ -5,6 +8,8 @@ interface PendingRequest {
   readonly sessionId: string;
   readonly tool: string;
   readonly args: unknown;
+  /** T14:ask 时即时算一次,SSE 与 listApprovals 两条路径共用这份画像。 */
+  readonly risk: ToolRisk;
   resolve: (allowed: boolean) => void;
   timer: NodeJS.Timeout;
 }
@@ -22,6 +27,8 @@ export interface PendingApprovalView {
   readonly runId: string;
   readonly tool: string;
   readonly args: unknown;
+  /** T14:风险画像,SSE 事件里的 risk 与这里一致。 */
+  readonly risk: ToolRisk;
 }
 
 /**
@@ -52,7 +59,12 @@ export class ApprovalGateway {
         resolve(false);
       }, PENDING_TIMEOUT_MS);
 
-      this.pending.set(callId, { ...input, resolve, timer });
+      this.pending.set(callId, {
+        ...input,
+        risk: classifyToolRisk(input.tool, (input.args ?? {}) as Record<string, unknown>),
+        resolve,
+        timer
+      });
     });
   }
 
@@ -97,7 +109,13 @@ export class ApprovalGateway {
     const out: PendingApprovalView[] = [];
     for (const [callId, entry] of this.pending) {
       if (sessionId && entry.sessionId !== sessionId) continue;
-      out.push({ callId, runId: entry.runId, tool: entry.tool, args: entry.args });
+      out.push({
+        callId,
+        runId: entry.runId,
+        tool: entry.tool,
+        args: entry.args,
+        risk: entry.risk
+      });
     }
     return out;
   }

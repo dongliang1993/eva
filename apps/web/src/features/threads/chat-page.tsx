@@ -20,16 +20,25 @@ export function ChatPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
 
-  // 「始终允许」→ 打开工具自动审批, 之后的危险工具不再逐条弹。
+  // 「始终允许」→ 只放开这一个工具的审批(T14:per-tool 白名单,不再是全局开关)。
   const settings = useSettings();
-  const enableAutoApprove = useCallback((): Promise<void> | void => {
-    const current = settings.data;
-    if (!current) return;
-    settings.saveSettings({
-      ...current,
-      security: { ...current.security, autoApproveToolRequests: true }
-    });
-  }, [settings]);
+  const enableAutoApprove = useCallback(
+    (toolName: string): Promise<void> | void => {
+      const current = settings.data;
+      if (!current) return;
+      if (current.security.alwaysAllowTools.includes(toolName)) {
+        return;
+      }
+      settings.saveSettings({
+        ...current,
+        security: {
+          ...current.security,
+          alwaysAllowTools: [...current.security.alwaysAllowTools, toolName]
+        }
+      });
+    },
+    [settings]
+  );
 
   const approvals = useApprovals(enableAutoApprove);
   const {

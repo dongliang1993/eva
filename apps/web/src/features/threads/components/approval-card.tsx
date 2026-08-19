@@ -1,5 +1,6 @@
-import { ShieldAlert, Check, X, Sparkles } from "lucide-react";
+import { ShieldAlert, ShieldCheck, Check, X, Sparkles } from "lucide-react";
 
+import type { ToolRiskLevel } from "@eva/shared";
 import type { PendingApproval } from "../api";
 
 interface ApprovalCardProps {
@@ -21,21 +22,72 @@ const summarizeArgs = (args: Record<string, unknown>, tool: string): string => {
   }
 };
 
+/** destructive → 红底 + ShieldAlert;elevated → 现有 warning 黄 + ShieldAlert;normal → 中性。 */
+const levelStylize = (
+  level: ToolRiskLevel
+): { border: string; bg: string; icon: typeof ShieldAlert; iconClass: string } => {
+  if (level === "destructive") {
+    return {
+      border: "border-destructive/60",
+      bg: "bg-destructive/5",
+      icon: ShieldAlert,
+      iconClass: "text-destructive"
+    };
+  }
+  // elevated 沿用现有 warning 黄(normal 基本不会出现 —— 危险工具至少 elevated)。
+  return {
+    border: "border-warning/40",
+    bg: "bg-warning/5",
+    icon: ShieldAlert,
+    iconClass: "text-warning"
+  };
+};
+
 export function ApprovalCard({
   approval,
   onDecide,
   onAllowAlways
 }: ApprovalCardProps) {
+  const { level, reasons } = approval.risk;
+  const style = levelStylize(level);
+  const RiskIcon = style.icon;
+  const destructive = level === "destructive";
+
   return (
-    <div className="my-3 max-w-[60%] rounded-md border border-warning/40 bg-warning/5 p-3">
+    <div className={`my-3 max-w-[60%] rounded-md border p-3 ${style.border} ${style.bg}`}>
       <div className="flex items-start gap-2">
-        <ShieldAlert size={18} className="mt-0.5 shrink-0 text-warning" />
+        <RiskIcon size={18} className={`mt-0.5 shrink-0 ${style.iconClass}`} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-foreground">
               Approve {approval.tool}
+              {destructive ? (
+                <span className="ml-2 rounded bg-destructive px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-destructive-foreground">
+                  高风险
+                </span>
+              ) : null}
             </span>
           </div>
+
+          {/* 命中的风险原因,一行为一个标签。 */}
+          {reasons.length > 0 ? (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {reasons.map((reason) => (
+                <span
+                  key={reason}
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${
+                    destructive
+                      ? "bg-destructive/10 text-destructive"
+                      : "bg-warning/15 text-warning-foreground"
+                  }`}
+                >
+                  {destructive ? <ShieldCheck size={10} /> : <ShieldAlert size={10} />}
+                  {reason}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
           <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
             {summarizeArgs(approval.args, approval.tool)}
           </pre>
@@ -57,14 +109,17 @@ export function ApprovalCard({
               <Check size={12} />
               允许一次
             </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
-              onClick={() => onAllowAlways(approval.callId)}
-            >
-              <Sparkles size={12} />
-              始终允许
-            </button>
+            {/* destructive 不给「始终允许」:能 rm -rf 的工具不该有"以后别问了"。 */}
+            {!destructive ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
+                onClick={() => onAllowAlways(approval.callId)}
+              >
+                <Sparkles size={12} />
+                始终允许 {approval.tool}
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

@@ -11,7 +11,9 @@ import { decideApproval, listApprovals, type PendingApproval } from "../api";
  * `refresh(sessionId)` 只覆盖「页面刷新时正好有 run 在等审批」这一种
  * 情况 —— 会话切换/刷新时由 chat-page 用 effect 驱动,不轮询。
  */
-export function useApprovals(alwaysAllowEnabled?: () => Promise<void> | void) {
+export function useApprovals(
+  allowAlwaysEnabled?: (toolName: string) => Promise<void> | void
+) {
   const [pending, setPending] = useState<readonly PendingApproval[]>([]);
 
   /** 会话切换/刷新恢复时对齐一次(不轮询) —— 事实源仍是 SSE 事件。 */
@@ -41,13 +43,16 @@ export function useApprovals(alwaysAllowEnabled?: () => Promise<void> | void) {
     setPending((prev) => prev.filter((p) => p.callId !== callId));
   }, []);
 
-  /** 允许执行,并把「始终允许」落到 autoApprove。 */
+  /** 允许执行,并把「始终允许」落到 per-tool 白名单(T14)。 */
   const allowAlways = useCallback(
     async (callId: string) => {
-      await alwaysAllowEnabled?.();
+      const target = pending.find((p) => p.callId === callId);
+      if (target) {
+        await allowAlwaysEnabled?.(target.tool);
+      }
       await decide(callId, true);
     },
-    [alwaysAllowEnabled, decide]
+    [pending, allowAlwaysEnabled, decide]
   );
 
   /** 由 useChat 的 onApproval 回调驱动(SSE approval_request / approval_resolved)。 */
@@ -55,7 +60,10 @@ export function useApprovals(alwaysAllowEnabled?: () => Promise<void> | void) {
     (event: RunApprovalRequestEvent | RunApprovalResolvedEvent) => {
       setPending((prev) =>
         event.type === "approval_request"
-          ? [...prev, { callId: event.callId, tool: event.toolName, args: event.args }]
+          ? [
+            ...prev,
+            { callId: event.callId, tool: event.toolName, args: event.args, risk: event.risk }
+          ]
           : prev.filter((item) => item.callId !== event.callId)
       );
     },

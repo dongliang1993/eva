@@ -20,7 +20,8 @@ export const registerApprovalRoutes = (app: FastifyInstance): void => {
         callId: p.callId,
         runId: p.runId,
         tool: p.tool,
-        args: p.args
+        args: p.args,
+        risk: p.risk
       }))
     };
   });

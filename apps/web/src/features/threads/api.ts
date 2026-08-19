@@ -1,4 +1,5 @@
 import { apiFetch } from "../../shared/api/fetch";
+import type { ToolRisk } from "@eva/shared";
 import type { ThreadMessage, ThreadStatus, ThreadUsage } from "../../types/api";
 
 export const fetchThreadStatus = async (threadId: string): Promise<ThreadStatus> =>
@@ -29,6 +30,8 @@ export interface PendingApproval {
   readonly runId?: string;
   readonly tool: string;
   readonly args: Record<string, unknown>;
+  /** T14:本次调用的风险画像(服务端算,SSE 与刷新两条路径一致)。 */
+  readonly risk: ToolRisk;
 }
 
 interface ListApprovalsResponse {

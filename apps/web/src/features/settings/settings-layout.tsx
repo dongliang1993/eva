@@ -1,4 +1,4 @@
-import { ArrowLeft, Brain, Plug, Settings as SettingsIcon, Store } from "lucide-react";
+import { ArrowLeft, Brain, Plug, Settings as SettingsIcon, ShieldCheck, Store } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { SettingsHeader } from "./components/settings-header";
@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: "/settings/models", label: "Models", icon: SettingsIcon },
   { to: "/settings/providers", label: "Providers", icon: Store },
   { to: "/settings/memory", label: "Memory", icon: Brain },
+  { to: "/settings/security", label: "Security", icon: ShieldCheck },
   { to: "/settings/mcp", label: "MCP", icon: Plug }
 ];
 
