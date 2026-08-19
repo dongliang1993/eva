@@ -28,8 +28,10 @@ import { autoCompactIfNeeded, createAutoCompactConfig } from "../services/auto-c
 import { buildMemoryRuntimeSupport } from "../services/memory-runtime.js";
 import type { ModelBinding } from "../services/providers/model-resolver.js";
 import { loadAppSettings } from "../services/settings/app-settings.js";
+import { evaDataDir } from "../paths.js";
 import { createModelSummarizer } from "../services/summarize-with-model.js";
 import { estimateModelHistoryTokens } from "../services/token-estimator.js";
+import { loadMemoryFilesSection, todayString } from "../services/memory/index.js";
 import { loadProjectDocsSection } from "../services/workspaces/project-docs.js";
 import { resolveWorkspaceForSession } from "../services/workspaces/workspace-store.js";
 import { runRequestSchema, type RunRequest } from "../types/runs.js";
@@ -287,11 +289,15 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       await app.services.mcp.ensureConnected();
 
       // 阶段②:解析模型(带工作区 + MCP 工具)。模型不可用(503)时,本次刚建的会话要回滚。
+      // memory files 与工作区无关(~/.eva 是全局的),per-run 读 —— 没绑工作区的会话也注入。
+      const memoryFilesSection = await loadMemoryFilesSection(evaDataDir(), todayString());
+
       const resolved = app.services.agents.resolve({
         ...(body.modelId !== undefined ? { requestedModelId: body.modelId } : {}),
         ...(open.workspace !== undefined ? { workspace: open.workspace } : {}),
         extraTools: app.services.mcp.listTools(),
-        requestApproval
+        requestApproval,
+        ...(memoryFilesSection !== undefined ? { memoryFilesSection } : {})
       });
 
       // 阶段③:模型这轮看见什么(需要 mainModel 的窗口信息)。

@@ -199,7 +199,9 @@ describe("DrizzleMemoryRepository", () => {
       }
     });
 
-    expect(runtime.additionalTools).toHaveLength(2);
+    // T16:文件工具(L1 MEMORY.md + 日记)与 settings.memory.enabled 无关、始终挂载,
+    // 所以 additionalTools = DB 版 2 个(save/search)+ 文件版 3 个 = 5。
+    expect(runtime.additionalTools).toHaveLength(5);
     expect(runtime.memoryBudgetTokens).toBeGreaterThan(0);
     expect(runtime.memoryContext).toContain(shortMemory.content);
     expect(runtime.usedMemoryIds).toContain(shortMemory.id);

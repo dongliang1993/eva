@@ -20,6 +20,8 @@ export interface AgentResolveOptions {
   readonly workspace?: ResolvedWorkspaceContext | undefined;
   /** 进程级外部工具（MCP）；由路由从 registry 取好传进来。 */
   readonly extraTools?: readonly AgentTool[] | undefined;
+  /** per-run 读好的人类可读记忆 section（L1 MEMORY.md + 近几天日记）。 */
+  readonly memoryFilesSection?: import("@eva/harness").PromptSection | undefined;
 }
 
 export interface ResolvedModels {
@@ -102,7 +104,10 @@ export class AgentFactory {
           ? { requestApproval: options.requestApproval }
           : {}),
         ...(options.workspace !== undefined ? { workspace: options.workspace } : {}),
-        ...(options.extraTools !== undefined ? { extraTools: options.extraTools } : {})
+        ...(options.extraTools !== undefined ? { extraTools: options.extraTools } : {}),
+        ...(options.memoryFilesSection !== undefined
+          ? { memoryFilesSection: options.memoryFilesSection }
+          : {})
       },
       models,
       (binding) => this.getModel(binding)

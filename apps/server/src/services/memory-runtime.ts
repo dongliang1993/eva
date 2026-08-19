@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  createAppendMemoryTool,
+  createReadMemoryFileTool,
   createSaveMemoryTool,
   createSearchMemoryTool,
+  createUpdateLongTermMemoryTool,
   type AgentTool,
   type MemoryCategory,
   type MemoryStore
@@ -12,6 +15,8 @@ import type { AppConfig } from "../config.js";
 import type { AppDatabase } from "../db/index.js";
 import { DrizzleMemoryRepository } from "../db/repositories/memory-repository.js";
 import { DrizzleMessageSearchRepository } from "../db/repositories/message-search-repository.js";
+import { evaDataDir } from "../paths.js";
+import { MemoryFileStore } from "./memory/memory-file-store.js";
 import { embedAndStoreMemory } from "./memory-embedding.js";
 import {
   calculateMemoryContextTokenBudget,
@@ -98,9 +103,16 @@ export const buildMemoryRuntimeSupport = async (
   }
 
   const store = createMemoryStore(db, config);
+  // 人类可读记忆文件(~/.eva/MEMORY.md + memory/)在 settings.memory.enabled 之外始终挂载:
+  // .enabled 管的是 DB 检索(L4),文件工具(L1/L2)是"文件即数据库"哲学的一部分,
+  // 与 skills/MCP 一样只要进程活着就能用 —— 无需用户先在 Settings 打开。
+  const fileStore: MemoryFileStore = new MemoryFileStore(evaDataDir());
   const additionalTools: readonly AgentTool[] = [
     createSaveMemoryTool(store),
-    createSearchMemoryTool(store)
+    createSearchMemoryTool(store),
+    createReadMemoryFileTool(fileStore),
+    createAppendMemoryTool(fileStore),
+    createUpdateLongTermMemoryTool(fileStore)
   ];
   const memoryBudgetTokens = settings.memory.autoRetrieve
     ? calculateMemoryContextTokenBudget({

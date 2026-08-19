@@ -125,6 +125,15 @@ Approvals are driven by the SSE `approval_request` / `approval_resolved` events 
 - **Workspaces** (`app.services.workspaces`): a local directory bound to a session (`sessions.workspace_id`). fs tools are injected per-run from it; `CLAUDE.md`/`AGENTS.md` under it are injected into the system prompt (16 KB cap). Paths must pass `assertUsableWorkspacePath` ($HOME and `/` rejected). Tool overflow lands in `~/.eva/tool-overflow/<workspaceId>/`, and `read_file` has a read-only whitelist for it.
 - **MCP** (`app.services.mcp`, T9): DB `mcp_servers` is the only runtime source; `~/.eva/mcp.json` imports file-origin entries at startup. MCP tools are named `mcp__<server>__<tool>` and require approval unless the server declares `readOnlyHint`. A broken server degrades to `state: "error"` and never fails the chat.
 
+## Memory (T16)
+
+Memory is split across two stores by scale and access pattern (the "file as database" philosophy, docs 14 §11):
+
+- **DB (L4)**: `memories` table + `memory_embeddings` (vec0) + FTS. Tools: `save_memory` / `search_memory`. Hundreds-to-thousands of searchable facts; gated by Settings → Memory (`settings.memory.enabled`).
+- **Human-readable files (L1/L2)**: `~/.eva/MEMORY.md` (long-term, injected every turn, 8 KB cap) and `~/.eva/memory/YYYY-MM-DD.md` (recent 2 days injected). Tools: `read_memory_file` / `append_memory` / `update_long_term_memory`. These are **user-editable** — `MEMORY.md` is what "you can open it in an editor and fix it" means. Always mounted (not gated by `settings.memory.enabled`); the routing rule lives in `agent.ts`'s `MEMORY_PROMPT_SECTION`.
+
+The prompt tells the model the one decisive question — *"is this fact worth spending tokens on every single turn?"* — Yes → `update_long_term_memory`, No → `save_memory`; day-stamped ephemera → `append_memory`.
+
 ## Commands
 
 ```bash
