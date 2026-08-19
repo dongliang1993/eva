@@ -257,7 +257,7 @@ async function waitForServer(port: number, timeout = 30_000): Promise<void> {
 
   throw new Error(
     `Server startup timeout after ${timeout / 1000}s.\nLast error: ${lastError}\n\n${serverErrors.length > 0
-      ? "Server output:\n" + serverErrors.slice(-10).join("\n")
+      ? "Server output:\n" + serverErrors.slice(-20).join("\n")
       : "No server output captured."
     }`
   );
@@ -402,6 +402,19 @@ ipcMain.handle("dialog:pick-directory", async (): Promise<string | null> => {
 // ---------------------------------------------------------------------------
 // App Lifecycle
 // ---------------------------------------------------------------------------
+
+// 第二个实例会抢同一个 ~/.eva/eva.db —— SQLite WAL 能扛并发读写,但两个实例
+// 各自 fork 一份 server、各自连一套 MCP server,行为不可预测。直接拒绝第二实例。
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
 
 app.whenReady().then(async () => {
   console.log("[app] Starting Eva Desktop...");

@@ -128,3 +128,10 @@ T9 只支持静态 token（`headers` 里塞 Bearer）。`docs 14 §4.7` 计划�
 `mcp-client.ts` 改成 `stderr: "pipe"` + 保留尾部 2000 字符，连接失败时并进错误信息，
 用户在 UI 上能直接看到 `Cannot find package ...` 这类可照着修的原文。
 **教训**：包装外部进程时，"错误信息够不够用户自己修"要单独验一遍 —— 实测才发现的。
+
+### BUNDLED skills 打包态静默失效 `[r4]`（T11）
+
+`loader.ts` 的 `BUNDLED_SKILLS_DIR` 从 `import.meta.url` 推断,打包后指向
+`Resources/server/dist/bundled` 但不存在。当前 `bundled/` 是空目录所以今天没坏,
+第一个内置 skill 加进去那天会静默失效。修法二选一:随 `copy-migrations.mjs` 拷进 dist,
+或走 extraResources。没在 T11 顺手修 —— 没有内置 skill 就没有验收对象。

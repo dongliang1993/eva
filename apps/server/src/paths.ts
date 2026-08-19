@@ -11,3 +11,9 @@ export const evaDataDir = (): string => path.join(os.homedir(), ".eva");
  */
 export const toolOverflowDir = (workspaceId: string): string =>
   path.join(evaDataDir(), "tool-overflow", workspaceId);
+
+/**
+ * 用户技能目录。技能是用户内容,必须在用户数据目录里 ——
+ * 放 App 包内部的话,装完的用户根本没有途径加 skill(docs 14 §7.3)。
+ */
+export const userSkillsDir = (): string => path.join(evaDataDir(), "skills");

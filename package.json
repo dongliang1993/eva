@@ -12,7 +12,7 @@
     "web:build": "pnpm --filter @eva/web build",
     "desktop:dev": "pnpm --filter @eva/desktop dev",
     "desktop:build": "pnpm --filter @eva/desktop build",
-    "desktop:pack": "pnpm --filter @eva/desktop pack"
+    "desktop:pack": "pnpm --filter @eva/desktop run pack"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

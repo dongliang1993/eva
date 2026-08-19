@@ -13,6 +13,7 @@ import { createPinoObserver } from "./observability.js";
 import { findMonorepoRoot } from "./services/monorepo-root.js";
 import { syncMcpConfigFile } from "./services/mcp/mcp-config-file.js";
 import { migrateLegacySettings } from "./services/settings/migrate-legacy.js";
+import { userSkillsDir } from "./paths.js";
 import type { AppInfrastructure, AppServices } from "./types/common.js";
 
 export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
@@ -21,11 +22,13 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   const observer = createPinoObserver(logger);
   const workspaceRoot = findMonorepoRoot(process.cwd());
 
-  const projectSkillsDir = path.join(
-    workspaceRoot,
-    "skills"
-  );
-  const skills = await loadSkills(projectSkillsDir);
+  // 用户技能在 ~/.eva/skills(打包后唯一可写位置);dev 时额外扫 monorepo 根的
+  // skills/,方便在仓库里试写并提交。打包态 findMonorepoRoot 会退化成 cwd,
+  // 那个目录不存在,scanDirectory 返回空,无副作用。
+  const skills = await loadSkills([
+    { dir: userSkillsDir(), source: "project" },
+    { dir: path.join(workspaceRoot, "skills"), source: "project" }
+  ]);
 
   logger.info(
     { skillCount: skills.length, skills: skills.map((s) => `${s.name} (${s.source})`) },

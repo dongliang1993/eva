@@ -139,6 +139,12 @@ pnpm desktop:build# Build the desktop app
 pnpm desktop:pack # Pack the desktop app for distribution
 ```
 
+打包链路（T11 起）：`pack` = web build → server build → `pnpm deploy .server-deploy`
+（server 的 prod node_modules，供 external 依赖）→ `electron-rebuild`（better-sqlite3 按
+Electron ABI）→ electron-vite。产物：`Eva.app/Contents/Resources/{app.asar, server/dist,
+server/node_modules, web/dist}`。用户数据与技能在 `~/.eva/`（`~/.eva/skills/<name>/SKILL.md`
+是打包态技能唯一可写位置；dev 态额外扫 monorepo 根 `skills/`）。单实例锁在多开时聚焦已有窗口。
+
 ## Configuration
 
 > **Model configuration does not go through environment variables.** Providers and API keys live in the `providers` table in SQLite (`~/.eva/eva.db`), managed via the Settings page; the DB is the single source of truth. Environment variables only govern process-level concerns.

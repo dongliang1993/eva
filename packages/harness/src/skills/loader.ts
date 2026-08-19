@@ -7,6 +7,12 @@ import type { Skill } from "./types.js";
 
 const SKILL_FILE_NAME = "SKILL.md";
 
+/**
+ * ⚠️ BUNDLED 行程:这个目录从 import.meta.url 推断,打包后会指向
+ * Resources/server/dist/bundled —— 不存在(当前 bundled/ 是空目录,所以今天没坏)。
+ * 第一个内置 skill 加进去那天它会静默失效。要么随 copy-migrations.mjs 一起拷进 dist,
+ * 要么走 extraResources。见 FINDINGS [r4]。
+ */
 const BUNDLED_SKILLS_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "bundled"
@@ -70,22 +76,33 @@ export const loadBundledSkills = (): Promise<Skill[]> =>
 export const loadProjectSkills = (skillsDir: string): Promise<Skill[]> =>
   loadSkillsFromDir(skillsDir, "project");
 
+export interface SkillSourceDir {
+  readonly dir: string;
+  readonly source: Skill["source"];
+}
+
+/**
+ * 按给定顺序扫描多个目录。同名 skill 后来者不覆盖先到者 —— 用户目录排在前面,
+ * 于是用户可以用同名 skill 覆盖内置的。
+ */
 export const loadSkills = async (
-  projectSkillsDir?: string
+  dirs: readonly SkillSourceDir[]
 ): Promise<Skill[]> => {
   const bundled = await loadBundledSkills();
-  const project = projectSkillsDir
-    ? await loadProjectSkills(projectSkillsDir)
-    : [];
-
   const byName = new Map<string, Skill>();
 
   for (const skill of bundled) {
     byName.set(skill.name, skill);
   }
 
-  for (const skill of project) {
-    byName.set(skill.name, skill);
+  for (const { dir, source } of dirs) {
+    const skills = await loadSkillsFromDir(dir, source);
+
+    for (const skill of skills) {
+      if (!byName.has(skill.name)) {
+        byName.set(skill.name, skill);
+      }
+    }
   }
 
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));

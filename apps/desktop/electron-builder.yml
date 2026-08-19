@@ -23,6 +23,10 @@ extraResources:
     to: server/package.json
   - from: ../../apps/server/SOUL.md
     to: server/SOUL.md
+  - from: ../../apps/web/dist/
+    to: web/dist/
+    filter:
+      - "**/*"
 mac:
   icon: build/icon.png
   category: public.app-category.developer-tools
@@ -31,12 +35,3 @@ mac:
     - target: dmg
       arch:
         - arm64
-win:
-  icon: build/icon.png
-  target:
-    - target: nsis
-      arch:
-        - x64
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true

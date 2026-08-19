@@ -112,7 +112,7 @@ describe("loadSkills", () => {
       "---\nname: my-tool\ndescription: Custom tool skill.\n---\nCustom content."
     );
 
-    const skills = await loadSkills(dir);
+    const skills = await loadSkills([{ dir, source: "project" }]);
     const myTool = skills.find((s) => s.name === "my-tool");
 
     expect(myTool).toBeDefined();
@@ -121,7 +121,7 @@ describe("loadSkills", () => {
   });
 
   it("returns only project skills when no bundled skills exist", async () => {
-    const skills = await loadSkills();
+    const skills = await loadSkills([]);
 
     expect(skills).toEqual([]);
   });
@@ -135,7 +135,7 @@ describe("loadSkills", () => {
       "---\nname: zebra\ndescription: Z skill.\n---\nZ content."
     );
 
-    const skills = await loadSkills(dir);
+    const skills = await loadSkills([{ dir, source: "project" }]);
     const names = skills.map((s) => s.name);
 
     for (let i = 1; i < names.length; i++) {
