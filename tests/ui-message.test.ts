@@ -180,7 +180,23 @@ describe("UiMessageBuilder", () => {
 });
 
 describe("stripReasoningParts", () => {
-  it("剥离全部 reasoning part,保留其余 part 与 metadata", () => {
+  it("build() 保留 reasoning —— 落库的是完整轨迹,剥离只留给回灌模型", () => {
+    const builder = new UiMessageBuilder("m1");
+    pushAll(builder, [
+      { type: "reasoning-delta", textDelta: "先想" },
+      { type: "text-delta", textDelta: "结论" }
+    ]);
+
+    // 落库走的是 build():reasoning 原样保留(Think 块在刷新后仍可回看)。
+    const persisted = builder.build();
+    expect(persisted.parts.map((p) => p.type)).toEqual(["reasoning", "text"]);
+
+    // 回灌给 provider 前才剥 —— stripReasoningParts 只用在 convertToModelMessages 之前。
+    const stripped = stripReasoningParts(persisted);
+    expect(stripped.parts.map((p) => p.type)).toEqual(["text"]);
+  });
+
+  it("剥离全部 reasoning part,保留其余 text 与 metadata", () => {
     const msg: EvaUIMessage = {
       id: "m1",
       role: "assistant",

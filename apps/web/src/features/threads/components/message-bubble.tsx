@@ -185,7 +185,11 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
             />
           </div>
         ) : group.kind === "reasoning" ? (
-          <ThinkBlock key={`reasoning-${groupIndex}`} text={group.part.text} />
+          <ThinkBlock
+            key={`reasoning-${groupIndex}`}
+            text={group.part.text}
+            isStreaming={group.part.state === "streaming"}
+          />
         ) : (
           // 一串连续工具调用收拢成一组:组内紧凑(space-y-1),组与文字之间才宽松。
           <div key={`tools-${groupIndex}`} className="my-4 space-y-1 first:mt-0 last:mb-0">
@@ -209,12 +213,19 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
 }
 
 /**
- * Think 块 —— assistant 消息里的推理轨迹(对接 reasoning-delta),默认折叠。
- * DeepSeek 风格 = 一条扁平 DisclosureRow,无边框无底色;展开才显示推理全文。
+ * Think 块 —— assistant 消息里的推理轨迹(对接 reasoning-delta)。
+ * DeepSeek 风格 = 一条扁平 DisclosureRow。
+ *
+ * 流式期间 force open:reasoning 逐字进来时立即铺开给人看(此刻正是用户想看的
+ * 实时思考);收口成 done 后回到默认折叠,想回看的手动展开。
  */
-function ThinkBlock({ text }: { readonly text: string }) {
+function ThinkBlock({ text, isStreaming }: { readonly text: string; readonly isStreaming: boolean }) {
   return (
-    <DisclosureRow icon={<Brain size={14} className="shrink-0" />} title="Think">
+    <DisclosureRow
+      icon={<Brain size={14} className="shrink-0" />}
+      title="Think"
+      open={isStreaming}
+    >
       <div className="whitespace-pre-wrap text-secondary-foreground">{text}</div>
     </DisclosureRow>
   );

@@ -17,13 +17,22 @@ interface DisclosureRowProps {
   readonly trailing?: ReactNode;
   /** 展开区内容;undefined 表示不可展开。 */
   readonly children?: ReactNode;
+  /**
+   * 自动展开提示:true 时强制展开(用于"流式期间铺开给用户看实时推理")。
+   * 只是 overlay 提示,不接管展开/收起 —— 用户点击永远以自己的 state 为准,
+   * open 转 false 时回落自管理。
+   */
+  readonly open?: boolean;
   /** 每次切换展开态时通知外层(用于"首次展开触发数据拉取"这类副作用)。 */
   readonly onToggle?: () => void;
 }
 
-export function DisclosureRow({ icon, title, trailing, children, onToggle }: DisclosureRowProps) {
-  const [expanded, setExpanded] = useState(false);
+export function DisclosureRow({ icon, title, trailing, children, onToggle, open }: DisclosureRowProps) {
+  const [selfOpen, setSelfOpen] = useState(false);
   const expandable = children !== undefined;
+  // open 是流式期间的自动展开提示,和用户点击攒出的 selfOpen 取或 ——
+  // 流式中必展开,收口后照自管理,用户永远能自己开合。
+  const expanded = open === true || selfOpen;
 
   return (
     <div className="flex min-w-0 w-full flex-col">
@@ -32,7 +41,7 @@ export function DisclosureRow({ icon, title, trailing, children, onToggle }: Dis
         className="group flex h-6 min-w-0 cursor-pointer items-center overflow-hidden text-left transition-colors hover:text-foreground"
         onClick={() => {
           if (expandable) {
-            setExpanded((v) => !v);
+            setSelfOpen((v) => !v);
             onToggle?.();
           }
         }}
