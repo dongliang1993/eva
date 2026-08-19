@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, RotateCcw, Users } from "lucide-react";
+import { Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileText, RotateCcw } from "lucide-react";
 import "streamdown/styles.css";
 
 import type { EvaUIMessage } from "@eva/shared";
@@ -223,6 +223,10 @@ function ThinkBlock({ text }: { readonly text: string }) {
 /**
  * 子代理通知条 —— 既不是用户气泡也不是 assistant 正文,而是一条低调的分隔提示。
  * 默认折叠:报告全文往往很长,展开才看(它已经进了模型上下文,UI 不必强推给人看)。
+ *
+ * header 只留「已回报/已结束」一个词 + 描述,把注入文本里的担纲头
+ * ("Background subagent <id> (<desc>) reported:")剥掉 —— 那是写给模型的方向词,
+ * 对人读是噪音(对应参考图里"分层+强调"后一目了然的头部)。
  */
 function SubagentNotice({
   kind,
@@ -236,6 +240,13 @@ function SubagentNotice({
   const [expanded, setExpanded] = useState(false);
   const label = kind === "subagent_reported" ? "已回报" : "已结束";
 
+  // 剥掉注入前缀("Background subagent <id> (<desc>) reported:" / "finished and ... more."),
+  // 只留子代理真正交付的那段内容。
+  const body = text.replace(
+    /^Background subagent \S+ \(.*?\) (?:reported:|finished and will do no further work unless you send it more\.)\s*\n?\n?/,
+    ""
+  );
+
   return (
     <div className="my-4 first:mt-0 last:mb-0">
       <button
@@ -244,9 +255,9 @@ function SubagentNotice({
         onClick={() => setExpanded((prev) => !prev)}
       >
         <span className="h-px flex-1 bg-border" />
-        <Users size={12} className="shrink-0" />
-        <span className="shrink-0">
-          子代理{description !== undefined && description.length > 0 ? ` 「${description}」` : ""} {label}
+        <FileText size={12} className="shrink-0" />
+        <span className="shrink-0 font-medium text-foreground">
+          {description !== undefined && description.length > 0 ? `「${description}」 ` : ""}{label}
         </span>
         {expanded ? (
           <ChevronUp size={12} className="shrink-0" />
@@ -258,7 +269,7 @@ function SubagentNotice({
 
       {expanded ? (
         <div className="mt-2 rounded-md border border-border bg-card/50 p-3">
-          <StreamMarkdown content={text} />
+          {body.length > 0 ? <StreamMarkdown content={body} /> : <StreamMarkdown content={text} />}
         </div>
       ) : null}
     </div>
