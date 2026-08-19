@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import type { ToolCallInfo } from "../../../shared/api/run-stream-client";
+import { SubagentCard } from "./subagent-card";
 
 // ---------------------------------------------------------------------------
 // Semantic tool display config
@@ -73,6 +74,12 @@ interface ToolCallBlockProps {
 }
 
 function ToolCallBlockImpl({ toolCall }: ToolCallBlockProps) {
+  // S7:Task/TaskOutput 调用的卡片交给子代理专属渲染(角色 + 状态点 + 展开过程),
+  // 复用 shared/streaming + shared/markdown —— 主工具的通用渲染在这里不适用。
+  if (toolCall.toolName === "Task" || toolCall.toolName === "TaskOutput") {
+    return <SubagentCard toolCall={toolCall} />;
+  }
+
   const [expanded, setExpanded] = useState(false);
   const [showFullResult, setShowFullResult] = useState(false);
 

@@ -9,6 +9,7 @@ import { setThreadWorkspace } from "../workspaces/api";
 import { useSettings } from "../settings/hooks/use-settings";
 import { Sidebar } from "./components/sidebar";
 import { ChatView } from "./components/chat-view";
+import { SubagentsProvider, useSubagentsStore } from "./components/subagents-context";
 import { VersionActionsProvider } from "./components/version-actions-context";
 import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
 import type { ThreadSummary } from "../../types/api";
@@ -41,6 +42,8 @@ export function ChatPage() {
   );
 
   const approvals = useApprovals(enableAutoApprove);
+  // S7:子代理视图 store(SSE 累积 + /subagent-messages 兜底)。
+  const subagents = useSubagentsStore();
   const {
     messages,
     streamingMessage,
@@ -53,7 +56,12 @@ export function ChatPage() {
     stopStreaming,
     newConversation,
     loadSession
-  } = useChat({ onApproval: approvals.applyStreamEvent });
+  } = useChat({ onApproval: approvals.applyStreamEvent, onSubagent: subagents.applyStreamEvent });
+
+  // 会话切换 → store 归位,子代理卡片刷新兜底走对会话。
+  useEffect(() => {
+    subagents.setSessionId(sessionId);
+  }, [sessionId, subagents]);
 
   // 会话切换/新会话时,从服务端对齐一次该会话下的待审批(不轮询)。事实源仍是 SSE。
   useEffect(() => approvals.refresh(sessionId), [sessionId, approvals.refresh]);
@@ -163,22 +171,24 @@ export function ChatPage() {
         }
       >
         <VersionActionsProvider value={{ siblingIdsById, isStreaming, onRegenerate: regenerate, onSwitchVersion: switchVersion }}>
-          <ChatView
-            messages={messages}
-            streamingMessage={streamingMessage}
-            isStreaming={isStreaming}
-            selectedModel={selectedModel}
-            onSend={(text) => sendMessage(text, selectedModel ?? undefined)}
-            onStop={stopStreaming}
-            onSelectModel={setSelectedModel}
-            workspaceId={displayWorkspaceId}
-            onSelectWorkspace={handleSelectWorkspace}
-            sessionId={sessionId}
-            pendingApprovals={approvals.pending}
-            onApproveOnce={(callId) => approvals.decide(callId, true)}
-            onDeny={(callId) => approvals.decide(callId, false)}
-            onAllowAlways={(callId) => approvals.allowAlways(callId)}
-          />
+          <SubagentsProvider value={subagents}>
+            <ChatView
+              messages={messages}
+              streamingMessage={streamingMessage}
+              isStreaming={isStreaming}
+              selectedModel={selectedModel}
+              onSend={(text) => sendMessage(text, selectedModel ?? undefined)}
+              onStop={stopStreaming}
+              onSelectModel={setSelectedModel}
+              workspaceId={displayWorkspaceId}
+              onSelectWorkspace={handleSelectWorkspace}
+              sessionId={sessionId}
+              pendingApprovals={approvals.pending}
+              onApproveOnce={(callId) => approvals.decide(callId, true)}
+              onDeny={(callId) => approvals.decide(callId, false)}
+              onAllowAlways={(callId) => approvals.allowAlways(callId)}
+            />
+          </SubagentsProvider>
         </VersionActionsProvider>
       </ResizableSidebar>
     </div>

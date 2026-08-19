@@ -5,6 +5,7 @@ import type {
   RunApprovalResolvedEvent,
   RunStreamEvent,
   RunStreamFrame,
+  RunSubagentUpdateEvent,
   StreamFinishReason
 } from "@eva/shared";
 import { toolPartOutput } from "@eva/shared";
@@ -22,10 +23,12 @@ export interface ToolCallInfo {
 
 export interface StreamCallbacks {
   readonly onRunStart?: (runId: string, sessionId: string) => void;
-  /** 已按 seq 归位的 agent 域事件,交给 UiMessageBuilder 累积。 */
+  /** 已按 seq 归位的 agent 事件,交给 SSE 累积。 */
   readonly onEvent: (event: RunAgentStreamEvent) => void;
   /** T0.4 引入的 Eva 自有域审批事件。 */
   readonly onApproval?: (event: RunApprovalRequestEvent | RunApprovalResolvedEvent) => void;
+  /** S7:子代理事件。与主链隔离 —— 走专属 callback,绝不并进 onEvent 的主 builder。 */
+  readonly onSubagent?: (event: RunSubagentUpdateEvent) => void;
   readonly onError: (message: string) => void;
   readonly onEnd: (finishReason: StreamFinishReason) => void;
 }
@@ -108,6 +111,11 @@ const dispatchEvent = (ev: RunStreamEvent, callbacks: StreamCallbacks): void => 
     case "approval_request":
     case "approval_resolved":
       callbacks.onApproval?.(ev);
+      break;
+    // S7:子代理事件与主链隔离段 —— 🔴 若漏掉这个 case,会掉进 default 被并进主
+    // builder,子代理的中间过程反向污染主上下文(T15 §2.4 的静默失败模式)。
+    case "subagent_update":
+      callbacks.onSubagent?.(ev);
       break;
     case "end":
       callbacks.onEnd(ev.finishReason);

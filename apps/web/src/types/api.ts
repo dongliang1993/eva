@@ -21,6 +21,7 @@ export type {
   ProviderModel,
   RunStatus,
   SessionStatus,
+  SubagentMessage,
   ThreadMessage,
   ThreadStatus,
   ThreadSummary,

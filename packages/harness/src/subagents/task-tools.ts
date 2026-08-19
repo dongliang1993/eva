@@ -78,12 +78,15 @@ export const createTaskTools = (ctx: TaskToolContext): readonly AgentTool[] => {
       "are not (and cannot be) brought into this context."
     ].join("\n"),
     schema: taskSchema,
-    execute: async ({ prompt, subagent, background }) => {
+    execute: async ({ prompt, subagent, background }, options) => {
       const id = newTaskId();
-      const tcId = `task-${id}`;
+      // parentToolCallId 用 SDK 派给这次调用(同一卡片)的 toolCallId —— 子代理
+      // 进程消息与主对话里的 Task 卡片靠它一对一归位(前端卡片展开区 + /subagent-messages)。
+      // SDK 总会有,这里兜底只是防御:极端路径下退化成本地合成 id,不崩。
+      const parentToolCallId = options?.toolCallId ?? `task-${id}`;
       const result = await ctx.runFork({
         taskId: id,
-        parentToolCallId: tcId,
+        parentToolCallId,
         subagentType: subagent ?? "explorer",
         prompt,
         background: background !== false
