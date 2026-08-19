@@ -1,18 +1,9 @@
 import { memo, useState } from "react";
-import {
-  Search,
-  Globe,
-  FileText,
-  Wrench,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  ChevronDown,
-  ChevronUp
-} from "lucide-react";
+import { Search, Globe, FileText, Wrench, CheckCircle2, XCircle, Clock } from "lucide-react";
 
 import type { ToolCallInfo } from "../../../shared/api/run-stream-client";
 import { SubagentCard } from "./subagent-card";
+import { DisclosureRow } from "./disclosure-row";
 
 // ---------------------------------------------------------------------------
 // Semantic tool display config
@@ -42,6 +33,15 @@ const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   read_skill: {
     icon: FileText,
     getTitle: (args) => `Read: ${String(args.name ?? "skill")}`
+  },
+  // 读取类工具统一 📄,对齐参考里的 Read 行。
+  read_file: {
+    icon: FileText,
+    getTitle: (args) => `Read: ${String(args.path ?? "file")}`
+  },
+  grep: {
+    icon: FileText,
+    getTitle: (args) => `Grep: ${String(args.pattern ?? args.query ?? "")}`
   }
 };
 
@@ -51,7 +51,7 @@ const DEFAULT_DISPLAY: ToolDisplay = {
 };
 
 function getToolDisplay(toolName: string): ToolDisplay {
-  // toolName 可能为空(部分 provider 的错误 part 不带名字)—— 别渲染出一张无字空卡。
+  // toolName 可能为空(部分 provider 的错误 part 不带名字)——
   return TOOL_DISPLAY[toolName] ?? {
     ...DEFAULT_DISPLAY,
     getTitle: () => (toolName.length > 0 ? toolName : "Tool Call")
@@ -70,7 +70,7 @@ function formatBytes(str: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Component
+// Component — DeepSeek 扁平披露行(无边框无底色),不再是圆角卡片
 // ---------------------------------------------------------------------------
 
 interface ToolCallBlockProps {
@@ -83,9 +83,6 @@ function ToolCallBlockImpl({ toolCall }: ToolCallBlockProps) {
     return <SubagentCard toolCall={toolCall} />;
   }
 
-  const [expanded, setExpanded] = useState(false);
-  const [showFullResult, setShowFullResult] = useState(false);
-
   const display = getToolDisplay(toolCall.toolName);
   const Icon = display.icon;
   const title = display.getTitle(toolCall.args);
@@ -95,106 +92,75 @@ function ToolCallBlockImpl({ toolCall }: ToolCallBlockProps) {
   const isRunning = !toolCall.status;
 
   return (
-    <div className="my-3 max-w-[60%]">
-      {/* Header — always visible */}
-      <button
-        type="button"
-        className="flex w-full items-center gap-2.5 rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent/50"
-        onClick={() => setExpanded((prev) => !prev)}
-      >
-        <Icon size={16} className="shrink-0 text-muted-foreground" />
-        <span className="flex-1 truncate text-sm font-medium text-foreground">
-          {title}
-        </span>
-
-        <div className="flex items-center gap-2 shrink-0">
-          {isSuccess ? (
-            <CheckCircle2 size={16} className="text-success" />
-          ) : isError ? (
-            <XCircle size={16} className="text-destructive" />
-          ) : null}
-
-          {toolCall.durationMs !== undefined ? (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Clock size={12} />
-              {formatDuration(toolCall.durationMs)}
-            </span>
-          ) : isRunning ? (
-            <span className="text-xs text-warning animate-pulse">running</span>
-          ) : null}
-
-          {expanded ? (
-            <ChevronUp size={14} className="text-muted-foreground" />
-          ) : (
-            <ChevronDown size={14} className="text-muted-foreground" />
-          )}
-        </div>
-      </button>
-
-      {/* Expanded detail */}
-      {expanded ? (
-        <div className="mt-3 space-y-4 pl-1 pl-4">
-          {/* Arguments */}
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-              Arguments
-            </h4>
-            <div className="rounded-md border border-border bg-terminal/30 p-3">
-              <pre className="text-xs text-foreground font-mono whitespace-pre-wrap break-all">
-                {JSON.stringify(toolCall.args, null, 2)}
-              </pre>
-            </div>
-          </div>
-
-          {/* Result */}
-          {toolCall.output ? (
-            <div>
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                Result
-              </h4>
-              <div className="rounded-md border border-border bg-terminal/30">
-                <div
-                  className={`p-3 overflow-hidden ${showFullResult ? "" : "max-h-[300px]"
-                    }`}
-                >
-                  <pre className="text-xs text-foreground font-mono whitespace-pre-wrap break-all">
-                    {toolCall.output}
-                  </pre>
-                </div>
-
-                {/* Footer with size + show full */}
-                {toolCall.output.length > 500 ? (
-                  <div className="flex items-center justify-between border-t border-border px-3 py-2">
-                    <span className="text-xs text-muted-foreground">
-                      {formatBytes(toolCall.output)}
-                    </span>
-                    <button
-                      type="button"
-                      className="text-xs text-primary hover:underline"
-                      onClick={() => setShowFullResult((prev) => !prev)}
-                    >
-                      {showFullResult ? "Collapse" : "Show full output"}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {/* Footer meta */}
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <span>
-              Call ID:
-              <span className="ml-2 font-mono text-foreground">
-                {toolCall.toolCallId}
-              </span>
-            </span>
-            {toolCall.durationMs !== undefined ? (
-              <span>Duration: {formatDuration(toolCall.durationMs)}</span>
-            ) : null}
+    <DisclosureRow
+      icon={<Icon size={14} className="shrink-0" />}
+      title={`${toolCall.toolName}${title ? ` · ${title}` : ""}`}
+      trailing={
+        isSuccess ? (
+          <CheckCircle2 size={14} className="text-success" />
+        ) : isError ? (
+          <XCircle size={14} className="text-destructive" />
+        ) : toolCall.durationMs !== undefined ? (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock size={12} />
+            {formatDuration(toolCall.durationMs)}
+          </span>
+        ) : isRunning ? (
+          <span className="text-xs text-warning animate-pulse">running</span>
+        ) : null
+      }
+    >
+      <div className="space-y-4">
+        {/* Arguments */}
+        <div>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Arguments
+          </h4>
+          <div className="rounded-md border border-border bg-terminal/30 p-3">
+            <pre className="font-mono text-xs whitespace-pre-wrap break-all text-foreground">
+              {JSON.stringify(toolCall.args, null, 2)}
+            </pre>
           </div>
         </div>
-      ) : null}
+
+        {/* Result */}
+        {toolCall.output ? (
+          <ResultBlock output={toolCall.output} />
+        ) : null}
+      </div>
+    </DisclosureRow>
+  );
+}
+
+/** 工具结果:默认折叠超过 300px 高,底部给尺寸 + Show full output。 */
+function ResultBlock({ output }: { readonly output: string }) {
+  const [showFull, setShowFull] = useState(false);
+  const long = output.length > 500;
+
+  return (
+    <div>
+      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Result
+      </h4>
+      <div className="overflow-hidden rounded-md border border-border bg-terminal/30">
+        <div className={`p-3 ${showFull ? "" : "max-h-[300px]"}`}>
+          <pre className="font-mono text-xs whitespace-pre-wrap break-all text-foreground">
+            {output}
+          </pre>
+        </div>
+        {long ? (
+          <div className="flex items-center justify-between border-t border-border px-3 py-2">
+            <span className="text-xs text-muted-foreground">{formatBytes(output)}</span>
+            <button
+              type="button"
+              className="text-xs text-primary hover:underline"
+              onClick={() => setShowFull((v) => !v)}
+            >
+              {showFull ? "Collapse" : "Show full output"}
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

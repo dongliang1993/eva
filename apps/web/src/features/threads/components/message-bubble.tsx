@@ -12,6 +12,7 @@ import { toolPartToInfo } from "../../../shared/api/run-stream-client";
 import { useVersionActions } from "./version-actions-context";
 import { StreamingIndicator } from "./streaming-indicator";
 import { ToolCallBlock } from "./tool-call-block";
+import { DisclosureRow } from "./disclosure-row";
 
 interface MessageBubbleProps {
   readonly message: EvaUIMessage;
@@ -162,10 +163,13 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
   }
 
   const thinkingMs = message.metadata?.thinkingDurationMs;
+  // 有 reasoning part(会渲染成扁平 Think 行)时不再显示 "Thought for Xs"
+  // —— 那是空的等待时长估计,和真实推理轨迹叠一起是噪音。
+  const hasReasoning = message.parts.some(isReasoningPart);
 
   return (
     <div className="max-w-none">
-      {thinkingMs !== undefined && thinkingMs > 0 ? (
+      {thinkingMs !== undefined && thinkingMs > 0 && !hasReasoning ? (
         <ThinkingBadge durationMs={thinkingMs} />
       ) : null}
 
@@ -205,40 +209,14 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
 }
 
 /**
- * Think 块 —— assistant 消息里的推理轨迹(对接 reasoning-delta),默认折叠成
- * 一条可展开的目录行。样式对齐参考截图:左对齐标题行 + 大脑图标 + chevron。
- * 折叠时只显示标题行;展开时显示推理全文(纯文本,不经过 markdown)。
+ * Think 块 —— assistant 消息里的推理轨迹(对接 reasoning-delta),默认折叠。
+ * DeepSeek 风格 = 一条扁平 DisclosureRow,无边框无底色;展开才显示推理全文。
  */
 function ThinkBlock({ text }: { readonly text: string }) {
-  const [expanded, setExpanded] = useState(false);
-
   return (
-    <div
-      className="my-3 rounded-md border border-border bg-card/50 overflow-hidden"
-      data-variant="think"
-    >
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/50"
-        onClick={() => setExpanded((prev) => !prev)}
-        aria-expanded={expanded}
-        aria-label={expanded ? "折叠思考过程" : "展开思考过程"}
-      >
-        <Brain size={14} className="shrink-0 text-muted-foreground" />
-        <span className="flex-1 font-medium text-foreground">Think</span>
-        {expanded ? (
-          <ChevronUp size={14} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
-        )}
-      </button>
-
-      {expanded ? (
-        <div className="px-3 pb-3 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
-          {text}
-        </div>
-      ) : null}
-    </div>
+    <DisclosureRow icon={<Brain size={14} className="shrink-0" />} title="Think">
+      <div className="whitespace-pre-wrap text-secondary-foreground">{text}</div>
+    </DisclosureRow>
   );
 }
 
