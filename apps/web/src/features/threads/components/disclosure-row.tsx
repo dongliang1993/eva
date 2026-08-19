@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
 /**
  * 可折叠披露行 —— DeepSeek Harness 风格。
@@ -38,14 +38,16 @@ export function DisclosureRow({ icon, title, trailing, children, onToggle }: Dis
         }}
         aria-expanded={expandable ? expanded : undefined}
       >
-        <span className="mr-1.5 inline-flex h-4 w-4 flex-none items-center justify-center text-muted-foreground">
-          <ChevronRight
-            size={14}
-            className={`shrink-0 transition-transform duration-100 ${expandable && expanded ? "rotate-90" : ""}`}
-          />
-        </span>
-        <span className="inline-flex h-4 w-4 flex-none items-center justify-center text-secondary-foreground">
-          {icon}
+        <span className="relative mr-1.5 inline-flex h-4 w-4 flex-none items-center justify-center text-secondary-foreground">
+          <span className={`transition-opacity duration-100 ${expandable ? "group-hover:opacity-0" : ""}`}>
+            {icon}
+          </span>
+          {/* 展开提示不单独占位:可展开的行 hover 时前面的 icon 就地变成向下箭头。 */}
+          {expandable ? (
+            <span className="absolute inset-0 inline-flex items-center justify-center text-muted-foreground opacity-0 transition-opacity duration-100 group-hover:opacity-100">
+              <ChevronDown size={14} />
+            </span>
+          ) : null}
         </span>
         <span className="ml-1.5 flex-none truncate text-sm leading-6 text-secondary-foreground">
           {title}
