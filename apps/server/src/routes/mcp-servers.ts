@@ -45,9 +45,6 @@ const serverInputSchema = z.discriminatedUnion("transport", [
   })
 ]);
 
-/** file-origin 条目在 UI 里唯一允许的改动。 */
-const enabledOnlySchema = z.object({ enabled: z.boolean() }).strict();
-
 type ServerInput = z.infer<typeof serverInputSchema>;
 
 const toFields = (input: ServerInput): McpServerFields =>
@@ -70,19 +67,6 @@ const toFields = (input: ServerInput): McpServerFields =>
       enabled: input.enabled
     };
 
-/** zod 报错 → 一句人能读的话（本仓库没有全局 ZodError handler，见 FINDINGS）。 */
-const firstIssue = (error: z.ZodError): string => {
-  const issue = error.issues[0];
-
-  if (!issue) {
-    return "请求体不合法";
-  }
-
-  const where = issue.path.length > 0 ? `${issue.path.join(".")}: ` : "";
-
-  return `${where}${issue.message}`;
-};
-
 export const registerMcpServerRoutes = (app: FastifyInstance): void => {
   const repo = (): McpServerRepository => new McpServerRepository(app.infra.db);
 
@@ -99,21 +83,17 @@ export const registerMcpServerRoutes = (app: FastifyInstance): void => {
   app.post(
     "/api/v1/mcp-servers",
     async (request, reply): Promise<McpServerConfig | { error: string }> => {
-      const parsed = serverInputSchema.safeParse(request.body ?? {});
-
-      if (!parsed.success) {
-        reply.code(400);
-        return { error: firstIssue(parsed.error) };
-      }
+      // 校验交给全局 ZodError handler(400 + firstIssue),这里只管业务。
+      const input = serverInputSchema.parse(request.body ?? {});
 
       const store = repo();
 
-      if (store.findByName(parsed.data.name)) {
+      if (store.findByName(input.name)) {
         reply.code(409);
-        return { error: `已存在名为 "${parsed.data.name}" 的 MCP server` };
+        return { error: `已存在名为 "${input.name}" 的 MCP server` };
       }
 
-      const created = store.create(randomUUID(), "manual", toFields(parsed.data));
+      const created = store.create(randomUUID(), "manual", toFields(input));
       await app.services.mcp.reconnect(created.id);
 
       reply.code(201);
@@ -134,37 +114,42 @@ export const registerMcpServerRoutes = (app: FastifyInstance): void => {
       }
 
       // 来自 mcp.json 的条目：内容以文件为准，UI 只能启停。
+      // 这是业务规则(不是校验失败),错误信息要解释为什么,所以不走全局 ZodError handler。
       if (existing.origin === "file") {
-        const parsed = enabledOnlySchema.safeParse(request.body ?? {});
+        const body = request.body;
+        const isEnabledOnly = (
+          body !== null &&
+          typeof body === "object" &&
+          !Array.isArray(body) &&
+          (body as { enabled?: unknown }).enabled !== undefined &&
+          typeof (body as { enabled?: unknown }).enabled === "boolean" &&
+          Object.keys(body).every((key) => key === "enabled")
+        );
 
-        if (!parsed.success) {
+        if (!isEnabledOnly) {
           reply.code(400);
           return {
             error: "来自 mcp.json 的 server 只能启用/停用；要改配置请编辑 ~/.eva/mcp.json"
           };
         }
 
-        const updated = store.setEnabled(id, parsed.data.enabled)!;
+        const updated = store.setEnabled(id, (body as { enabled: boolean }).enabled)!;
         await app.services.mcp.reconnect(id);
 
         return toMcpServerConfig(updated);
       }
 
-      const parsed = serverInputSchema.safeParse(request.body ?? {});
+      // 手动 server：校验交给全局 ZodError handler(400 + firstIssue)。
+      const input = serverInputSchema.parse(request.body ?? {});
 
-      if (!parsed.success) {
-        reply.code(400);
-        return { error: firstIssue(parsed.error) };
-      }
-
-      const conflict = store.findByName(parsed.data.name);
+      const conflict = store.findByName(input.name);
 
       if (conflict && conflict.id !== id) {
         reply.code(409);
-        return { error: `已存在名为 "${parsed.data.name}" 的 MCP server` };
+        return { error: `已存在名为 "${input.name}" 的 MCP server` };
       }
 
-      const updated = store.update(id, toFields(parsed.data))!;
+      const updated = store.update(id, toFields(input))!;
       await app.services.mcp.reconnect(id);
 
       return toMcpServerConfig(updated);
