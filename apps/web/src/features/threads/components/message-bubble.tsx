@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileText, RotateCcw } from "lucide-react";
+import { Brain, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileText, RotateCcw } from "lucide-react";
 import "streamdown/styles.css";
 
 import type { EvaUIMessage } from "@eva/shared";
@@ -221,12 +221,13 @@ function ThinkBlock({ text }: { readonly text: string }) {
 }
 
 /**
- * 子代理通知条 —— 既不是用户气泡也不是 assistant 正文,而是一条低调的分隔提示。
- * 默认折叠:报告全文往往很长,展开才看(它已经进了模型上下文,UI 不必强推给人看)。
+ * 子代理通知条 —— 既不是用户气泡也不是 assistant 正文,照 Think/tool 同一套
+ * DisclosureRow 渲染(左对齐、无边框、无横线),和其它行平齐。默认折叠:报告
+ * 全文往往很长,展开才看。
  *
- * header 只留「已回报/已结束」一个词 + 描述,把注入文本里的担纲头
- * ("Background subagent <id> (<desc>) reported:")剥掉 —— 那是写给模型的方向词,
- * 对人读是噪音(对应参考图里"分层+强调"后一目了然的头部)。
+ * header 只留「已结束/已回报」一个词 + 描述,把注入文本里的担纲头
+ * ("Background subagent <id> (<desc>) served:")剥掉 —— 那是写给模型的方向词,
+ * 对人读是噪音。
  */
 function SubagentNotice({
   kind,
@@ -237,9 +238,6 @@ function SubagentNotice({
   readonly description?: string | undefined;
   readonly text: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const label = kind === "subagent_reported" ? "已回报" : "已结束";
-
   // 剥掉注入前缀("Background subagent <id> (<desc>) reported:" / "finished and ... more."),
   // 只留子代理真正交付的那段内容。
   const body = text.replace(
@@ -247,32 +245,31 @@ function SubagentNotice({
     ""
   );
 
-  return (
-    <div className="my-4 first:mt-0 last:mb-0">
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        onClick={() => setExpanded((prev) => !prev)}
-      >
-        <span className="h-px flex-1 bg-border" />
-        <FileText size={12} className="shrink-0" />
-        <span className="shrink-0 font-medium text-foreground">
-          {description !== undefined && description.length > 0 ? `「${description}」 ` : ""}{label}
-        </span>
-        {expanded ? (
-          <ChevronUp size={12} className="shrink-0" />
-        ) : (
-          <ChevronDown size={12} className="shrink-0" />
-        )}
-        <span className="h-px flex-1 bg-border" />
-      </button>
+  const title =
+    description !== undefined && description.length > 0
+      ? `「${description}」 ${kind === "subagent_reported" ? "已回报" : "已结束"}`
+      : kind === "subagent_reported"
+        ? "子代理已回报"
+        : "子代理已结束";
 
-      {expanded ? (
-        <div className="mt-2 rounded-md border border-border bg-card/50 p-3">
-          {body.length > 0 ? <StreamMarkdown content={body} /> : <StreamMarkdown content={text} />}
-        </div>
-      ) : null}
-    </div>
+  return (
+    <DisclosureRow
+      icon={<FileText size={14} className="shrink-0" />}
+      title={title}
+      trailing={
+        kind === "subagent_reported" ? (
+          <CheckCircle2 size={14} className="text-success" />
+        ) : undefined
+      }
+    >
+      <div className="rounded-md border border-border bg-terminal/30 p-3">
+        {body.length > 0 ? (
+          <StreamMarkdown content={body} />
+        ) : (
+          <StreamMarkdown content={text} />
+        )}
+      </div>
+    </DisclosureRow>
   );
 }
 
