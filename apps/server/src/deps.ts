@@ -9,6 +9,7 @@ import {
   initializeDatabase
 } from "./db/index.js";
 import { DrizzleRunRepository } from "./db/repositories/run-repository.js";
+import { failStaleTasks } from "./db/repositories/background-task-repository.js";
 import { createPinoObserver } from "./observability.js";
 import { findMonorepoRoot } from "./services/monorepo-root.js";
 import { syncMcpConfigFile } from "./services/mcp/mcp-config-file.js";
@@ -61,6 +62,13 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   const staleRuns = new DrizzleRunRepository(db).failStale();
   if (staleRuns > 0) {
     logger.warn({ staleRuns }, "marked in-flight runs as error after restart");
+  }
+
+  // 同样的收尾给后台子代理任务:崩溃遗留的 running 任务实为"永远等不到",
+  // 收成 failed 后 join 拿到明确错误,而不是吊到 join 超时。
+  const staleTasks = failStaleTasks(db);
+  if (staleTasks > 0) {
+    logger.warn({ staleTasks }, "marked in-flight subagent tasks as failed after restart");
   }
 
   return {
