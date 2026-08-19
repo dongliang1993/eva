@@ -15,6 +15,10 @@ interface SidebarProps {
   readonly sessionId: string | null;
 }
 
+/**
+ * 侧栏: 折叠/展开由外层 Panel 宽度 + 下方 index.css 的 flex-grow transition 驱动,
+ * 这里保持单一根容器 (背景跟随 Panel 动画), 内部按 collapsed 条件渲染内容。
+ */
 export function Sidebar({
   collapsed,
   onToggle,
@@ -31,98 +35,102 @@ export function Sidebar({
 
   const threads = data ?? [];
 
-  if (collapsed) {
-    return (
-      <div className="flex h-full w-12 flex-col items-center border-r border-border bg-sidebar py-3 gap-2">
-        <div className="titlebar-drag h-10 w-full shrink-0" />
-        <button
-          type="button"
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          onClick={onToggle}
-          title="Expand sidebar"
-        >
-          <PanelLeft size={18} />
-        </button>
-        <button
-          type="button"
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          onClick={onNewChat}
-          title="New chat"
-        >
-          <SquarePen size={18} />
-        </button>
-        <div className="flex-1" />
-        <div className="theme-toggle-compact flex flex-col items-center gap-2">
-          <ThemeToggle />
-        </div>
-        <button
-          type="button"
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          onClick={onOpenSettings}
-          title="Settings"
-        >
-          <Settings size={18} />
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex h-full flex-col bg-sidebar">
-      {/* Header buttons */}
-      <div className="flex items-center justify-between px-3 py-3 mt-4.5">
+    <div className="flex h-full flex-col overflow-hidden border-r border-border bg-sidebar">
+      {/* Drag region spacer — 小程序化, 让折叠按钮避开上方全局 titlebar-drag 拦截层 */}
+      <div className="titlebar-drag h-11 w-full shrink-0" />
+
+      {/* Header: brand + collapse toggle */}
+      <div
+        className={`flex shrink-0 items-center ${
+          collapsed ? "justify-center py-3" : "justify-between px-3 py-2"
+        }`}
+      >
+        {!collapsed && (
+          <span className="text-base font-bold text-foreground select-none">Eva</span>
+        )}
         <button
           type="button"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
           onClick={onToggle}
-          title="Collapse sidebar"
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          <PanelLeftClose size={18} />
-        </button>
-        <button
-          type="button"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          onClick={onNewChat}
-          title="New chat"
-        >
-          <SquarePen size={18} />
+          {collapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
         </button>
       </div>
 
-      {/* Thread list */}
-      <div className="flex-1 overflow-y-auto px-2">
-        {threads.length === 0 ? (
-          <p className="px-2 py-4 text-xs text-muted-foreground">No conversations yet</p>
+      {/* New chat — 展开=全宽主按钮 / 折叠=居中图标 */}
+      <div className={`shrink-0 ${collapsed ? "px-1 pb-1" : "px-3 pb-2"}`}>
+        {collapsed ? (
+          <button
+            type="button"
+            className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            onClick={onNewChat}
+            title="New chat"
+          >
+            <SquarePen size={18} />
+          </button>
         ) : (
-          <div className="space-y-1">
-            {threads.map((thread) => (
-              <button
-                key={thread.id}
-                type="button"
-                className={`flex w-full items-center gap-2 rounded-lg px-3.5 py-2 text-left text-sm transition-colors ${thread.id === sessionId
-                  ? "bg-sidebar-active text-sidebar-active-foreground font-medium"
-                  : "text-foreground hover:bg-accent"
-                  }`}
-                onClick={() => onSelectThread(thread.id)}
-              >
-                <SessionStatusDot status={thread.status} />
-                <span className="flex-1 truncate">{thread.title}</span>
-              </button>
-            ))}
-          </div>
+          <button
+            type="button"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+            onClick={onNewChat}
+            title="New chat"
+          >
+            <SquarePen size={16} />
+            <span>新会话</span>
+          </button>
         )}
       </div>
 
+      {/* Thread list (展开) / 弹性占位 (折叠) */}
+      {collapsed ? (
+        <div className="flex-1" />
+      ) : (
+        <div className="flex-1 overflow-y-auto px-2">
+          {threads.length === 0 ? (
+            <p className="px-2 py-4 text-xs text-muted-foreground">No conversations yet</p>
+          ) : (
+            <div className="space-y-1">
+              {threads.map((thread) => (
+                <button
+                  key={thread.id}
+                  type="button"
+                  className={`flex w-full items-center gap-2 rounded-lg px-3.5 py-2 text-left text-sm transition-colors ${
+                    thread.id === sessionId
+                      ? "bg-sidebar-active text-sidebar-active-foreground font-medium"
+                      : "text-foreground hover:bg-accent"
+                  }`}
+                  onClick={() => onSelectThread(thread.id)}
+                >
+                  <SessionStatusDot status={thread.status} />
+                  <span className="flex-1 truncate">{thread.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Bottom: theme toggle + settings */}
-      <div className="flex items-center justify-between px-2 py-2">
+      <div
+        className={`shrink-0 ${
+          collapsed
+            ? "flex flex-col items-center gap-1 py-2"
+            : "flex items-center justify-between px-2 py-2"
+        }`}
+      >
         <ThemeToggle />
         <button
           type="button"
-          className="flex flex-1 items-center justify-start gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          className={`flex items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors ${
+            collapsed ? "h-9 w-9 justify-center" : "flex-1 justify-start gap-2 px-2.5 py-2 text-sm"
+          }`}
           onClick={onOpenSettings}
+          title="Settings"
         >
           <Settings size={16} />
-          <span>Settings</span>
+          {!collapsed && <span>Settings</span>}
         </button>
       </div>
     </div>

@@ -283,3 +283,20 @@ body {
 ::selection {
   background: color-mix(in oklab, var(--brand-focus) 20%, transparent);
 }
+
+/* ------------------------------------------------------------------ */
+/* Sidebar panel collapse/expand transition                           */
+/*                                                                     */
+/* react-resizable-panels 用 inline `flex` 简写驱动 Panel 宽度          */
+/* (展开 flex-grow≈66.667 ↔ 折叠 11.429)。给 flex-grow 加过渡即可让     */
+/* 程序性折叠/展开平滑动画。拖拽分隔条时库会把 separator 标为           */
+/* data-separator="active", 该期间禁用过渡保证跟手手感。               */
+/* ------------------------------------------------------------------ */
+div[data-panel] {
+  transition: flex-grow 0.22s ease, flex-basis 0.22s ease;
+}
+
+/* 拖拽分隔条期间: 关闭过渡, 尺寸即时响应 (data-group 是库的 Group 元素) */
+div[data-group]:has(div[data-separator][data-separator="active"]) div[data-panel] {
+  transition: none !important;
+}

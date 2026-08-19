@@ -136,6 +136,8 @@ export function ChatPage() {
     <div className="h-screen bg-background text-foreground">
       <div className="titlebar-drag h-11 w-full fixed top-0 left-0 z-50" />
       <ResizableSidebar
+        collapsed={sidebarCollapsed}
+        onCollapsedChange={setSidebarCollapsed}
         sidebar={
           <Sidebar
             collapsed={sidebarCollapsed}
