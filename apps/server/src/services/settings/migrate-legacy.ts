@@ -2,9 +2,10 @@ import type { AppDatabase } from "../../db/index.js";
 import { providers, settings } from "../../db/schema.js";
 import { eq } from "drizzle-orm";
 
-/** 只需要 info 的结构化日志接口 —— 兼容 Fastify 的 logger 与 pino logger。 */
+/** 只需要 info / warn 的结构化日志接口 —— 兼容 Fastify 的 logger 与 pino logger。 */
 interface InfoLogger {
   info(object: unknown, message?: string): void;
+  warn(object: unknown, message?: string): void;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -117,4 +118,53 @@ export const migrateLegacySettings = (db: AppDatabase, logger: InfoLogger): void
     },
     "settings migrated to model slots"
   );
+};
+
+/** 旧「始终允许」全局开关对应的危险工具名(T14 §2.1)。 */
+const LEGACY_AUTO_APPROVE_TOOLS = ["bash", "write", "edit"] as const;
+
+/**
+ * T14 一次性迁移:「始终允许」全局开关 → per-tool 白名单。
+ *
+ * 旧 `security.autoApproveToolRequests` 是核按钮,点了放开**所有**危险工具。
+ * 它没有逼问"你信任哪个工具",所以迁移时把旧信任范围翻译成那份白名单。
+ * 迁移标志:`security` 行里已含 `alwaysAllowTools` 字段(幂等)。
+ *
+ * 入口文件末尾 R3 可连同上面 models 迁移一起删本文件。
+ */
+export const migrateSecurityToAlwaysAllowTools = (
+  db: AppDatabase,
+  logger: InfoLogger
+): void => {
+  const security = readBlock(db, "security");
+  if (!security) return;
+
+  // 幂等:已经迁过(存在 alwaysAllowTools,无论空数组还是列表)就不再动。
+  if ("alwaysAllowTools" in security) return;
+
+  const oldFlag = security.autoApproveToolRequests;
+
+  // 落库时剔除旧开关字段,只保留新白名单。
+  const dropLegacyFlag = (obj: Record<string, unknown>): Record<string, unknown> => {
+    const { autoApproveToolRequests: _legacy, ...rest } = obj;
+    // _legacy 刻意丢弃:迁移后只有 alwaysAllowTools 有意义。
+    void _legacy;
+    return rest;
+  };
+
+  const list = oldFlag === true ? [...LEGACY_AUTO_APPROVE_TOOLS] : [];
+
+  // 先删旧行再插入,避免 settings.key 唯一约束冲突;dropLegacyFlag 顺便剔除旧开关。
+  db.delete(settings).where(eq(settings.key, "security")).run();
+  db.insert(settings).values({
+    key: "security",
+    value: JSON.stringify({ ...dropLegacyFlag(security), alwaysAllowTools: list })
+  }).run();
+
+  if (oldFlag === true) {
+    logger.warn(
+      { alwaysAllowTools: list },
+      "安全设置迁移:全局自动审批已拆成 per-tool 白名单,按原有信任范围填入"
+    );
+  }
 };

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { convertToModelMessages, type ModelMessage } from "ai";
-import type { RequestApproval } from "@eva/harness";
+import { classifyToolRisk, type RequestApproval } from "@eva/harness";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type {
   RunStreamEvent,
@@ -256,11 +256,14 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     const requestApproval: RequestApproval = async ({ toolCallId, toolName, args }) => {
       const settings = loadAppSettings(app.infra.db, app.infra.config);
 
-      if (settings.security.autoApproveToolRequests) {
+      // T14:per-tool 白名单取代全局开关。命中才直接放行,否则走审批卡片。
+      // (MCP 侧 per-server 白名单先于这里判,见 services/mcp/mcp-tools.ts)
+      if (settings.security.alwaysAllowTools.includes(toolName)) {
         return true;
       }
 
-      emit({ type: "approval_request", callId: toolCallId, toolName, args });
+      const risk = classifyToolRisk(toolName, args);
+      emit({ type: "approval_request", callId: toolCallId, toolName, args, risk });
       const approved = await app.services.approvals.ask(toolCallId, {
         runId,
         sessionId,

@@ -1,11 +1,4 @@
-/** 危险工具调用的风险画像。 */
-export type ToolRiskLevel = "normal" | "elevated" | "destructive";
-
-export interface ToolRisk {
-  readonly level: ToolRiskLevel;
-  /** 命中的原因，直接展示给用户（如 "递归删除"、"写入工作区外"）。 */
-  readonly reasons: readonly string[];
-}
+import type { ToolRisk } from "@eva/shared";
 
 /**
  * 危险工具调用的风险画像。纯函数、无 IO —— 它只看工具名与入参。

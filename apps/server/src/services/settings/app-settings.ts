@@ -48,7 +48,7 @@ const createDefaultSettings = (): AppSettings => ({
   },
   security: {
     logLevel: "info",
-    autoApproveToolRequests: false
+    alwaysAllowTools: []
   }
 });
 

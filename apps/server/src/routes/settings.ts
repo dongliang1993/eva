@@ -29,7 +29,7 @@ const appSettingsSchema = z.object({
   }),
   security: z.object({
     logLevel: z.enum(["error", "warn", "info", "debug"]),
-    autoApproveToolRequests: z.boolean()
+    alwaysAllowTools: z.array(z.string())
   })
 });
 

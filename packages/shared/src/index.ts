@@ -114,7 +114,8 @@ export interface AppSettings {
   };
   security: {
     logLevel: "error" | "warn" | "info" | "debug";
-    autoApproveToolRequests: boolean;
+    /** 免审批的工具名。空数组 = 每个危险工具都要问。 */
+    alwaysAllowTools: readonly string[];
   };
 }
 

@@ -7,12 +7,18 @@ import {
   type AppDatabase
 } from "../apps/server/src/db/index.js";
 import { loadAppSettings } from "../apps/server/src/services/settings/app-settings.js";
-import { migrateLegacySettings } from "../apps/server/src/services/settings/migrate-legacy.js";
+import {
+  migrateLegacySettings,
+  migrateSecurityToAlwaysAllowTools
+} from "../apps/server/src/services/settings/migrate-legacy.js";
 
 let db: AppDatabase;
 
-type WarnLogger = { info: (object: unknown, message?: string) => void };
-const silentLogger: WarnLogger = { info: () => {} };
+type WarnLogger = {
+  info: (object: unknown, message?: string) => void;
+  warn: (object: unknown, message?: string) => void;
+};
+const silentLogger: WarnLogger = { info: () => {}, warn: () => {} };
 
 const rawClient = (): import("better-sqlite3").Database =>
   (db as unknown as { $client: import("better-sqlite3").Database }).$client;
@@ -97,5 +103,51 @@ describe("migrateLegacySettings", () => {
 
     const migrated = loadAppSettings(db, config);
     expect(migrated.models.embedding).toBe("embedding-migrated:text-embedding-3-small");
+  });
+});
+
+describe("migrateSecurityToAlwaysAllowTools (T14)", () => {
+  it("旧为 true → 白名单填 bash/write/edit,且旧开关字段被剔除", () => {
+    writeLegacyBlock("security", { logLevel: "info", autoApproveToolRequests: true });
+
+    migrateSecurityToAlwaysAllowTools(db, silentLogger);
+
+    const migrated = loadAppSettings(db, config);
+    expect(migrated.security.alwaysAllowTools).toEqual(["bash", "write", "edit"]);
+    // 旧开关不再出现在持久化结构里
+    const securityRow = rawClient()
+      .prepare("SELECT * FROM settings WHERE key = 'security'")
+      .get() as { value: string } | undefined;
+    expect(JSON.stringify(securityRow?.value)).not.toContain("autoApproveToolRequests");
+  });
+
+  it("旧为 false → 空数组", () => {
+    writeLegacyBlock("security", { logLevel: "info", autoApproveToolRequests: false });
+
+    migrateSecurityToAlwaysAllowTools(db, silentLogger);
+
+    const migrated = loadAppSettings(db, config);
+    expect(migrated.security.alwaysAllowTools).toEqual([]);
+  });
+
+  it("幂等:已含 alwaysAllowTools 则不动(即使旧开关还在)", () => {
+    // 模拟已迁过的状态:有 alwaysAllowTools 字段 + 残留 autoApproveToolRequests
+    writeLegacyBlock("security", {
+      logLevel: "info",
+      alwaysAllowTools: ["write"],
+      autoApproveToolRequests: true
+    });
+
+    migrateSecurityToAlwaysAllowTools(db, silentLogger);
+
+    const migrated = loadAppSettings(db, config);
+    // 幂等:保持原来白名单,不被旧 true 覆盖成三个工具
+    expect(migrated.security.alwaysAllowTools).toEqual(["write"]);
+  });
+
+  it("无 security 块 → 不崩", () => {
+    migrateSecurityToAlwaysAllowTools(db, silentLogger);
+    const migrated = loadAppSettings(db, config);
+    expect(migrated.security.alwaysAllowTools).toEqual([]);
   });
 });

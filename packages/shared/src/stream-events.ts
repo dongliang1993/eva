@@ -116,12 +116,23 @@ export interface RunEndEvent {
 
 // ---------- Eva 自有域：审批桥（docs 14 §6.1） ----------
 
+/** 危险工具调用的风险画像(T14)。 */
+export type ToolRiskLevel = "normal" | "elevated" | "destructive";
+
+export interface ToolRisk {
+  readonly level: ToolRiskLevel;
+  /** 命中的原因，直接展示给用户（如 "递归强制删除"、"覆盖写入到文件"）。 */
+  readonly reasons: readonly string[];
+}
+
 /** 危险工具挂起等待用户决策。 */
 export interface RunApprovalRequestEvent {
   type: "approval_request";
   callId: string;
   toolName: string;
   args: Record<string, unknown>;
+  /** T14：本次调用的风险画像，前端据此配色/标注/决定是否给「始终允许」。 */
+  risk: ToolRisk;
 }
 
 /** 审批已决（用户决策 / 自动放行 / abort 取消）。 */
