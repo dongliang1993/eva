@@ -45,7 +45,7 @@ export class McpRegistry {
     private readonly repo: McpServerRepository,
     private readonly logger: McpLogger,
     private readonly connect: McpConnect = defaultConnect
-  ) {}
+  ) { }
 
   /** 幂等地把所有 enabled server 连上；已经连过一轮就直接返回。 */
   async ensureConnected(): Promise<void> {

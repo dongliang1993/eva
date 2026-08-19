@@ -32,8 +32,8 @@ const installShutdownHooks = (app: FastifyInstance): void => {
     process.exit(0);
   };
 
-  process.once("SIGTERM", () => void shutdown("SIGTERM"));
-  process.once("SIGINT", () => void shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 };
 
 export const startServer = async (): Promise<FastifyInstance> => {

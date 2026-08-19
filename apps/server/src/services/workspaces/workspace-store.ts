@@ -14,7 +14,7 @@ interface WarnLogger {
 }
 
 export class WorkspaceStore {
-  constructor(private readonly repo: DrizzleWorkspaceRepository) {}
+  constructor(private readonly repo: DrizzleWorkspaceRepository) { }
 
   list(): readonly Workspace[] {
     return this.repo.listAll();

@@ -41,7 +41,7 @@ export class SessionService {
   constructor(
     private readonly sessions: ISessionRepository,
     private readonly messages: IMessageRepository
-  ) {}
+  ) { }
 
   createSession(input: EvaUIMessage, runId?: string): ResolvedSession {
     const session = this.sessions.create({
