@@ -7,9 +7,13 @@ export async function apiFetch<T>(
   url: string,
   options?: RequestInit
 ): Promise<T> {
+  // 只有真带 body 才声明 application/json。空 body + json 会导致 Fastify 在进
+  // handler 前就拒掉(FST_ERR_CTP_EMPTY_JSON_BODY),POST 但无 body 的调用(如
+  // switch-version)不需要这个头。
+  const hasBody = options?.body !== undefined && options.body !== null;
   const response = await fetch(url, {
     headers: {
-      "Content-Type": "application/json",
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
       ...options?.headers
     },
     ...options
