@@ -334,7 +334,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
       emit({ type: "run_start", runId, sessionId });
 
-      // 阶段④:S7 子代理运行时 —— Task/TaskOutput 基元注入主 agent。
+      // 阶段④:S7 子代理运行时 —— subagent 基元注入主 agent,回报走 push(无 join 工具)。
       // sink 做两件事:① emit 推 SSE(前端子代理卡片拿流式过程);② recorder 攒
       // 事件,子代理 finish 时落库(parentToolCallId 隔离卖力,见 subagent-recorder)。
       // abortSignal 传给后台子代理:T15 §2.7 —— 用户点停止,子代理一起停,不留孤儿。
@@ -370,7 +370,6 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
       reportGateway = new ReportGateway(() => subagentRunner.hasLiveTasks());
       const subagentTools = createSubagentTool({
-        taskStore: subagentRunner.store,
         runFork: subagentRunner.runFork
       });
 

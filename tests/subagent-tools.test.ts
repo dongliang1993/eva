@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { createSubagentTool } from "../packages/harness/src/subagents/subagent-tool.js";
-import { InMemoryTaskStore } from "../packages/harness/src/subagents/in-memory-task-store.js";
 import { toToolSet } from "../packages/harness/src/tools.js";
 
 /** 把一个 AgentTool 的 execute 拉出来可单独调用(测试不用跑 LeadAgent)。 */
@@ -16,7 +15,6 @@ const exec =
 describe("subagent 原语 (S7 push 模型)", () => {
   it("只暴露一个工具 —— 没有 join/查询接口(轮询的结构性根源)", () => {
     const tools = createSubagentTool({
-      taskStore: new InMemoryTaskStore(),
       runFork: async () => ({})
     });
 
@@ -24,10 +22,8 @@ describe("subagent 原语 (S7 push 模型)", () => {
   });
 
   it("缺省后台 → 立刻返回任务号,并明说结果会自动送到、无需轮询", async () => {
-    const store = new InMemoryTaskStore();
     const seen: { background?: boolean; description?: string } = {};
     const tools = createSubagentTool({
-      taskStore: store,
       runFork: async ({ background, description, taskId }) => {
         seen.background = background;
         seen.description = description;
@@ -50,9 +46,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
   });
 
   it("run_in_background=false → 前台等到底,返回子代理交付的结论", async () => {
-    const store = new InMemoryTaskStore();
     const tools = createSubagentTool({
-      taskStore: store,
       runFork: async ({ background, prompt }) => {
         expect(background).toBe(false);
         // 子代理确实读了 README(中间步骤),但只有结论收敛出来(阀2)。
@@ -71,7 +65,6 @@ describe("subagent 原语 (S7 push 模型)", () => {
 
   it("description 必填 —— 缺了就报错(否则卡片无法分辨)", async () => {
     const tools = createSubagentTool({
-      taskStore: new InMemoryTaskStore(),
       runFork: async () => ({ taskId: "t_x" })
     });
 
@@ -83,7 +76,6 @@ describe("subagent 原语 (S7 push 模型)", () => {
   it("缺省角色是 explorer", async () => {
     let got = "";
     const tools = createSubagentTool({
-      taskStore: new InMemoryTaskStore(),
       runFork: async ({ subagentType, taskId }) => {
         got = subagentType;
         return { taskId };
@@ -98,7 +90,6 @@ describe("subagent 原语 (S7 push 模型)", () => {
   it("fork 的 parentToolCallId 用 SDK 的 toolCallId(卡片归位的键)", async () => {
     let got = "";
     const tools = createSubagentTool({
-      taskStore: new InMemoryTaskStore(),
       runFork: async ({ parentToolCallId, taskId }) => {
         got = parentToolCallId;
         return { taskId };
@@ -118,7 +109,6 @@ describe("subagent 原语 (S7 push 模型)", () => {
 
   it("进 toolSet 后名字是 subagent(供 SDK 装配)", () => {
     const tools = createSubagentTool({
-      taskStore: new InMemoryTaskStore(),
       runFork: async () => ({})
     });
 

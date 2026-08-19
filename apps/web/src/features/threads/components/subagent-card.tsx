@@ -18,19 +18,19 @@ interface SubagentCardProps {
   readonly toolCall: ToolCallInfo;
 }
 
-/** TaskOutput 的输出里夹带的任务号(如 "Task t_abc still running")。 */
+/** subagent 工具后台派发时输出里的任务号(如 "Started subagent t_abc (...)")。 */
 const extractTaskId = (output: string): string | undefined => {
-  const match = output.match(/Task (t_[A-Za-z0-9_]+)/);
+  const match = output.match(/subagent (t_[A-Za-z0-9_]+)/);
   return match?.[1];
 };
 
 /**
- * Task / TaskOutput 调用的渲染:角色 + 状态点(running/done/failed)
- * + 可展开的子代理过程。
+ * subagent 调用的渲染:任务名(description)+ 状态点(running/done/failed)
+ * + 可展开的回报与过程。
  *
  * 数据两源:
- * - 流式中:当轮的 subagent_update 按 parentToolCallId(== 本卡片的 toolCallId)
- *   累积出 message / 状态,进 store;
+ * - 流式中:当轮的 subagent_update / subagent_report 按 parentToolCallId
+ *   (== 本卡片的 toolCallId)累积进 store;
  * - 刷新/切换后:任务已落库,展开时经 store.loadForToolCall 走
  *   /subagent-messages 兜底取那棵子树。
  */
@@ -41,14 +41,20 @@ function SubagentCardImpl({ toolCall }: SubagentCardProps) {
   const state = byToolCallId[toolCall.toolCallId];
   // 既不在 live 也没拉到时维持 running 占位(卡片仍可展开,展开即触发拉取)。
   const status = state?.status ?? "running";
-  // 首帧到达前 state 还是空的 —— 用 Task 的入参兜底,别显示 "subagent" 占位符。
-  // (harness 侧 subagent 缺省即 explorer,这里与之对齐。)
+  // 标题用 description(3-5 词任务名)—— 并行派出的多个子代理靠它区分。
+  // 入参在 tool-call 帧就有,所以首帧之前也拿得到;store 的值用于刷新恢复后。
+  const description =
+    (toolCall.args.description !== undefined
+      ? String(toolCall.args.description)
+      : undefined) ??
+    (state?.description !== undefined && state.description.length > 0
+      ? state.description
+      : undefined);
   const subagentType =
     state?.subagentType ??
     (toolCall.args.subagent !== undefined ? String(toolCall.args.subagent) : "explorer");
 
-  // 卡片只渲染 Task(入参里没有 taskId),任务号从它的输出里取
-  // ("Started subagent task t_xxx.");前台 Task(background=false)直接返回答案,没有任务号。
+  // 任务号从工具输出里取;前台派发(run_in_background=false)直接返回结论,没有任务号。
   const taskId = toolCall.output ? extractTaskId(toolCall.output) : undefined;
 
   const handleToggle = (): void => {
@@ -78,12 +84,11 @@ function SubagentCardImpl({ toolCall }: SubagentCardProps) {
       >
         <Users size={16} className="shrink-0 text-muted-foreground" />
         <span className="flex-1 truncate text-sm font-medium text-foreground">
-          Subagent · {subagentType}
-          {taskId !== undefined ? (
-            <span className="ml-2 font-mono text-xs text-muted-foreground">
-              {taskId}
-            </span>
-          ) : null}
+          {description ?? `Subagent · ${subagentType}`}
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            {subagentType}
+            {taskId !== undefined ? ` · ${taskId}` : ""}
+          </span>
         </span>
 
         <span className="flex items-center gap-2 shrink-0">
@@ -98,7 +103,23 @@ function SubagentCardImpl({ toolCall }: SubagentCardProps) {
 
       {expanded ? (
         <div className="mt-1 space-y-3 border-t border-border p-3">
-          {state?.result ? (
+          {state !== undefined && state.reports.length > 0 ? (
+            <div>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Reported
+              </h4>
+              <div className="space-y-2">
+                {state.reports.map((report, index) => (
+                  <div
+                    key={index}
+                    className="max-h-[300px] overflow-y-auto rounded-md border border-border bg-terminal/30 p-3"
+                  >
+                    <StreamMarkdown content={report} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : state?.result ? (
             <div>
               <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Result

@@ -212,6 +212,8 @@ export interface SubagentMessage {
   taskId: string;
   parentToolCallId: string;
   subagentType: string;
+  /** 3-5 词任务名(旧任务为空串)。 */
+  description: string;
   status: "running" | "done" | "failed";
   /** done 时的最终答案(阀2:只有 final answer,不含中间过程)。 */
   result: string | null;

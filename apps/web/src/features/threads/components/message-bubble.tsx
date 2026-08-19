@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, RotateCcw } from "lucide-react";
+import { Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, RotateCcw, Users } from "lucide-react";
 import "streamdown/styles.css";
 
 import type { EvaUIMessage } from "@eva/shared";
@@ -131,6 +131,19 @@ function groupParts(parts: readonly EvaUIMessagePart[]): readonly PartGroup[] {
 }
 
 function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBubbleProps) {
+  // S7:runtime 注入的子代理通知。DB 的 role 枚举只有 user/assistant,所以它以 user
+  // 落库 —— 必须先于 user 分支拦掉,否则会渲染成右对齐的用户气泡(像用户自己说的话)。
+  const noticeKind = message.metadata?.noticeKind;
+  if (noticeKind !== undefined) {
+    return (
+      <SubagentNotice
+        kind={noticeKind}
+        description={message.metadata?.noticeDescription}
+        text={uiMessageText(message)}
+      />
+    );
+  }
+
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -179,6 +192,51 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
           <VersionSwitcher messageId={message.id} />
           <RegenerateButton messageId={message.id} />
         </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 子代理通知条 —— 既不是用户气泡也不是 assistant 正文,而是一条低调的分隔提示。
+ * 默认折叠:报告全文往往很长,展开才看(它已经进了模型上下文,UI 不必强推给人看)。
+ */
+function SubagentNotice({
+  kind,
+  description,
+  text
+}: {
+  readonly kind: "subagent_reported" | "subagent_settled";
+  readonly description?: string | undefined;
+  readonly text: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const label = kind === "subagent_reported" ? "已回报" : "已结束";
+
+  return (
+    <div className="my-4 first:mt-0 last:mb-0">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => setExpanded((prev) => !prev)}
+      >
+        <span className="h-px flex-1 bg-border" />
+        <Users size={12} className="shrink-0" />
+        <span className="shrink-0">
+          子代理{description !== undefined && description.length > 0 ? ` 「${description}」` : ""} {label}
+        </span>
+        {expanded ? (
+          <ChevronUp size={12} className="shrink-0" />
+        ) : (
+          <ChevronDown size={12} className="shrink-0" />
+        )}
+        <span className="h-px flex-1 bg-border" />
+      </button>
+
+      {expanded ? (
+        <div className="mt-2 rounded-md border border-border bg-card/50 p-3">
+          <StreamMarkdown content={text} />
+        </div>
       ) : null}
     </div>
   );

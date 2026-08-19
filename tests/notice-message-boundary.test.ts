@@ -107,8 +107,8 @@ const reportingSubagentModel = (): MockLanguageModelV4 => {
 let app: FastifyInstance;
 let db: AppDatabase;
 
-const startApp = async (): Promise<void> => {
-  const mainAgent = createAgent({ model: forkingModel(), tools: [], maxSteps: 6 });
+const startApp = async (agentOverride?: Agent): Promise<void> => {
+  const mainAgent = agentOverride ?? createAgent({ model: forkingModel(), tools: [], maxSteps: 6 });
 
   app = Fastify();
   app.decorate("infra", {
@@ -188,6 +188,40 @@ const activeChain = (sessionId: string) => {
   const all = new DrizzleMessageRepository(db).findBySessionId(sessionId, { limit: 100 });
   const leaf = new DrizzleSessionRepository(db).findById(sessionId)?.activeLeafId ?? null;
   return buildActiveChain(all, leaf);
+};
+
+/** 第一步用前台派发(run_in_background=false),结果由工具返回值直达。 */
+const foregroundForkingModel = (): MockLanguageModelV4 => {
+  let call = 0;
+  return new MockLanguageModelV4({
+    doStream: async () => {
+      const index = call;
+      call += 1;
+
+      if (index === 0) {
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start", warnings: [] },
+              {
+                type: "tool-call",
+                toolCallId: "call_00",
+                toolName: "subagent",
+                input: JSON.stringify({
+                  description: "前台读 server",
+                  prompt: "调查 apps/server",
+                  run_in_background: false
+                })
+              },
+              { type: "finish", finishReason: "tool-calls", usage }
+            ]
+          })
+        };
+      }
+
+      return { stream: simulateReadableStream({ chunks: textChunks(`f${index}`, "已拿到结果") }) };
+    }
+  });
 };
 
 describe("子代理通知的消息边界 (S7 push 落库)", () => {
@@ -271,5 +305,23 @@ describe("子代理通知的消息边界 (S7 push 落库)", () => {
       .get() as { assistant_message_id: string };
 
     expect(row.assistant_message_id).toBe(assistants.at(-1)!.id);
+  });
+
+  // 前台派发的结果由工具返回值直达模型;再推一条通知会让它把同一份内容读两遍
+  // (实测第二条 assistant 只会说"这就是我刚转述的那份,一致")。
+  it("前台派发不注入通知 —— 结果已由工具返回值带回,不重复投递", async () => {
+    await app.close();
+    const mainAgent = createAgent({ model: foregroundForkingModel(), tools: [], maxSteps: 6 });
+    await startApp(mainAgent);
+
+    const events = await streamRun({ text: "前台派一个" });
+    const sessionId = String(events.find((e) => e.type === "run_start")?.sessionId);
+
+    expect(events.some((e) => e.type === "notice-injected")).toBe(false);
+
+    const chain = activeChain(sessionId);
+    expect(chain.some((m) => m.message.metadata?.noticeKind !== undefined)).toBe(false);
+    // 一轮一条 assistant,不因通知被切成两条。
+    expect(chain.filter((m) => m.role === "assistant")).toHaveLength(1);
   });
 });

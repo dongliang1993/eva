@@ -7,7 +7,7 @@ import {
   type ReactNode
 } from "react";
 
-import type { RunSubagentUpdateEvent } from "@eva/shared";
+import type { RunSubagentReportEvent, RunSubagentUpdateEvent } from "@eva/shared";
 import { UiMessageBuilder, type EvaUIMessage } from "@eva/shared";
 
 import { fetchSubagentMessages } from "../api";
@@ -17,6 +17,10 @@ import type { SubagentMessage } from "../../../types/api";
 export interface SubagentView {
   readonly status: "running" | "done" | "failed";
   readonly subagentType: string;
+  /** 3-5 词任务名 —— 卡片标题用它区分并行派出的多个子代理。 */
+  readonly description: string;
+  /** 子代理主动交付的结论(report 工具)。可多条。 */
+  readonly reports: readonly string[];
   readonly result: string | null;
   readonly error: string | null;
   /** 子代理进程累积出的 assistant 消息(含 tool call / result 轨迹)。 */
@@ -30,6 +34,8 @@ export interface SubagentsStore {
   readonly byToolCallId: Readonly<Record<string, SubagentView>>;
   /** SSE subagent_update 累积 —— 给 useChat 的 onSubagent 喂。 */
   readonly applyStreamEvent: (event: RunSubagentUpdateEvent) => void;
+  /** SSE subagent_report —— 卡片即时显示"已回报",不必等注入。 */
+  readonly applyReport: (event: RunSubagentReportEvent) => void;
   /** 会话 id 变更后刷新归属(页面/会话切换后用 threadId 兜底)。 */
   readonly setSessionId: (sessionId: string | null) => void;
   /** 卡片展开按 toolCallId 从 /subagent-messages 拉已落库的子代理进程。 */
@@ -43,6 +49,8 @@ const toView = (msg: SubagentMessage): SubagentView => {
   return {
     status: msg.status,
     subagentType: msg.subagentType,
+    description: msg.description,
+    reports: msg.result !== null ? [msg.result] : [],
     result: msg.result,
     error: msg.error,
     message:
@@ -90,6 +98,8 @@ export function useSubagentsStore(): SubagentsStore {
 
         const base = {
           subagentType: event.subagentType,
+          description: event.description,
+          reports: existing?.reports ?? [],
           status: "running" as const,
           result: null as string | null,
           error: null as string | null
@@ -126,6 +136,30 @@ export function useSubagentsStore(): SubagentsStore {
       });
     };
 
+    const applyReport = (event: RunSubagentReportEvent): void => {
+      const key = event.parentToolCallId;
+      setByToolCallId((prev) => {
+        const existing = prev[key];
+        return {
+          ...prev,
+          [key]: {
+            status: existing?.status ?? "running",
+            subagentType: existing?.subagentType ?? "explorer",
+            description: event.description,
+            reports: [...(existing?.reports ?? []), event.output],
+            result: existing?.result ?? null,
+            error: existing?.error ?? null,
+            message: existing?.message ?? {
+              id: `subagent-${event.taskId}`,
+              role: "assistant",
+              parts: []
+            },
+            live: true
+          }
+        };
+      });
+    };
+
     const loadForToolCall = async (toolCallId: string): Promise<void> => {
       const threadId = sessionId;
       if (!threadId) return;
@@ -147,7 +181,7 @@ export function useSubagentsStore(): SubagentsStore {
       }
     };
 
-    return { byToolCallId, applyStreamEvent, setSessionId, loadForToolCall };
+    return { byToolCallId, applyStreamEvent, applyReport, setSessionId, loadForToolCall };
   }, [byToolCallId, sessionId]);
 }
 

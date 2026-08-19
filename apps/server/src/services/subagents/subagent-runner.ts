@@ -99,8 +99,13 @@ export class SubagentRunner {
       depth: 0
     });
 
+    // 前台派发的结果由工具返回值直达模型 —— 再推一条通知会让它把同一份内容
+    // 读两遍(实测:第二条 assistant 只能说"这就是我刚转述的那份,一致")。
+    // push 通道的存在意义正是"后台调用没有返回通道",所以只有后台才通知。
     const spawn = (): Promise<string> =>
-      this.spawnSettled({ role, taskId, parentToolCallId, description, prompt });
+      this.spawnSettled({
+        role, taskId, parentToolCallId, description, prompt, notify: background
+      });
 
     if (background) {
       // 后台:立刻带 taskId 返回,spawn 在后台跑(settle 稍后进 store)。
@@ -131,8 +136,10 @@ export class SubagentRunner {
     readonly parentToolCallId: string;
     readonly description: string;
     readonly prompt: string;
+    /** 是否把 report/settled 推给父级(前台派发不推:工具返回值已经带回结果)。 */
+    readonly notify: boolean;
   }): Promise<string> {
-    const { role, taskId, parentToolCallId, description, prompt } = input;
+    const { role, taskId, parentToolCallId, description, prompt, notify } = input;
 
     // report 是子代理交付结论的唯一出口(S7 push)。每个 fork 一份闭包 ——
     // 它捕获自己的 taskId/挂点,子代理无从选择报给谁。
@@ -140,10 +147,12 @@ export class SubagentRunner {
     const reportTool = createReportTool((output) => {
       reports.push(output);
       // 立刻推给父级:中途的发现也能马上改变父 agent 的下一步,不必等它跑完。
-      this.notify({
-        kind: "reported", taskId, parentToolCallId, subagentType: role.type,
-        description, output
-      });
+      if (notify) {
+        this.notify({
+          kind: "reported", taskId, parentToolCallId, subagentType: role.type,
+          description, output
+        });
+      }
     });
 
     const agent = this.agents.buildSubagent({
@@ -199,10 +208,12 @@ export class SubagentRunner {
 
     if (streamError !== undefined) {
       await this.taskStore.settle(taskId, { error: streamError });
-      this.notify({
-        kind: "settled", taskId, parentToolCallId, subagentType: role.type,
-        description, output: `Failed: ${streamError}`
-      });
+      if (notify) {
+        this.notify({
+          kind: "settled", taskId, parentToolCallId, subagentType: role.type,
+          description, output: `Failed: ${streamError}`
+        });
+      }
       return delivered;
     }
 
@@ -214,7 +225,7 @@ export class SubagentRunner {
     // 我们只有"注入即续跑一圈"一种粒度,所以已经报过的任务再补一条 settled 会让模型
     // 为同一个子代理白醒两次(实测:主链多出一条通知 + 一条空洞回应)。
     // 已 report → 结论已交付,"它结束了"不带新信息,不值得再唤起一圈。
-    if (reports.length === 0) {
+    if (notify && reports.length === 0) {
       this.notify({
         kind: "settled", taskId, parentToolCallId, subagentType: role.type,
         description, output: lastText

@@ -56,7 +56,11 @@ export function ChatPage() {
     stopStreaming,
     newConversation,
     loadSession
-  } = useChat({ onApproval: approvals.applyStreamEvent, onSubagent: subagents.applyStreamEvent });
+  } = useChat({
+    onApproval: approvals.applyStreamEvent,
+    onSubagent: subagents.applyStreamEvent,
+    onSubagentReport: subagents.applyReport
+  });
 
   // 会话切换 → store 归位,子代理卡片刷新兜底走对会话。
   useEffect(() => {

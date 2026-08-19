@@ -296,6 +296,7 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
       taskId: task.id,
       parentToolCallId: task.parentToolCallId,
       subagentType: task.subagentType,
+      description: task.description,
       status: task.status,
       result: task.result,
       error: task.error,

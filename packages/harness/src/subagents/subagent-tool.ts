@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import { buildTool, type AgentTool } from "../tools.js";
-import type { TaskStore } from "./task-store.js";
 
 /**
  * server 层注入的 fork 边界。它知道 sessionId/depth/工具槽模型/角色白名单,
@@ -20,7 +19,6 @@ export type ForkRunner = (invocation: {
 }) => Promise<{ readonly taskId?: string; readonly text?: string }>;
 
 export interface SubagentToolContext {
-  readonly taskStore: TaskStore;
   readonly runFork: ForkRunner;
 }
 

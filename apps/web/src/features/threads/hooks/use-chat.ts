@@ -6,7 +6,8 @@ import type {
   RunAgentStreamEvent,
   RunApprovalRequestEvent,
   RunApprovalResolvedEvent,
-  RunSubagentUpdateEvent
+  RunSubagentUpdateEvent,
+  RunSubagentReportEvent
 } from "@eva/shared";
 import { UiMessageBuilder, createUserUIMessage } from "@eva/shared";
 
@@ -19,6 +20,8 @@ export interface UseChatHandlers {
   readonly onApproval?: (event: RunApprovalRequestEvent | RunApprovalResolvedEvent) => void;
   /** S7:子代理事件 —— 与主链隔离,由 useSubagents 累积(绝不并进主 builder)。 */
   readonly onSubagent?: (event: RunSubagentUpdateEvent) => void;
+  /** S7:子代理主动交付结论 —— 卡片即时显示"已回报"。 */
+  readonly onSubagentReport?: (event: RunSubagentReportEvent) => void;
 }
 
 export type SiblingIdsById = Readonly<Record<string, readonly string[]>>;
@@ -143,6 +146,10 @@ export function useChat(handlers: UseChatHandlers = {}): UseChatReturn {
 
       onSubagent(event) {
         handlersRef.current.onSubagent?.(event);
+      },
+
+      onSubagentReport(event) {
+        handlersRef.current.onSubagentReport?.(event);
       },
 
       onError(message) {
