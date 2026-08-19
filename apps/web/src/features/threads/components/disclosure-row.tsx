@@ -49,7 +49,7 @@ export function DisclosureRow({ icon, title, trailing, children, onToggle }: Dis
             </span>
           ) : null}
         </span>
-        <span className="ml-1.5 flex-none truncate text-sm leading-6 text-secondary-foreground">
+        <span className="flex-none truncate text-sm leading-6 text-secondary-foreground">
           {title}
         </span>
         {trailing !== undefined ? (
