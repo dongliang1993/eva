@@ -2,12 +2,12 @@ import type { AgentTool } from "../tools.js";
 
 export interface SubagentRole {
   readonly type: string;
-  /** 一句话，进 Task 工具的 description 让模型知道什么时候选它。 */
+  /** 一句话，进 subagent 工具的说明让模型知道什么时候选它。 */
   readonly summary: string;
   readonly systemPrompt: string;
   /** 该角色能拿到的工具名白名单。空数组 = 不给任何工具（纯推理角色）。 */
   readonly allowedTools: readonly string[];
-  /** 能再委派给哪些角色。空数组 = 拿不到 Task 工具，无法套娃。 */
+  /** 能再委派给哪些角色。空数组 = 拿不到 subagent 工具，无法套娃。 */
   readonly allowedDelegates: readonly string[];
   readonly maxSteps?: number;
 }
@@ -19,7 +19,7 @@ export interface SubagentRole {
  */
 export const MAX_DEPTH = 2;
 
-/** TaskOutput join 的硬上限。子代理死循环时主 agent 不能植物人(docs 08 坑②)。 */
+/** 前台 subagent(run_in_background=false)等待的硬上限。子代理死循环时主 agent 不能植物人。 */
 export const JOIN_TIMEOUT_MS = 120_000;
 
 /** 子代理单轮步数上限(独立于主 loop 的 25)。 */
@@ -33,9 +33,11 @@ const BUILTIN_ROLES: readonly SubagentRole[] = [
     systemPrompt: [
       "You are a codebase explorer. Read files and search to answer a focused question.",
       "Return a concise, factual answer citing the file:line you found. Do NOT propose changes.",
-      "You have no write access; never attempt to edit files."
+      "You have no write access; never attempt to edit files.",
+      "Deliver your answer with the `report` tool before you finish — the agent that started you " +
+      "does not see your transcript, so finishing without reporting delivers nothing."
     ].join("\n"),
-    allowedTools: ["read_file", "list_dir", "grep", "read_skill"],
+    allowedTools: ["read_file", "list_dir", "grep", "read_skill", "report"],
     allowedDelegates: // explorer 不委派 —— 已是叶子
       []
   },
@@ -44,9 +46,11 @@ const BUILTIN_ROLES: readonly SubagentRole[] = [
     summary: "查外部资料并汇合成结论",
     systemPrompt: [
       "You are a research assistant. Use web tools to gather information and synthesize.",
-      "Return a concise, sourced answer. State what is uncertain."
+      "Return a concise, sourced answer. State what is uncertain.",
+      "Deliver your answer with the `report` tool before you finish — the agent that started you " +
+      "does not see your transcript, so finishing without reporting delivers nothing."
     ].join("\n"),
-    allowedTools: ["web_search", "web_fetch", "read_file"],
+    allowedTools: ["web_search", "web_fetch", "read_file", "report"],
     allowedDelegates: []
   },
   {
@@ -55,9 +59,11 @@ const BUILTIN_ROLES: readonly SubagentRole[] = [
     systemPrompt: [
       "You are a critical reviewer. Find flaws in the given work.",
       "You may delegate `explorer` to check specific claims against the code.",
-      "Return a prioritized list of issues. Do NOT write code or fixes."
+      "Return a prioritized list of issues. Do NOT write code or fixes.",
+      "Deliver your findings with the `report` tool before you finish — the agent that started " +
+      "you does not see your transcript, so finishing without reporting delivers nothing."
     ].join("\n"),
-    allowedTools: ["read_file", "list_dir", "grep"],
+    allowedTools: ["read_file", "list_dir", "grep", "report"],
     allowedDelegates: ["explorer"]
   }
 ];
@@ -96,6 +102,21 @@ export const filterToolsForRole = (
 ): readonly AgentTool[] => {
   const allowed = new Set(role.allowedTools);
   return tools.filter((t) => allowed.has(t.name));
+};
+
+/**
+ * 角色声明要、但基础集里压根不存在的工具。
+ *
+ * 白名单是"收窄"语义,过滤不会告诉你某个工具本来就缺席。而文件工具挂在工作区守卫内 ——
+ * 没绑工作区的会话里 read_file/list_dir/grep 都不存在,explorer 过滤后只剩 read_skill。
+ * 那样的子代理"没有手却被要求读代码",实测会编造出看似完整的目录树。调用方据此早爆。
+ */
+export const missingRoleTools = (
+  tools: readonly AgentTool[],
+  role: SubagentRole
+): readonly string[] => {
+  const present = new Set(tools.map((t) => t.name));
+  return role.allowedTools.filter((name) => !present.has(name));
 };
 
 /** 委派白名单(阀3a):current 能否派 target。未知 current → false(保守)。 */

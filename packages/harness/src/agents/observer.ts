@@ -8,7 +8,9 @@ export type LoopTransitionReason =
   | "next_turn"
   | "proactive_loop_compact"
   | "reactive_compact_retry"
-  | "max_output_tokens_recovery";
+  | "max_output_tokens_recovery"
+  /** S7:后台子代理交付结论 → 注入通知后续跑一圈。 */
+  | "subagent_notice";
 
 export type ContextCompactionReason =
   | "proactive_loop_compact"

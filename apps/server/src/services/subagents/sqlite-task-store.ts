@@ -1,4 +1,4 @@
-import type { TaskRecord, TaskStore } from "@eva/harness";
+import type { CreateTaskInput, TaskRecord, TaskStore } from "@eva/harness";
 
 import type { AppDatabase } from "../../db/index.js";
 import { BackgroundTaskRepository } from "../../db/repositories/background-task-repository.js";
@@ -21,13 +21,7 @@ export class SqliteTaskStore implements TaskStore {
     private readonly tasks: BackgroundTaskRepository
   ) {}
 
-  async create(input: {
-    readonly id: string;
-    readonly sessionId: string;
-    readonly parentToolCallId: string;
-    readonly subagentType: string;
-    readonly depth: number;
-  }): Promise<TaskRecord> {
+  async create(input: CreateTaskInput): Promise<TaskRecord> {
     return this.tasks.create(input);
   }
 

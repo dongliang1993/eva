@@ -87,6 +87,26 @@ export interface RunErrorEvent {
   message: string;
 }
 
+/**
+ * 子代理通知已注入本轮对话（S7 push）。
+ *
+ * 它同时是**消息边界**信号：注入意味着「上一条 assistant 收口 → 通知作为一条
+ * 主链消息 → 新起一条 assistant 续跑」，route 靠这一帧切分落库（见 routes/runs.ts）。
+ */
+export interface RunNoticeInjectedEvent {
+  type: "notice-injected";
+  /** 注入给模型的通知文本（已格式化，可直接落库/渲染）。 */
+  notices: readonly RunInjectedNotice[];
+}
+
+export interface RunInjectedNotice {
+  readonly kind: "reported" | "settled";
+  readonly taskId: string;
+  readonly parentToolCallId: string;
+  readonly description: string;
+  readonly text: string;
+}
+
 /** harness 产出的事件（coalesce 后从 LeadAgent.stream 流出）。 */
 export type RunAgentStreamEvent =
   | RunTextDeltaEvent
@@ -96,6 +116,7 @@ export type RunAgentStreamEvent =
   | RunToolCallEvent
   | RunToolResultEvent
   | RunStepStartEvent
+  | RunNoticeInjectedEvent
   | RunFinishEvent
   | RunErrorEvent;
 
@@ -154,7 +175,21 @@ export interface RunSubagentUpdateEvent {
   taskId: string;
   parentToolCallId: string;
   subagentType: string;
+  /** 3-5 词任务名 —— 卡片标题用它区分并行派出的多个子代理。 */
+  description: string;
   event: RunAgentStreamEvent;
+}
+
+/**
+ * 子代理主动交付了结论(S7 push)。卡片据此即时显示"已回报",
+ * 不必等主 loop 把它注入对话。
+ */
+export interface RunSubagentReportEvent {
+  type: "subagent_report";
+  taskId: string;
+  parentToolCallId: string;
+  description: string;
+  output: string;
 }
 
 export type RunStreamEvent =
@@ -163,7 +198,8 @@ export type RunStreamEvent =
   | RunEndEvent
   | RunApprovalRequestEvent
   | RunApprovalResolvedEvent
-  | RunSubagentUpdateEvent;
+  | RunSubagentUpdateEvent
+  | RunSubagentReportEvent;
 
 /** 线上帧 = 事件 + seq；seq 单 run 内从 1 单调递增，含终态帧（accumulator 依赖此约定）。 */
 export type RunStreamFrame = RunStreamEvent & { seq: number };

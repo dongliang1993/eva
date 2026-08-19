@@ -1,6 +1,7 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 import type {
   RunAgentStreamEvent,
+  RunInjectedNotice,
   StreamFinishReason,
   StreamTokenUsage
 } from "@eva/shared";
@@ -16,6 +17,13 @@ export interface AgentRunInput {
   maxSteps?: number;
   additionalTools?: AgentTool[];
   abortSignal?: AbortSignal;
+  /**
+   * 取待注入的子代理通知(S7 push)。只在 loop 走到 stop 终态前调用一次/轮。
+   *
+   * 约定:无待处理通知且无存活后台任务 → 立刻返回 `[]`(不拖慢正常收尾);
+   * 有存活任务但还没报 → 最多等 `graceMs`。返回非空则 loop 注入后再跑一圈。
+   */
+  drainNotices?: (opts: { graceMs: number }) => Promise<readonly RunInjectedNotice[]>;
 }
 
 export type { StreamFinishReason, StreamTokenUsage };

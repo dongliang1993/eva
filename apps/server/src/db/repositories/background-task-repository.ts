@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import type { TaskRecord } from "@eva/harness";
 
@@ -10,6 +10,7 @@ export interface CreateBackgroundTaskInput {
   readonly sessionId: string;
   readonly parentToolCallId: string;
   readonly subagentType: string;
+  readonly description: string;
   readonly depth: number;
 }
 
@@ -18,6 +19,7 @@ const toTaskRecord = (row: typeof backgroundTasks.$inferSelect): TaskRecord => (
   id: row.id,
   sessionId: row.sessionId,
   parentToolCallId: row.parentToolCallId,
+  description: row.description,
   subagentType: row.subagentType,
   depth: row.depth,
   status: row.status,
@@ -53,6 +55,7 @@ export class BackgroundTaskRepository {
         sessionId: input.sessionId,
         parentToolCallId: input.parentToolCallId,
         subagentType: input.subagentType,
+        description: input.description,
         depth: input.depth,
         status: "running"
       })
@@ -80,6 +83,25 @@ export class BackgroundTaskRepository {
       .get();
 
     return row ? toTaskRecord(row) : undefined;
+  }
+
+  /**
+   * 该会话下仍在跑的后台子代理条数。
+   *
+   * ReportGateway 用它决定收尾前要不要等:没有存活任务就绝不等 —— 否则每一轮
+   * 普通对话都要白等一个宽限期才能收尾。
+   */
+  countRunningBySessionId(sessionId: string): number {
+    return this.db
+      .select()
+      .from(backgroundTasks)
+      .where(
+        and(
+          eq(backgroundTasks.sessionId, sessionId),
+          eq(backgroundTasks.status, "running")
+        )
+      )
+      .all().length;
   }
 
   /** settle: 把一个运行中任务写终态。running 之外的重复 settle 无副作用(幂等)。 */

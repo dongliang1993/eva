@@ -1,9 +1,12 @@
-export { CrewRegistry, filterToolsForRole, canDelegate, canSpawnAtDepth, MAX_DEPTH, JOIN_TIMEOUT_MS, SUBAGENT_MAX_STEPS } from "./crew.js";
+export { CrewRegistry, filterToolsForRole, missingRoleTools, canDelegate, canSpawnAtDepth, MAX_DEPTH, JOIN_TIMEOUT_MS, SUBAGENT_MAX_STEPS } from "./crew.js";
 export { InMemoryTaskStore } from "./in-memory-task-store.js";
 export { runSubagent } from "./run-subagent.js";
-export { createTaskTools } from "./task-tools.js";
-export type { ForkInvocation, ForkRunner, TaskToolContext } from "./task-tools.js";
+export { createSubagentTool } from "./subagent-tool.js";
+export { createReportTool } from "./report-tool.js";
+export type { ForkRunner, SubagentToolContext } from "./subagent-tool.js";
+export type { ReportSink } from "./report-tool.js";
 export type { SubagentRole } from "./crew.js";
 export type { TaskRecord, TaskStore, CreateTaskInput } from "./task-store.js";
 export type { RunSubagentInput } from "./run-subagent.js";
-export type { SubagentEvent, SubagentEventSink, SubagentOutcome } from "./types.js";
+export { formatSubagentNotice } from "./types.js";
+export type { SubagentEvent, SubagentEventSink, SubagentOutcome, SubagentNotice } from "./types.js";

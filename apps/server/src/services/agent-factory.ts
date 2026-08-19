@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import type { Agent, AgentTool, RequestApproval } from "@eva/harness";
-import { createAgent, filterToolsForRole, SUBAGENT_MAX_STEPS } from "@eva/harness";
+import { createAgent, filterToolsForRole, missingRoleTools, SUBAGENT_MAX_STEPS } from "@eva/harness";
 
 import {
   AgentUnavailableError,
@@ -158,6 +158,17 @@ export class AgentFactory {
       (binding) => this.getModel(binding),
       models.tool
     );
+
+    // 角色要的工具在这个会话里压根不存在 → 早爆,不给残废工具集。
+    // (文件工具挂在工作区守卫内:没绑工作区时 explorer 只剩 read_skill,
+    //  那样的子代理"没有手却被要求读代码",实测会编造目录树。)
+    const missing = missingRoleTools(baseTools, options.role);
+    if (missing.length > 0) {
+      throw new AgentUnavailableError(
+        `子代理 ${options.role.type} 缺少必需工具:${missing.join("、")}。` +
+        "这些是工作区工具 —— 请先给该会话绑定一个工作区,再派子代理。"
+      );
+    }
 
     const tools = [...filterToolsForRole(baseTools, options.role)];
 

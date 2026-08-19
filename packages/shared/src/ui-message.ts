@@ -18,6 +18,14 @@ export interface EvaMessageMetadata {
   readonly usage?: StreamTokenUsage;
   /** 该消息因 abort 提前结束 —— parts 可能不完整。 */
   readonly aborted?: boolean;
+  /**
+   * S7:这条 user 消息其实是 runtime 注入的子代理通知,不是用户说的话。
+   * DB 的 role 枚举只有 user/assistant,所以通知只能以 user 落库 —— UI 必须靠
+   * 这个标记把它渲染成通知条,否则会显示成右对齐的用户气泡(像用户自己说的)。
+   */
+  readonly noticeKind?: "subagent_reported" | "subagent_settled";
+  /** 通知对应的子代理任务名(渲染通知条时显示)。 */
+  readonly noticeDescription?: string;
 }
 
 /**

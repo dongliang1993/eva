@@ -3,8 +3,7 @@ import { randomUUID } from "node:crypto";
 import { convertToModelMessages, type ModelMessage } from "ai";
 import {
   classifyToolRisk,
-  createTaskTools,
-  JOIN_TIMEOUT_MS,
+  createSubagentTool,
   type RequestApproval
 } from "@eva/harness";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -40,12 +39,18 @@ import { loadMemoryFilesSection, todayString } from "../services/memory/index.js
 import { loadProjectDocsSection } from "../services/workspaces/project-docs.js";
 import { resolveWorkspaceForSession } from "../services/workspaces/workspace-store.js";
 import { SubagentRunner } from "../services/subagents/subagent-runner.js";
+import { ReportGateway } from "../services/subagents/report-gateway.js";
 import { runRequestSchema, type RunRequest } from "../types/runs.js";
 
 const formatSseFrame = (event: string, data: unknown): string =>
   `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
 const writeFrame = (reply: FastifyReply, frame: RunStreamFrame): void => {
+  // 后台子代理可能在 run 收尾后才产生事件(它持有 emit 闭包)。响应已 end 时
+  // 再 write 会抛 write-after-end —— 静默丢弃即可,事实都在 DB 里。
+  if (reply.raw.writableEnded) {
+    return;
+  }
   reply.raw.write(formatSseFrame(frame.type, frame));
 };
 
@@ -254,6 +259,9 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     let seq = 0;
     // 供 catch 回滚 503 时新建的会话。
     let open: OpenTurn | undefined;
+    // 回报网关与 run 同寿:主 loop 收尾前 drain 一次,把后台子代理刚交付的结论
+    // 注入本轮对话(S7 push)。声明在 try 外,finally 才能 dispose。
+    let reportGateway: ReportGateway | undefined;
 
     // 统一的帧出口:seq 只在这里递增(generator 帧与审批帧共用同一序列)。
     const emit = (event: RunStreamEvent): void => {
@@ -343,13 +351,27 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
           abortSignal: controller.signal,
           onSubagentEvent: (event) => {
             emit({ type: "subagent_update", ...event });
+          },
+          onNotice: (notice) => {
+            reportGateway?.push(notice);
+            // 卡片要能即时显示"已回报",不必等主 loop 注入。
+            if (notice.kind === "reported") {
+              emit({
+                type: "subagent_report",
+                taskId: notice.taskId,
+                parentToolCallId: notice.parentToolCallId,
+                description: notice.description,
+                output: notice.output ?? ""
+              });
+            }
           }
         }
       );
-      const taskTools = createTaskTools({
+
+      reportGateway = new ReportGateway(() => subagentRunner.hasLiveTasks());
+      const subagentTools = createSubagentTool({
         taskStore: subagentRunner.store,
-        runFork: subagentRunner.runFork,
-        joinTimeoutMs: JOIN_TIMEOUT_MS
+        runFork: subagentRunner.runFork
       });
 
       // 客户端断连检测必须挂在 response 上:Node ≥18 的 request "close"
@@ -363,7 +385,11 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         }
       });
 
-      const builder = new UiMessageBuilder(randomUUID());
+      let builder = new UiMessageBuilder(randomUUID());
+      let assistantPosition = open.assistantPosition;
+      // 注入通知会把一轮切成多条 assistant;runs 表只有单数 assistant_message_id,
+      // 记住最后一条即可(不动 schema)。
+      let lastAssistantId: string | undefined;
       let finishReason: StreamFinishReason = "stop";
       let usage: StreamTokenUsage | undefined;
       let streamError: string | undefined;
@@ -371,13 +397,52 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       for await (const event of resolved.agent.stream({
         messages: prepared.modelMessages,
         abortSignal: controller.signal,
+        drainNotices: (opts) => reportGateway!.drain(opts),
         ...(prepared.additionalTools.length > 0
-          ? { additionalTools: [...prepared.additionalTools, ...taskTools] }
-          : { additionalTools: [...taskTools] }),
+          ? { additionalTools: [...prepared.additionalTools, ...subagentTools] }
+          : { additionalTools: [...subagentTools] }),
         ...(prepared.context !== undefined ? { context: prepared.context } : {})
       })) {
         builder.push(event);
         emit(event);
+
+        // ---- 消息边界(S7 push)----
+        // 注入通知意味着:当前 assistant 就此收口 → 通知作为一条主链消息 →
+        // 新起一条 assistant 续跑。三条消息都要落库,顺序才是对话真实发生的样子。
+        if (event.type === "notice-injected") {
+          const settledAssistant = app.services.session.recordAssistantMessage(
+            sessionId,
+            builder.build({
+              runId,
+              model: resolved.mainModel.qualifiedModelId
+            }),
+            assistantPosition,
+            runId
+          );
+          lastAssistantId = settledAssistant.id;
+
+          for (const notice of event.notices) {
+            // 以 user 角色落库(DB 枚举只有 user/assistant),靠 metadata.noticeKind
+            // 让 UI 渲染成通知条而不是用户气泡。continueSession 会推进 activeLeafId。
+            app.services.session.continueSession(
+              sessionId,
+              createUserUIMessage(randomUUID(), notice.text, {
+                runId,
+                noticeKind: notice.kind === "reported"
+                  ? "subagent_reported"
+                  : "subagent_settled",
+                noticeDescription: notice.description
+              }),
+              runId
+            );
+          }
+
+          // 续跑那条 assistant 挂在通知之后,并换一个干净的 builder ——
+          // 复用旧 builder 会把上一条的 parts 一起再落一遍。
+          assistantPosition = app.services.session.positionAfterActiveLeaf(sessionId);
+          builder = new UiMessageBuilder(randomUUID());
+          continue;
+        }
 
         if (event.type === "finish") {
           finishReason = event.finishReason;
@@ -401,14 +466,15 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       const stored = app.services.session.recordAssistantMessage(
         sessionId,
         assistantMessage,
-        open.assistantPosition,
+        assistantPosition,
         runId
       );
+      lastAssistantId = stored.id;
 
       runs.settle(runId, {
         status: runStatusFor(finishReason),
         finishReason,
-        assistantMessageId: stored.id,
+        assistantMessageId: lastAssistantId,
         ...(usage !== undefined ? { usage } : {}),
         ...(streamError !== undefined ? { error: streamError } : {})
       });
@@ -443,6 +509,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       emit({ type: "end", finishReason: "error" });
       reply.raw.end();
     } finally {
+      // 唤醒可能还在等通知的 drain,别留悬挂 Promise。
+      reportGateway?.dispose();
       app.services.runRegistry.unregister(runId);
       // pending 审批要么已被决策、要么被上面 cancelByRun 清掉;这里兜底。
       app.services.approvals.cancelByRun(runId);

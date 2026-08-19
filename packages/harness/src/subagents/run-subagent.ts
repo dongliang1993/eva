@@ -21,7 +21,7 @@ import type { SubagentEventSink } from "./types.js";
 export const runSubagent = async (
   input: RunSubagentInput
 ): Promise<void> => {
-  const { agent, taskId, parentToolCallId, subagentType, messages, abortSignal, maxSteps, onEvent } = input;
+  const { agent, taskId, parentToolCallId, subagentType, description, messages, abortSignal, maxSteps, onEvent } = input;
   const emit = onEvent
     ? (event: Parameters<SubagentEventSink>[0]) => onEvent(event)
     : undefined;
@@ -37,6 +37,7 @@ export const runSubagent = async (
       taskId,
       parentToolCallId,
       subagentType,
+      description,
       event: {
         type: "finish",
         text: outcome.text,
@@ -49,6 +50,7 @@ export const runSubagent = async (
       taskId,
       parentToolCallId,
       subagentType,
+      description,
       event: {
         type: "error",
         message: error instanceof Error ? error.message : "Unknown error"
@@ -72,6 +74,7 @@ export interface RunSubagentInput {
   readonly taskId: string;
   readonly parentToolCallId: string;
   readonly subagentType: string;
+  readonly description: string;
   readonly messages: readonly ModelMessage[];
   readonly abortSignal?: AbortSignal;
   readonly maxSteps?: number;

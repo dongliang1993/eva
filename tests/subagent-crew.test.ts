@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CrewRegistry,
   filterToolsForRole,
+  missingRoleTools,
   canDelegate,
   canSpawnAtDepth,
   MAX_DEPTH
@@ -17,7 +18,8 @@ const stubTool = (name: string): AgentTool =>
 const ALL_TOOLS = [
   "read_file", "list_dir", "grep", "read_skill",
   "write", "edit", "bash",
-  "web_search", "web_fetch"
+  "web_search", "web_fetch",
+  "report"
 ].map(stubTool);
 
 describe("filterToolsForRole (阀4: 工具集收窄)", () => {
@@ -40,6 +42,32 @@ describe("filterToolsForRole (阀4: 工具集收窄)", () => {
     expect(names).not.toContain("write");
     expect(names).not.toContain("edit");
     expect(names).not.toContain("bash");
+  });
+
+  // 会话没绑工作区时,基础集里压根没有文件工具(它们挂在 workspace 守卫内)。
+  // 过滤只会静默留下 read_skill —— 子代理于是"没有手却被要求读代码",
+  // 实测会编造目录树。所以要能判定角色的核心工具是否缺席。
+  it("基础集缺文件工具时 → explorer 只剩 read_skill(必须可判定,不能静默)", () => {
+    const withoutFsTools = ["read_skill", "web_search"].map(stubTool);
+    const filtered = filterToolsForRole(withoutFsTools, role("explorer"));
+
+    expect(filtered.map((t) => t.name)).toEqual(["read_skill"]);
+    expect(missingRoleTools(withoutFsTools, role("explorer"))).toEqual([
+      "read_file", "list_dir", "grep", "report"
+    ]);
+  });
+
+  // S7 push:report 是子代理交付结论的唯一出口,三个角色都必须有,
+  // 否则它干完活却没有任何通道把结果送回父级。
+  it("三个内置角色都拿得到 report", () => {
+    for (const type of ["explorer", "researcher", "reviewer"]) {
+      const names = filterToolsForRole(ALL_TOOLS, role(type)).map((t) => t.name);
+      expect(names).toContain("report");
+    }
+  });
+
+  it("基础集齐全时 → 无缺席工具", () => {
+    expect(missingRoleTools(ALL_TOOLS, role("explorer"))).toEqual([]);
   });
 });
 

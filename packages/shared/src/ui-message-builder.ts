@@ -68,6 +68,8 @@ export class UiMessageBuilder {
       // reasoning-delta 只推前端不落库(无 signature 的 reasoning 回灌会被
       // 部分 provider 拒绝);tool-input-start/-delta 是 input 的流式过程,
       // tool-call 会带上完整 input;error 由调用方处理成 metadata。
+      // notice-injected 是消息边界信号(S7),它自己会成为一条独立的主链消息 ——
+      // 绝不能进 assistant 的 parts,否则通知文本会重复出现在回应里。
       default:
         break;
     }

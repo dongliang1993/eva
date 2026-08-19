@@ -41,14 +41,15 @@ function SubagentCardImpl({ toolCall }: SubagentCardProps) {
   const state = byToolCallId[toolCall.toolCallId];
   // 既不在 live 也没拉到时维持 running 占位(卡片仍可展开,展开即触发拉取)。
   const status = state?.status ?? "running";
-  const subagentType = state?.subagentType ?? "subagent";
+  // 首帧到达前 state 还是空的 —— 用 Task 的入参兜底,别显示 "subagent" 占位符。
+  // (harness 侧 subagent 缺省即 explorer,这里与之对齐。)
+  const subagentType =
+    state?.subagentType ??
+    (toolCall.args.subagent !== undefined ? String(toolCall.args.subagent) : "explorer");
 
-  const taskId =
-    toolCall.args.taskId !== undefined
-      ? String(toolCall.args.taskId)
-      : toolCall.output
-        ? extractTaskId(toolCall.output)
-        : undefined;
+  // 卡片只渲染 Task(入参里没有 taskId),任务号从它的输出里取
+  // ("Started subagent task t_xxx.");前台 Task(background=false)直接返回答案,没有任务号。
+  const taskId = toolCall.output ? extractTaskId(toolCall.output) : undefined;
 
   const handleToggle = (): void => {
     const next = !expanded;

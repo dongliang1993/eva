@@ -8,7 +8,8 @@ import {
   XCircle,
   Clock,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Users
 } from "lucide-react";
 
 import type { ToolCallInfo } from "../../../shared/api/run-stream-client";
@@ -42,6 +43,12 @@ const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   read_skill: {
     icon: FileText,
     getTitle: (args) => `Read: ${String(args.name ?? "skill")}`
+  },
+  // S7:join 步骤(Task 本身走 SubagentCard,不进这张表)。
+  TaskOutput: {
+    icon: Users,
+    getTitle: (args) =>
+      args.taskId !== undefined ? `Join subagent ${String(args.taskId)}` : "Join subagent"
   }
 };
 
@@ -51,7 +58,11 @@ const DEFAULT_DISPLAY: ToolDisplay = {
 };
 
 function getToolDisplay(toolName: string): ToolDisplay {
-  return TOOL_DISPLAY[toolName] ?? { ...DEFAULT_DISPLAY, getTitle: () => toolName };
+  // toolName 可能为空(部分 provider 的错误 part 不带名字)—— 别渲染出一张无字空卡。
+  return TOOL_DISPLAY[toolName] ?? {
+    ...DEFAULT_DISPLAY,
+    getTitle: () => (toolName.length > 0 ? toolName : "Tool Call")
+  };
 }
 
 function formatDuration(ms: number): string {
@@ -74,9 +85,10 @@ interface ToolCallBlockProps {
 }
 
 function ToolCallBlockImpl({ toolCall }: ToolCallBlockProps) {
-  // S7:Task/TaskOutput 调用的卡片交给子代理专属渲染(角色 + 状态点 + 展开过程),
-  // 复用 shared/streaming + shared/markdown —— 主工具的通用渲染在这里不适用。
-  if (toolCall.toolName === "Task" || toolCall.toolName === "TaskOutput") {
+  // S7:只有 Task 渲染成子代理卡片 —— 子代理状态按 Task 这次调用的 toolCallId 归位。
+  // TaskOutput 有自己的 toolCallId(查不到那份状态),且模型会对同一个 taskId 轮询多次,
+  // 若也渲染成卡片就会刷出一堆「subagent/永久 running」的重复假卡。它走通用工具渲染即可。
+  if (toolCall.toolName === "Task") {
     return <SubagentCard toolCall={toolCall} />;
   }
 

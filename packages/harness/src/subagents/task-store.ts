@@ -4,6 +4,8 @@ export interface TaskRecord {
   readonly sessionId: string;
   readonly parentToolCallId: string;
   readonly subagentType: string;
+  /** subagent 工具给的 3-5 词任务名(旧任务为空串)。 */
+  readonly description: string;
   readonly depth: number;
   readonly status: "running" | "done" | "failed";
   readonly result: string | null;
@@ -17,6 +19,7 @@ export interface CreateTaskInput {
   readonly sessionId: string;
   readonly parentToolCallId: string;
   readonly subagentType: string;
+  readonly description: string;
   readonly depth: number;
 }
 

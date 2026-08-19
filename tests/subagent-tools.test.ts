@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createTaskTools } from "../packages/harness/src/subagents/task-tools.js";
+import { createSubagentTool } from "../packages/harness/src/subagents/subagent-tool.js";
 import { InMemoryTaskStore } from "../packages/harness/src/subagents/in-memory-task-store.js";
 import { toToolSet } from "../packages/harness/src/tools.js";
 
@@ -13,80 +13,115 @@ const exec =
     return t.tool.execute(input as never) as Promise<string>;
   };
 
-describe("task-tools fork-join 基元 (S7)", () => {
-  it("未知 taskId → TaskOutput 返回可读错误(不静默吞)", async () => {
-    const store = new InMemoryTaskStore();
-    const tools = createTaskTools({
-      taskStore: store,
+describe("subagent 原语 (S7 push 模型)", () => {
+  it("只暴露一个工具 —— 没有 join/查询接口(轮询的结构性根源)", () => {
+    const tools = createSubagentTool({
+      taskStore: new InMemoryTaskStore(),
       runFork: async () => ({})
     });
-    const out = await exec("TaskOutput", tools)({ taskId: "t_nope" });
-    expect(out).toContain("[Task Error]");
-    expect(out).toContain("Unknown taskId");
+
+    expect(tools.map((t) => t.name)).toEqual(["subagent"]);
   });
 
-  it("前台 Task(background=false) → 只返回最终答案,不含中间工具输出(阀2)", async () => {
+  it("缺省后台 → 立刻返回任务号,并明说结果会自动送到、无需轮询", async () => {
     const store = new InMemoryTaskStore();
-    const runFork = async ({ taskId, prompt }: {
-      background: boolean; prompt: string; subagentType: string; taskId: string; parentToolCallId: string;
-    }) => {
-      void taskId; void prompt;
-      // 子代理确实读了 README(中间步骤),但只有最终两行收敛出来。
-      return { text: `FINAL: ${prompt} (read README, ~2 tools)` };
-    };
-    const tools = createTaskTools({ taskStore: store, runFork });
+    const seen: { background?: boolean; description?: string } = {};
+    const tools = createSubagentTool({
+      taskStore: store,
+      runFork: async ({ background, description, taskId }) => {
+        seen.background = background;
+        seen.description = description;
+        return { taskId };
+      }
+    });
 
-    const out = await exec("Task", tools)({ prompt: "digest README", background: false });
+    const out = await exec("subagent", tools)({
+      description: "深挖 apps/server",
+      prompt: "调查 apps/server 的目录结构"
+    });
+
+    expect(seen.background).toBe(true);
+    expect(seen.description).toBe("深挖 apps/server");
+    expect(out).toMatch(/Started subagent/);
+    expect(out).toContain("深挖 apps/server");
+    expect(out).toContain("delivered to you");
+    // 绝不能出现任何"去查/去 join"的话术,也不该再提 TaskOutput(工具已不存在)。
+    expect(out).not.toMatch(/TaskOutput|poll/i);
+  });
+
+  it("run_in_background=false → 前台等到底,返回子代理交付的结论", async () => {
+    const store = new InMemoryTaskStore();
+    const tools = createSubagentTool({
+      taskStore: store,
+      runFork: async ({ background, prompt }) => {
+        expect(background).toBe(false);
+        // 子代理确实读了 README(中间步骤),但只有结论收敛出来(阀2)。
+        return { text: `FINAL: ${prompt} (read README, ~2 tools)` };
+      }
+    });
+
+    const out = await exec("subagent", tools)({
+      description: "读 README",
+      prompt: "digest README",
+      run_in_background: false
+    });
+
     expect(out).toBe("FINAL: digest README (read README, ~2 tools)");
   });
 
-  it("后台 Task(默认) → 立刻返回任务号,由 TaskOutput join", async () => {
-    const store = new InMemoryTaskStore();
-    const tools = createTaskTools({
-      taskStore: store,
-      runFork: async ({ taskId }) => ({ taskId })
+  it("description 必填 —— 缺了就报错(否则卡片无法分辨)", async () => {
+    const tools = createSubagentTool({
+      taskStore: new InMemoryTaskStore(),
+      runFork: async () => ({ taskId: "t_x" })
     });
-    const out = await exec("Task", tools)({ prompt: "grep the logs" });
-    expect(out).toMatch(/Started subagent task/);
-    expect(out).toMatch(/TaskOutput/);
+
+    const out = await exec("subagent", tools)({ prompt: "做点什么" });
+
+    expect(out).toContain("[Tool Error]");
   });
 
-  it("TaskOutput(block=true) 等到底 → 返回子代理结果", async () => {
-    const store = new InMemoryTaskStore();
-    await store.create({
-      id: "t_fin", sessionId: "s1", parentToolCallId: "task-t_fin",
-      subagentType: "explorer", depth: 0
+  it("缺省角色是 explorer", async () => {
+    let got = "";
+    const tools = createSubagentTool({
+      taskStore: new InMemoryTaskStore(),
+      runFork: async ({ subagentType, taskId }) => {
+        got = subagentType;
+        return { taskId };
+      }
     });
-    await store.settle("t_fin", { result: "the answer is 42" });
-    const tools = createTaskTools({ taskStore: store, runFork: async () => ({}) });
 
-    const out = await exec("TaskOutput", tools)({ taskId: "t_fin", block: true });
-    expect(out).toBe("the answer is 42");
+    await exec("subagent", tools)({ description: "查一下", prompt: "p" });
+
+    expect(got).toBe("explorer");
   });
 
-  it("子代理失败 → TaskOutput 拿到 [Task Error] + 真实信息", async () => {
-    const store = new InMemoryTaskStore();
-    await store.create({
-      id: "t_fail", sessionId: "s1", parentToolCallId: "task-t_fail",
-      subagentType: "explorer", depth: 0
+  it("fork 的 parentToolCallId 用 SDK 的 toolCallId(卡片归位的键)", async () => {
+    let got = "";
+    const tools = createSubagentTool({
+      taskStore: new InMemoryTaskStore(),
+      runFork: async ({ parentToolCallId, taskId }) => {
+        got = parentToolCallId;
+        return { taskId };
+      }
     });
-    await store.settle("t_fail", { error: "subagent threw: stdin closed" });
-    const tools = createTaskTools({ taskStore: store, runFork: async () => ({}) });
 
-    const out = await exec("TaskOutput", tools)({ taskId: "t_fail", block: true });
-    expect(out).toContain("subagent threw");
+    const tool = tools[0]!.tool as {
+      execute: (i: unknown, o: { toolCallId: string }) => Promise<string>;
+    };
+    await tool.execute(
+      { description: "查一下", prompt: "p" },
+      { toolCallId: "call_00_REAL" }
+    );
+
+    expect(got).toBe("call_00_REAL");
   });
-});
 
-describe("InMemoryTaskStore 超时语义", () => {
-  it("running 任务 waitFor 超时 → 返回当前 running 快照(不永久阻塞)", async () => {
-    const store = new InMemoryTaskStore();
-    await store.create({
-      id: "t_hang", sessionId: "s1", parentToolCallId: "task-t_hang",
-      subagentType: "explorer", depth: 0
+  it("进 toolSet 后名字是 subagent(供 SDK 装配)", () => {
+    const tools = createSubagentTool({
+      taskStore: new InMemoryTaskStore(),
+      runFork: async () => ({})
     });
-    const out = await store.waitFor("t_hang", 30);
-    expect(out?.id).toBe("t_hang");
-    expect(out?.status).toBe("running");
+
+    expect(Object.keys(toToolSet([...tools]))).toEqual(["subagent"]);
   });
 });

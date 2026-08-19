@@ -4,6 +4,7 @@ import "streamdown/styles.css";
 
 import type { EvaUIMessage } from "@eva/shared";
 import { isDynamicToolPart, isTextPart, uiMessageText } from "@eva/shared";
+import type { EvaDynamicToolPart, EvaTextPart, EvaUIMessagePart } from "@eva/shared";
 
 import { StreamMarkdown } from "../../../shared/markdown/markdown.js";
 import { useSmoothStream } from "../../../shared/streaming/use-smooth-stream.js";
@@ -94,6 +95,41 @@ function ThinkingBadge({ durationMs }: { readonly durationMs: number }) {
   );
 }
 
+/** 渲染分组:一段文字,或一串连续的工具调用。 */
+type PartGroup =
+  | { readonly kind: "text"; readonly part: EvaTextPart }
+  | { readonly kind: "tools"; readonly parts: readonly EvaDynamicToolPart[] };
+
+/**
+ * 把 parts 压成交替的「文字段 / 工具组」序列。
+ *
+ * 连续的工具调用合成一组,组内紧凑排布 —— 否则每张卡各带外边距,和文字段落等距,
+ * 视觉上就分不出"这句话"和"它引发的那几次调用"。step-start 等非渲染 part 直接跳过,
+ * 且不打断工具组(SDK 在工具之间会插 step-start)。
+ */
+function groupParts(parts: readonly EvaUIMessagePart[]): readonly PartGroup[] {
+  const groups: PartGroup[] = [];
+
+  for (const part of parts) {
+    if (isTextPart(part)) {
+      groups.push({ kind: "text", part });
+      continue;
+    }
+    if (!isDynamicToolPart(part)) {
+      continue;
+    }
+
+    const last = groups[groups.length - 1];
+    if (last?.kind === "tools") {
+      groups[groups.length - 1] = { kind: "tools", parts: [...last.parts, part] };
+    } else {
+      groups.push({ kind: "tools", parts: [part] });
+    }
+  }
+
+  return groups;
+}
+
 function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBubbleProps) {
   if (message.role === "user") {
     return (
@@ -115,24 +151,26 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
         <ThinkingBadge durationMs={thinkingMs} />
       ) : null}
 
-      {message.parts.map((part, index) => {
-        if (isTextPart(part)) {
-          return (
+      {/* 节奏统一由这里的 space-y 控制,part 自己不带 margin —— 否则连续卡片
+          被各自的 my-3 撑开后,和文字段落等距,读起来就是"文字夹在卡片队列里"。
+          模型常在工具调用之间只吐一两个字(如"再"),碎片文字尤其需要这个层次。 */}
+      {groupParts(message.parts).map((group, groupIndex) =>
+        group.kind === "text" ? (
+          <div key={`text-${groupIndex}`} className="my-4 first:mt-0 last:mb-0">
             <AssistantContent
-              key={`text-${index}`}
-              content={part.text}
-              isStreaming={isStreaming === true && part.state === "streaming"}
+              content={group.part.text}
+              isStreaming={isStreaming === true && group.part.state === "streaming"}
             />
-          );
-        }
-
-        if (isDynamicToolPart(part)) {
-          return <ToolCallBlock key={part.toolCallId} toolCall={toolPartToInfo(part)} />;
-        }
-
-        // step-start 等不渲染
-        return null;
-      })}
+          </div>
+        ) : (
+          // 一串连续工具调用收拢成一组:组内紧凑(space-y-1),组与文字之间才宽松。
+          <div key={`tools-${groupIndex}`} className="my-4 space-y-1 first:mt-0 last:mb-0">
+            {group.parts.map((part) => (
+              <ToolCallBlock key={part.toolCallId} toolCall={toolPartToInfo(part)} />
+            ))}
+          </div>
+        )
+      )}
 
       {message.parts.length === 0 ? <StreamingIndicator /> : null}
 

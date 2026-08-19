@@ -153,6 +153,8 @@ export const backgroundTasks = sqliteTable(
       .references(() => sessions.id, { onDelete: "cascade" }),
     parentToolCallId: text("parent_tool_call_id").notNull(),
     subagentType: text("subagent_type").notNull(),
+    /** subagent 工具给的 3-5 词任务名 —— 卡片标题与通知文本都用它。 */
+    description: text("description").notNull().default(""),
     depth: integer("depth").notNull().default(0),
     status: text("status", { enum: ["running", "done", "failed"] })
       .notNull()

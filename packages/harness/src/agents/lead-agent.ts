@@ -48,6 +48,18 @@ import type {
 
 type FinishReason = "stop" | "aborted" | "error" | "max-steps";
 
+/**
+ * 收尾前等后台子代理交付结论的宽限期(S7 push)。
+ *
+ * 一次 HTTP = 一个 run,SSE 在 run 结束时关闭 —— 超过这个窗口才报的子代理,
+ * 结果只落库(卡片可展开看),模型不再主动回应。给得太长会让每轮对话都卡着等,
+ * 太短则常见的几秒级子任务白白错过注入。
+ */
+const NOTICE_GRACE_MS = 20_000;
+
+/** 一个 run 内最多因通知续跑几圈 —— 防子代理互相唤起的病态循环。 */
+const MAX_NOTICE_ROUNDS = 4;
+
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "AbortError";
 
@@ -195,6 +207,7 @@ export class LeadAgent implements Agent {
     const prefixMessageCount = messages.length;
     let stepsUsed = 0;
     let recoveries = 0;
+    let noticeRounds = 0;
     let hasCompactedReactively = false;
     let continuedText = "";
     let totalTokens: TokenUsage = ZERO_TOKEN_USAGE;
@@ -352,6 +365,42 @@ export class LeadAgent implements Agent {
         recoveries += 1;
         this.emitTransition(stepsUsed, "max_output_tokens_recovery", recoveries);
         continue;
+      }
+
+      // ---- 子代理通知注入(S7 push):模型说完了,但后台子代理可能刚交付结论 ----
+      // 条件是"模型正常说完了":aborted 与 error 走不到这里(上面已 return/throw),
+      // max-steps 也不注入(步数已耗尽,再续跑只会立刻又撞顶)。
+      // 注意 finishReason 是 SDK 的原始值(stop/length/other/tool-calls…),不是本文件
+      // 那个窄化的 FinishReason —— 所以按"不是 max-steps"判,别写成 === "stop"
+      // (真实供应商常给 "other",那样会静默永不注入)。
+      if (
+        stepsUsed < maxSteps &&
+        input.drainNotices !== undefined &&
+        noticeRounds < MAX_NOTICE_ROUNDS
+      ) {
+        const notices = await input.drainNotices({ graceMs: NOTICE_GRACE_MS });
+
+        if (notices.length > 0) {
+          // 先 yield 边界帧:route 靠它把当前 assistant 收口落库,再落通知消息,
+          // 然后为续跑新建 builder(见 routes/runs.ts)。必须在改 messages 之前发。
+          yield { type: "notice-injected", notices };
+
+          messages = [
+            ...(await result.responseMessages),
+            {
+              role: "user",
+              content: notices.map((n) => n.text).join("\n\n")
+            } as ModelMessage
+          ];
+          // 与 max-output 续写的关键差异:那里是"同一条消息继续写"所以累加 continuedText,
+          // 这里是两条独立 assistant 消息 —— 本轮正文已随上一条 assistant 收口落库,
+          // 所以 continuedText 必须保持空,否则续跑那条会把前一条的正文重复一遍。
+          // (text 是每圈局部变量,下一圈自然从 "" 开始,无需在此清。)
+          continuedText = "";
+          noticeRounds += 1;
+          this.emitTransition(stepsUsed, "subagent_notice", noticeRounds);
+          continue;
+        }
       }
 
       // ---- 终态:stop / max-steps / 空响应 ----
