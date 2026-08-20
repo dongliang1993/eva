@@ -78,4 +78,9 @@ export interface CreateAgentOptions {
   contextPolicy?: ContextWindowPolicyOptions;
   requestApproval?: RequestApproval;
   callSettings?: AgentCallSettings;
+  /**
+   * T18:repairToolCall 用的修复模型(tool 槽位)。可选 —— 不传维持 SDK 默认
+   * (schema 校验失败直接报错),最小场景/测试不该被强制塞一个模型。
+   */
+  repairModel?: AgentModel;
 }

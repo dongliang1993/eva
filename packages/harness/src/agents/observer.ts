@@ -60,6 +60,13 @@ export type AgentTelemetryEvent =
       readonly durationMs: number;
     }
   | {
+      /** T18:repairToolCall 修复成功(失败不发 —— 那会有 error 事件收尾)。 */
+      readonly type: "tool_call_repaired";
+      readonly toolName: string;
+      /** name=工具名修成真实存在的;input=入参按 schema 重出。 */
+      readonly kind: "name" | "input";
+    }
+  | {
       readonly type: "loop_transition";
       readonly step: number;
       readonly reason: LoopTransitionReason;

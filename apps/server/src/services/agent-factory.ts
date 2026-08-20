@@ -246,6 +246,8 @@ export class AgentFactory {
         ...defined("maxOutputTokens", models.chat.maxOutputTokens)
       },
       ...defined("requestApproval", options.requestApproval),
+      // T18:schema 不匹配时用 tool 槽位模型修一次 —— 结构化小生成正是该槽位的用途。
+      repairModel: this.getModel(models.tool),
       contextPolicy: {
         ...defined("contextWindow", models.chat.contextWindow),
         ...defined("reservedOutputTokens", models.chat.maxOutputTokens)
@@ -331,6 +333,8 @@ export class AgentFactory {
         ...defined("temperature", options.temperature)
       },
       ...defined("requestApproval", options.requestApproval),
+      // 子代理用的本来就是 tool 槽位(往往更弱),弱模型更需要修复器。
+      repairModel: this.getModel(models.tool),
       ...defined("observer", this.infra.observer)
     });
   }

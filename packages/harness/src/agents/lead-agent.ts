@@ -31,6 +31,7 @@ import {
   type RuntimeCompactResult
 } from "../context/runtime-compact.js";
 import { coalesceTextDeltas } from "./coalesce-stream.js";
+import { createRepairToolCall } from "./repair-tool-call.js";
 import {
   createPrepareStep,
   MAX_OUTPUT_CONTINUATION_MESSAGE,
@@ -117,6 +118,8 @@ export interface LeadAgentOptions {
   systemPrompt?: string | SystemModelMessage;
   maxSteps?: number;
   observer?: AgentObserver;
+  /** T18:repairToolCall 修复模型。可选,不传 = SDK 默认(校验失败直接报错)。 */
+  repairModel?: LanguageModel;
   contextPolicy?: ContextWindowPolicyOptions;
   callSettings?: AgentCallSettings;
 }
@@ -239,6 +242,14 @@ export class LeadAgent implements Agent {
         tools: toolSet,
         stopWhen: stepCountIs(maxSteps - stepsUsed),
         prepareStep,
+        ...(this.options.repairModel !== undefined
+          ? {
+              repairToolCall: createRepairToolCall({
+                repairModel: this.options.repairModel,
+                emit: (event) => this.emit(event)
+              })
+            }
+          : {}),
         ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
         ...(this.options.callSettings?.temperature !== undefined
           ? { temperature: this.options.callSettings.temperature } : {}),

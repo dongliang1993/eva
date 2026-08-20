@@ -2,6 +2,7 @@ export * from "./agents/coalesce-stream.js";
 export * from "./agents/create-agent.js";
 export * from "./agents/context-strategy.js";
 export * from "./agents/observer.js";
+export * from "./agents/repair-tool-call.js";
 export * from "./agents/stream-part-mapper.js";
 export * from "./agents/types.js";
 export * from "./constants.js";
