@@ -19,7 +19,7 @@ export const withApproval = (
   agentTool: AgentTool,
   requestApproval: RequestApproval
 ): AgentTool => {
-  if (agentTool.requiresApproval !== true) {
+  if (agentTool.needsApproval !== true) {
     return agentTool;
   }
 

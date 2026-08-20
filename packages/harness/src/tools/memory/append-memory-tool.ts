@@ -29,7 +29,7 @@ export const createAppendMemoryTool = (store: MemoryFileStore): AgentTool =>
       "- `save_memory` → a searchable fact that is NOT worth carrying every turn, but may matter later",
       "Prefer note-taking that reads like a diary: the date is the file; you do not need to repeat the date in each line."
     ].join("\n"),
-    schema: appendMemorySchema,
+    inputSchema: appendMemorySchema,
     execute: async ({ note, date }) => {
       const today = todayString();
       const targetDate = date ?? today;

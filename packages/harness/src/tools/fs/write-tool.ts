@@ -18,8 +18,8 @@ export const createWriteTool = (options: FsToolBaseOptions): AgentTool =>
     description:
       "Write (or append to) a file within the workspace. Requires user approval " +
       "because it modifies the filesystem.",
-    schema: writeFileSchema,
-    requiresApproval: true,
+    inputSchema: writeFileSchema,
+    needsApproval: true,
     async execute({ path: rel, content, append }) {
       const absolute = resolveWorkspacePath(rel, options.workRoot);
       await fs.mkdir(path.dirname(absolute), { recursive: true });

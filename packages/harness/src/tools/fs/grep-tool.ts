@@ -37,7 +37,7 @@ export const createGrepTool = (options: FsToolBaseOptions): AgentTool =>
       "Search file contents for a pattern within the workspace. Returns filename + " +
       "matching line. Use this instead of reading many files when you need to find " +
       "what references something.",
-    schema: grepSchema,
+    inputSchema: grepSchema,
     readOnly: true,
     async execute({ pattern, path: rel, maxMatches }) {
       const absolute = resolveWorkspacePath(rel, options.workRoot);

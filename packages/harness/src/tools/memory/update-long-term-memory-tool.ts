@@ -24,7 +24,7 @@ export const createUpdateLongTermMemoryTool = (store: MemoryFileStore): AgentToo
       "Before editing: ask yourself if each fact is worth spending tokens on every single turn. " +
       "Stable user identity, preferences, and durable constraints live here; everything else goes in `save_memory` (DB)."
     ].join("\n"),
-    schema: updateLongTermMemorySchema,
+    inputSchema: updateLongTermMemorySchema,
     execute: async ({ content }) => {
       try {
         const savedPath = await store.writeLongTermMemory(content);

@@ -52,8 +52,8 @@ const writeTool = (executed: string[]) =>
   buildTool({
     name: "write_file",
     description: "write a file",
-    schema: z.object({ path: z.string() }),
-    requiresApproval: true,
+    inputSchema: z.object({ path: z.string() }),
+    needsApproval: true,
     execute: async (input: { path: string }) => {
       executed.push(input.path);
       return `wrote ${input.path}`;

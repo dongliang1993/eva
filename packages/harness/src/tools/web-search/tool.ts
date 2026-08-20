@@ -49,7 +49,7 @@ export const createWebSearchTool = (client: WebSearchClient): AgentTool =>
   buildTool({
     name: WEB_SEARCH_TOOL_NAME,
     description: getWebSearchToolDescription,
-    schema: webSearchToolSchema,
+    inputSchema: webSearchToolSchema,
     readOnly: true,
     execute: async ({ query, maxResults }) =>
       JSON.stringify(

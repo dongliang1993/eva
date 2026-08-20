@@ -60,7 +60,7 @@ export const createSubagentTool = (ctx: SubagentToolContext): readonly AgentTool
       "no tool to poll and no need to ask for it.",
       "Set run_in_background: false only when your next action depends on receiving the result."
     ].join("\n"),
-    schema: subagentSchema,
+    inputSchema: subagentSchema,
     execute: async ({ description, prompt, subagent: type, run_in_background }, options) => {
       const id = newTaskId();
       // parentToolCallId 用 SDK 派给这次调用的 toolCallId —— 子代理进程消息、SSE 帧、

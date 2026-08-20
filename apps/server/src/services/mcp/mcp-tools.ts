@@ -42,7 +42,7 @@ const isAutoApproved = (server: McpServerRow, descriptor: McpToolDescriptor): bo
 /**
  * MCP 工具 → AgentTool。
  *
- * 不需要新的审批机制：`AgentTool.requiresApproval` + `withApproval` 是 R1 T0.4 建好的闸门，
+ * 不需要新的审批机制：`AgentTool.needsApproval` + `withApproval` 是 R1 T0.4 建好的闸门，
  * MCP 工具只是又一批带标记的工具。
  */
 export const toAgentTools = (
@@ -67,7 +67,7 @@ export const toAgentTools = (
         description: descriptor.description,
         inputSchema: descriptor.inputSchema,
         readOnly: descriptor.readOnly,
-        ...(isAutoApproved(server, descriptor) ? {} : { requiresApproval: true }),
+        ...(isAutoApproved(server, descriptor) ? {} : { needsApproval: true }),
         execute: (input) => invoker.callTool(descriptor.name, input)
       })
     );

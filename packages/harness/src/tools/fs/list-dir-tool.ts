@@ -17,7 +17,7 @@ export const createListDirTool = (options: FsToolBaseOptions): AgentTool =>
     description:
       "List files and directories directly under a directory within the workspace. " +
       "One line per entry (dir/ prefix for directories). Use for exploring structure.",
-    schema: listDirSchema,
+    inputSchema: listDirSchema,
     readOnly: true,
     async execute({ path: rel, includeHidden, maxEntries }) {
       const absolute = resolveWorkspacePath(rel, options.workRoot);

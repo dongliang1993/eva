@@ -26,7 +26,7 @@ export const createReadFileTool = (options: FsToolBaseOptions): AgentTool =>
     description:
       "Read a text file within the workspace. Supports offset/limit for reading " +
       "a range of lines. Large outputs are truncated with a path for re-reads.",
-    schema: readFileSchema,
+    inputSchema: readFileSchema,
     readOnly: true,
     async execute({ path: rel, offset, limit }) {
       const absolute = resolveReadablePath(rel, options.workRoot, options.readableRoots ?? []);

@@ -20,8 +20,8 @@ export const createEditTool = (options: FsToolBaseOptions): AgentTool =>
       "Precisely replace text in a file within the workspace. " +
       "`before` must match exactly once, and is replaced with `after`. " +
       "Requires user approval because it modifies the filesystem.",
-    schema: editFileSchema,
-    requiresApproval: true,
+    inputSchema: editFileSchema,
+    needsApproval: true,
     async execute({ path: rel, before, after }) {
       if (before.length > EDIT_MAX_BEFORE) {
         return `[Tool Error] 'before' text too long (${before.length} > ${EDIT_MAX_BEFORE}). Edit smaller chunks.`;

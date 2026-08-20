@@ -34,7 +34,7 @@ export const createReportTool = (onReport: ReportSink): AgentTool =>
       "receives it.",
       "A failed call may still have arrived, so do not blindly repeat it."
     ].join("\n"),
-    schema: reportSchema,
+    inputSchema: reportSchema,
     // 只读语义:它不碰工作区,只把内容递给父级(免审批,与 read_* 同级)。
     readOnly: true,
     execute: async ({ output }) => {

@@ -25,8 +25,8 @@ export const createBashTool = (options: FsToolBaseOptions): AgentTool =>
     description:
       "Run a shell command within the workspace root. Requires user approval " +
       "because it can modify files or have side effects.",
-    schema: bashSchema,
-    requiresApproval: true,
+    inputSchema: bashSchema,
+    needsApproval: true,
     async execute({ command }) {
       try {
         const { stdout, stderr } = await execFileAsync("/bin/bash", ["-lc", command], {

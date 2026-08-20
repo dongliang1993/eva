@@ -44,7 +44,7 @@ export const createSaveMemoryTool = (store: MemoryStore): AgentTool =>
       "- Temporary conversation details",
       "- Information already in the conversation history"
     ].join("\n"),
-    schema: saveMemorySchema,
+    inputSchema: saveMemorySchema,
     execute: async ({ content, category, updateId }) => {
       const cat = (category ?? "knowledge") as MemoryCategory;
 

@@ -59,7 +59,7 @@ const echoTool = () =>
   buildTool({
     name: "echo",
     description: "echo the msg",
-    schema: z.object({ msg: z.string() }),
+    inputSchema: z.object({ msg: z.string() }),
     execute: async (input: { msg: string }) => input.msg
   });
 
@@ -67,7 +67,7 @@ const failingTool = () =>
   buildTool({
     name: "fail",
     description: "always throws",
-    schema: z.object({}),
+    inputSchema: z.object({}),
     execute: async () => {
       throw new Error("kaboom");
     }

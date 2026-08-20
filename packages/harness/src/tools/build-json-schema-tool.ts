@@ -9,7 +9,7 @@ export interface JsonSchemaToolDefinition {
   readonly inputSchema: unknown;
   readonly execute: (input: unknown) => Promise<string>;
   readonly readOnly?: boolean;
-  readonly requiresApproval?: boolean;
+  readonly needsApproval?: boolean;
 }
 
 /**
@@ -39,8 +39,8 @@ export const buildJsonSchemaTool = (
     name: definition.name,
     tool: built,
     ...(definition.readOnly !== undefined ? { readOnly: definition.readOnly } : {}),
-    ...(definition.requiresApproval !== undefined
-      ? { requiresApproval: definition.requiresApproval }
+    ...(definition.needsApproval !== undefined
+      ? { needsApproval: definition.needsApproval }
       : {})
   };
 };

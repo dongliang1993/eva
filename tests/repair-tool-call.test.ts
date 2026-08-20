@@ -12,7 +12,7 @@ const readFileTool = () =>
   buildTool({
     name: "read_file",
     description: "read a file",
-    schema: z.object({ path: z.string() }),
+    inputSchema: z.object({ path: z.string() }),
     execute: async (input: { path: string }) => `content of ${input.path}`
   });
 
@@ -20,7 +20,7 @@ const readSkillTool = () =>
   buildTool({
     name: "read_skill",
     description: "read a skill",
-    schema: z.object({ name: z.string() }),
+    inputSchema: z.object({ name: z.string() }),
     execute: async (input: { name: string }) => `skill ${input.name}`
   });
 
@@ -222,7 +222,7 @@ describe("streamText 接线 (端到端)", () => {
     const tool = buildTool({
       name: "read_file",
       description: "read a file",
-      schema: z.object({ path: z.string() }),
+      inputSchema: z.object({ path: z.string() }),
       execute: async (input: { path: string }) => {
         executed.push(input.path);
         return `content of ${input.path}`;

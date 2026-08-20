@@ -116,8 +116,8 @@ describe("McpRegistry", () => {
     const tools = registry.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(["mcp__km__read_doc", "mcp__km__write_doc"]);
     // readOnly 的免审批，其余需审批
-    expect(tools.find((t) => t.name.endsWith("read_doc"))!.requiresApproval).toBeUndefined();
-    expect(tools.find((t) => t.name.endsWith("write_doc"))!.requiresApproval).toBe(true);
+    expect(tools.find((t) => t.name.endsWith("read_doc"))!.needsApproval).toBeUndefined();
+    expect(tools.find((t) => t.name.endsWith("write_doc"))!.needsApproval).toBe(true);
   });
 
   it("一个 server 连不上 → 它记 error，另一个照常 connected，工具只来自好的那个", async () => {

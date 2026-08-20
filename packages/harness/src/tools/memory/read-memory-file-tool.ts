@@ -25,7 +25,7 @@ export const createReadMemoryFileTool = (store: MemoryFileStore): AgentTool =>
       "- `file: \"memory/YYYY-MM-DD.md\"` reads a specific day's note.",
       "Paths are confined to the memory root; anything escaping the root is rejected."
     ].join("\n"),
-    schema: readMemoryFileSchema,
+    inputSchema: readMemoryFileSchema,
     readOnly: true,
     execute: async ({ from }) => {
       if (from === undefined) {

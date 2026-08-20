@@ -55,7 +55,7 @@ describe("toAgentTools", () => {
 
     expect(tool?.name).toBe("mcp__km__search");
     expect(tool?.readOnly).toBe(true);
-    expect(tool?.requiresApproval).toBeUndefined();
+    expect(tool?.needsApproval).toBeUndefined();
   });
 
   it("命中 autoApproveTools 白名单 → 免审批（白名单写 MCP 侧原名）", () => {
@@ -65,7 +65,7 @@ describe("toAgentTools", () => {
       { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
     );
 
-    expect(tool?.requiresApproval).toBeUndefined();
+    expect(tool?.needsApproval).toBeUndefined();
   });
 
   it("既非只读也不在白名单 → 需要审批", () => {
@@ -73,7 +73,7 @@ describe("toAgentTools", () => {
       info: vi.fn(), warn: vi.fn(), error: vi.fn()
     });
 
-    expect(tool?.requiresApproval).toBe(true);
+    expect(tool?.needsApproval).toBe(true);
   });
 
   it("JSON Schema 原样交给工具，execute 转调 client.callTool", async () => {

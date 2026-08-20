@@ -14,7 +14,7 @@ export const createReadSkillTool = (skills: Skill[]): AgentTool => {
     name: "read_skill",
     description:
       "Read the full content of a skill by name. Use this to load domain-specific guidance before executing a task.",
-    schema: readSkillSchema,
+    inputSchema: readSkillSchema,
     readOnly: true,
     execute: async ({ name }) => {
       const skill = skillsByName.get(name);

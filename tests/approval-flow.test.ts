@@ -74,7 +74,7 @@ const readFileTool = () =>
   buildTool({
     name: "read_file",
     description: "read a file",
-    schema: z.object({ path: z.string() }),
+    inputSchema: z.object({ path: z.string() }),
     readOnly: true,
     execute: async (input: { path: string }) => `content of ${input.path}`
   });
@@ -83,8 +83,8 @@ const dangerousTool = () =>
   buildTool({
     name: "dangerous_a",
     description: "a dangerous tool",
-    schema: z.object({ value: z.string() }),
-    requiresApproval: true,
+    inputSchema: z.object({ value: z.string() }),
+    needsApproval: true,
     execute: async () => "executed dangerous_a"
   });
 

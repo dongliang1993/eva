@@ -18,7 +18,7 @@ export const createSearchMemoryTool = (store: MemoryStore): AgentTool =>
       "Do not imply you recalled long-term memory unless you actually used this tool.",
       "Returns matching memories with their IDs (use ID for updates/deletes)."
     ].join("\n"),
-    schema: searchMemorySchema,
+    inputSchema: searchMemorySchema,
     readOnly: true,
     execute: async ({ query }) => {
       const results = await store.search(query);

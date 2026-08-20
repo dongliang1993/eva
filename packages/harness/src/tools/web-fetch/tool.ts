@@ -29,7 +29,7 @@ export const createWebFetchTool = (
     description:
       "Fetch the content of a URL, convert it to Markdown, and summarize it based on the given prompt. " +
       "Use this after web_search to read specific pages in detail.",
-    schema: webFetchSchema,
+    inputSchema: webFetchSchema,
     async execute(input) {
       const startedAt = performance.now();
 
