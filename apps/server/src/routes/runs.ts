@@ -163,9 +163,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         messages: runContext.modelMessages,
         abortSignal: controller.signal,
         drainNotices: (opts) => reportGateway!.drain(opts),
-        ...(runContext.additionalTools.length > 0
-          ? { additionalTools: [...runContext.additionalTools, ...subagentTools] }
-          : { additionalTools: [...subagentTools] }),
+        additionalTools: [...runContext.additionalTools, ...subagentTools],
         ...(runContext.context !== undefined ? { context: runContext.context } : {})
       })) {
         emit(event);
