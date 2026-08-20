@@ -56,7 +56,7 @@ const startApp = async (): Promise<void> => {
   });
   app.decorate("services", {
     agents: {
-      resolve: () => ({
+      build: () => ({
         agent: createAgent({ model: textModel("reply"), tools: [], maxSteps: 3 }),
         mainModel: { qualifiedModelId: "openai:test" }
       }),

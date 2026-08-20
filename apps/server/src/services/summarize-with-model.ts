@@ -1,7 +1,7 @@
 import { generateText } from "ai";
 
 import { isDynamicToolPart, isTextPart, toolPartOutput } from "@eva/shared";
-import { toAgentModel } from "../agent.js";
+import { toAgentModel } from "./agent-factory.js";
 import type { ModelBinding } from "./providers/model-resolver.js";
 import type { StoredMessage } from "../db/repositories/types.js";
 

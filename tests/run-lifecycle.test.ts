@@ -71,7 +71,7 @@ const startApp = async (agent: Agent): Promise<void> => {
   });
   app.decorate("services", {
     agents: {
-      resolve: () => ({ agent, mainModel: { qualifiedModelId: "openai:test" } })
+      build: () => ({ agent, mainModel: { qualifiedModelId: "openai:test" } })
     },
     session: new SessionService(
       new DrizzleSessionRepository(db),

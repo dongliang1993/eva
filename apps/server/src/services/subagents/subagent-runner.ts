@@ -17,7 +17,7 @@ import type {
 import type { AppDatabase } from "../../db/index.js";
 import { BackgroundTaskRepository } from "../../db/repositories/background-task-repository.js";
 import { DrizzleMessageRepository } from "../../db/repositories/message-repository.js";
-import type { WorkspaceContext } from "../../agent.js";
+import type { WorkspaceContext } from "../agent-factory.js";
 import type { AgentFactory } from "../agent-factory.js";
 import { SqliteTaskStore } from "./sqlite-task-store.js";
 import { SubagentRecorder } from "./subagent-recorder.js";
@@ -26,7 +26,8 @@ export interface SubagentRunnerOptions {
   readonly sessionId: string;
   readonly db: AppDatabase;
   readonly runId?: string | undefined;
-  readonly model?: string | undefined;
+  /** 本轮主链选定的模型。必填 —— 子代理的 tool 槽位回落 chat 时沿用同一个。 */
+  readonly model: string;
   /** 本轮工作区(角色白名单照它过滤真实工具)。 */
   readonly workspace?: WorkspaceContext | undefined;
   /** 进程级外部工具(MCP) —— 子代理按角色从此收窄。 */
@@ -167,9 +168,7 @@ export class SubagentRunner {
         : {}),
       // 子代理沿用本轮主链选定的 chat 模型 —— 没有全局 chat 默认兜底,
       // tool 槽位回落 chat 时必须用主链同一个模型,不能另起解析。
-      ...(this.options.model !== undefined
-        ? { requestedModelId: this.options.model }
-        : {})
+      modelId: this.options.model
     });
 
     const recorder = new SubagentRecorder(

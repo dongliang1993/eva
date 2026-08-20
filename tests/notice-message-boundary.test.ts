@@ -120,7 +120,7 @@ const startApp = async (agentOverride?: Agent): Promise<void> => {
   });
   app.decorate("services", {
     agents: {
-      resolve: () => ({
+      build: () => ({
         agent: mainAgent,
         mainModel: { qualifiedModelId: "openai:test" }
       }),

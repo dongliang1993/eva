@@ -8,7 +8,7 @@ import {
 } from "@eva/shared";
 import { convertToModelMessages, type ModelMessage } from "ai";
 
-import type { WorkspaceContext } from "../../agent.js";
+import { defined, type WorkspaceContext } from "../agent-factory.js";
 import type { AppConfig } from "../../config.js";
 import type { AppDatabase } from "../../db/index.js";
 import { DrizzleMessageRepository } from "../../db/repositories/message-repository.js";
@@ -40,7 +40,11 @@ export interface RunPreparationDependencies {
   readonly workspaces: WorkspaceStore;
 }
 
-export interface OpenTurn {
+/**
+ * 一次 run 的输入材料 —— 阶段①的产出,回答"这次 run 落在哪、用什么模型、
+ * 从哪条消息回溯"。不是"一轮对话"(turn),是 run 的事实。
+ */
+export interface RunInput {
   readonly sessionId: string;
   /** runs 台账的 user_message_id，同时也是模型可见历史的末端。 */
   readonly userMessageId: string;
@@ -62,11 +66,13 @@ export interface OpenTurn {
   readonly modelId: string;
 }
 
-export interface PreparedRun {
+export interface RunContext {
   readonly sessionId: string;
   readonly userMessageId: string;
   readonly modelMessages: ModelMessage[];
+  /** 喂给 agent.stream 的 additionalTools —— 记忆工具在这,路由再拼 subagentTools。 */
   readonly additionalTools: readonly AgentTool[];
+  /** 喂给 agent.stream 的 context —— 目前是 { memory: <渲染好的记忆 prompt> }。 */
   readonly context?: Record<string, unknown>;
 }
 
@@ -91,12 +97,15 @@ const loadWorkspaceContext = async (
   };
 };
 
-/** 建/取会话、落用户消息并解析本轮工作区；不解析模型。 */
-export const openSessionTurn = async (
+/**
+ * 阶段①:备齐这次 run 的输入材料 —— 建/取会话、落用户消息、定模型、定工作区。
+ * 不解析模型(那是 AgentFactory 的活),只把"用哪个模型"这个决定落实成 modelId。
+ */
+export const prepareRunInput = async (
   dependencies: RunPreparationDependencies,
   body: RunRequest,
   runId: string
-): Promise<OpenTurn> => {
+): Promise<RunInput> => {
   if (body.retryMessageId !== undefined) {
     const messageRepo = new DrizzleMessageRepository(dependencies.db);
     const target = messageRepo.findById(body.retryMessageId);
@@ -147,34 +156,34 @@ export const openSessionTurn = async (
     assistantPosition: dependencies.session.positionAfterActiveLeaf(session.id),
     historyLeafId: storedUser.id,
     ...(continuedSession === undefined ? { createdSessionId: session.id } : {}),
-    ...(workspace !== undefined ? { workspace } : {}),
+    workspace,
     // schema 的 superRefine 已保证 text 模式必带 modelId。
     modelId: body.modelId!
   };
 };
 
-/** 根据已解析模型构造这轮模型可见的历史、记忆上下文和附加工具。 */
+/** 阶段③:拿输入材料 + 已解析模型 → 模型这轮可见的历史、记忆上下文和附加工具。 */
 export const prepareRunContext = async (
   dependencies: RunPreparationDependencies,
-  open: OpenTurn,
+  input: RunInput,
   resolved: { readonly mainModel: ModelBinding; readonly toolModel: ModelBinding }
-): Promise<PreparedRun> => {
+): Promise<RunContext> => {
   const { mainModel } = resolved;
   new DrizzleSessionRepository(dependencies.db)
-    .updateModel(open.sessionId, mainModel.qualifiedModelId);
+    .updateModel(input.sessionId, mainModel.qualifiedModelId);
 
   const settings = loadAppSettings(dependencies.db, dependencies.config);
   await autoCompactIfNeeded(
     dependencies.db,
-    open.sessionId,
+    input.sessionId,
     createAutoCompactConfig(settings.chat),
     { summarize: createModelSummarizer(resolved.toolModel, dependencies.logger) }
   );
 
   const history = dependencies.session.buildModelHistory(
     dependencies.db,
-    open.sessionId,
-    open.historyLeafId
+    input.sessionId,
+    input.historyLeafId
   );
 
   // abort 可能留下不完整工具调用；reasoning 保留给 UI，但不回灌模型。
@@ -189,29 +198,25 @@ export const prepareRunContext = async (
   const memoryRuntime = await buildMemoryRuntimeSupport({
     db: dependencies.db,
     config: dependencies.config,
-    userMessage: open.humanText,
+    userMessage: input.humanText,
     historyTokens: estimateModelHistoryTokens(history),
-    ...(mainModel.contextWindow !== undefined || mainModel.maxOutputTokens !== undefined
-      ? {
-        modelLimits: {
-          ...(mainModel.contextWindow !== undefined
-            ? { contextWindow: mainModel.contextWindow }
-            : {}),
-          ...(mainModel.maxOutputTokens !== undefined
-            ? { maxOutputTokens: mainModel.maxOutputTokens }
-            : {})
-        }
-      }
-      : {})
+    modelLimits: {
+      ...defined("contextWindow", mainModel.contextWindow),
+      ...defined("maxOutputTokens", mainModel.maxOutputTokens)
+    }
   });
 
+  // MemoryRuntimeSupport(服务层词)→ agent.stream 的入参(harness 词):
+  // additionalTools 还要在路由拼 subagentTools;memoryContext 是个裸 string,
+  // harness 要 Record —— 给它起 key = "memory"。
   return {
-    sessionId: open.sessionId,
-    userMessageId: open.userMessageId,
+    sessionId: input.sessionId,
+    userMessageId: input.userMessageId,
     modelMessages,
-    additionalTools: [...memoryRuntime.additionalTools],
-    ...(memoryRuntime.memoryContext
-      ? { context: { memory: memoryRuntime.memoryContext } }
-      : {})
+    additionalTools: memoryRuntime.additionalTools,
+    ...defined("context",
+      memoryRuntime.memoryContext !== undefined
+        ? { memory: memoryRuntime.memoryContext }
+        : undefined)
   };
 };

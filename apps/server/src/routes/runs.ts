@@ -9,15 +9,15 @@ import type { FastifyInstance } from "fastify";
 import type { RunStreamEvent } from "@eva/shared";
 import { toErrorMessage } from "@eva/shared";
 
-import { AgentUnavailableError } from "../agent.js";
+import { AgentUnavailableError, defined } from "../services/agent-factory.js";
 import { loadAppSettings } from "../services/settings/app-settings.js";
 import { evaDataDir } from "../paths.js";
 import { loadMemoryFilesSection, todayString } from "../services/memory/index.js";
 import { AssistantMessageRecorder } from "../services/runs/assistant-message-recorder.js";
 import {
-  openSessionTurn,
+  prepareRunInput,
   prepareRunContext,
-  type OpenTurn,
+  type RunInput,
   type RunPreparationDependencies
 } from "../services/runs/run-preparation.js";
 import { SubagentRunner } from "../services/subagents/subagent-runner.js";
@@ -32,7 +32,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     const stream = new RunEventStream(reply);
     let sessionId = "";
     // 供 catch 回滚 503 时新建的会话。
-    let open: OpenTurn | undefined;
+    let runInput: RunInput | undefined;
     // 回报网关与 run 同寿:主 loop 收尾前 drain 一次,把后台子代理刚交付的结论
     // 注入本轮对话(S7 push)。声明在 try 外,finally 才能 dispose。
     let reportGateway: ReportGateway | undefined;
@@ -72,35 +72,37 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       const body = runRequestSchema.parse(request.body ?? {});
 
       // 阶段①:会话/工作区先落 —— agent 的工具集依赖工作区,工作区来自会话。
-      open = await openSessionTurn(preparationDependencies, body, runId);
-      sessionId = open.sessionId;
+      runInput = await prepareRunInput(preparationDependencies, body, runId);
+      sessionId = runInput.sessionId;
 
       // MCP 连接在这里懒触发(首个 run 付一次成本,之后是空调用)。连不上的 server
       // 只在 registry 里记 error,工具缺席即可 —— MCP 不可用绝不让对话失败。
       await app.services.mcp.ensureConnected();
 
-      // 阶段②:解析模型(带工作区 + MCP 工具)。模型不可用(503)时,本次刚建的会话要回滚。
-      // memory files 与工作区无关(~/.eva 是全局的),per-run 读 —— 没绑工作区的会话也注入。
+      // 模型在阶段①就定好了(send = body.modelId,retry = body 或会话记录),
+      // 这里直接用 —— 没有兜底链,拿不到模型在 prepareRunInput 里就已经报错。
+      //
+      // memoryFilesSection 不依赖模型也不依赖工作区(~/.eva 全局),但它要喂给
+      // resolve(agent 的 prompt section),而 prepareRunContext 又吃 resolved.mainModel
+      // 的窗口信息 —— 所以 section 在 resolve 之前备好,别和模型相关准备混在一起。
       const memoryFilesSection = await loadMemoryFilesSection(evaDataDir(), todayString());
 
-      // 模型在阶段①就定好了(send = body.modelId,retry = body 或会话记录),
-      // 这里直接用 —— 没有兜底链,拿不到模型在 openSessionTurn 里就已经报错。
-      const resolved = app.services.agents.resolve({
-        requestedModelId: open.modelId,
-        ...(open.workspace !== undefined ? { workspace: open.workspace } : {}),
+      const resolved = app.services.agents.build({
+        modelId: runInput.modelId,
         extraTools: app.services.mcp.listTools(),
         requestApproval,
-        ...(memoryFilesSection !== undefined ? { memoryFilesSection } : {})
+        ...defined("workspace", runInput.workspace),
+        ...defined("memoryFilesSection", memoryFilesSection)
       });
 
       // 阶段③:模型这轮看见什么(需要 mainModel 的窗口信息)。
-      const prepared = await prepareRunContext(preparationDependencies, open, resolved);
+      const runContext = await prepareRunContext(preparationDependencies, runInput, resolved);
 
       app.services.runLedger.start({
         id: runId,
         sessionId,
         model: resolved.mainModel.qualifiedModelId,
-        userMessageId: prepared.userMessageId
+        userMessageId: runContext.userMessageId
       });
 
       stream.open();
@@ -117,7 +119,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
           db: app.infra.db,
           runId,
           model: resolved.mainModel.qualifiedModelId,
-          ...(open.workspace !== undefined ? { workspace: open.workspace } : {}),
+          ...(runInput.workspace !== undefined ? { workspace: runInput.workspace } : {}),
           extraTools: app.services.mcp.listTools(),
           abortSignal: controller.signal,
           onSubagentEvent: (event) => {
@@ -154,17 +156,17 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         sessionId,
         runId,
         model: resolved.mainModel.qualifiedModelId,
-        initialPosition: open.assistantPosition
+        initialPosition: runInput.assistantPosition
       });
 
       for await (const event of resolved.agent.stream({
-        messages: prepared.modelMessages,
+        messages: runContext.modelMessages,
         abortSignal: controller.signal,
         drainNotices: (opts) => reportGateway!.drain(opts),
-        ...(prepared.additionalTools.length > 0
-          ? { additionalTools: [...prepared.additionalTools, ...subagentTools] }
+        ...(runContext.additionalTools.length > 0
+          ? { additionalTools: [...runContext.additionalTools, ...subagentTools] }
           : { additionalTools: [...subagentTools] }),
-        ...(prepared.context !== undefined ? { context: prepared.context } : {})
+        ...(runContext.context !== undefined ? { context: runContext.context } : {})
       })) {
         emit(event);
         messageRecorder.push(event);
@@ -188,8 +190,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
       // 模型不可用(503)且这条会话是本次请求刚建的 → 撤掉,别让没配好 API key 的
       // 新装用户每点一次发送就攒一条空会话。已有会话不动:用户说的话得留下。
-      if (error instanceof AgentUnavailableError && open?.createdSessionId) {
-        app.services.session.deleteSession(open.createdSessionId);
+      if (error instanceof AgentUnavailableError && runInput?.createdSessionId) {
+        app.services.session.deleteSession(runInput.createdSessionId);
       }
 
       if (sessionId) {

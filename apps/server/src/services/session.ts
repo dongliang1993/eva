@@ -117,7 +117,7 @@ export class SessionService {
   }
 
   /**
-   * 落库一条 assistant 消息,位置由调用方给定(openSessionTurn 阶段算好)。
+   * 落库一条 assistant 消息,位置由调用方给定(prepareRunInput 阶段算好)。
    * send 模式 = positionAfterActiveLeaf;retry 模式 = positionAlongside(被重试消息)。
    */
   recordAssistantMessage(
