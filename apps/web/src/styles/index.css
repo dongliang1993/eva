@@ -176,6 +176,9 @@
   --color-foreground: var(--fg-primary);
   --color-muted-foreground: var(--fg-tertiary);
   --color-secondary-foreground: var(--fg-primary);
+  /* 真正的次级文字色 —— 与 secondary-foreground(主文本色)不同,语义清晰。
+     secondary-foreground 是"secondary 表面上的前景";secondary-text 是"次级的文字"。 */
+  --color-secondary-text: var(--fg-secondary);
   --color-caption: var(--fg-caption);
 
   /* Muted / hover surface (兼容既有 bg-muted / bg-accent) */

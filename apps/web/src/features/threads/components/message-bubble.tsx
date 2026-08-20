@@ -213,20 +213,41 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
 }
 
 /**
- * Think 块 —— assistant 消息里的推理轨迹(对接 reasoning-delta)。
- * DeepSeek 风格 = 一条扁平 DisclosureRow。
+ * 取 reasoning 里最新的一句话(流式预览用)。
  *
- * 流式期间 force open:reasoning 逐字进来时立即铺开给人看(此刻正是用户想看的
- * 实时思考);收口成 done 后回到默认折叠,想回看的手动展开。
+ * 按句子/换行断:取最后一段非空内容(通常就是正在生成的那句)。reasoning
+ * 是逐字追加进同一 part 的,所以"当前正在想的东西"≈ 尾部最后一句。
+ */
+const lastReasoningPreview = (text: string): string => {
+  const trimmed = text.trim();
+  const trailing = trimmed
+    .split(/(?<=[。！？.!?\n])/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return trailing.length > 0 ? trailing[trailing.length - 1]! : trimmed;
+};
+
+/**
+ * Think 块 —— assistant 消息里的推理轨迹(对接 reasoning-delta)。DSH 形态:
+ *
+ * - 流式期间:标题行实时显示「Think · <最新一句>」,推理过程就滚动在这行上面;
+ * - 收口后:标题收起成「Think」,展开/折叠才看全部内容。
  */
 function ThinkBlock({ text, isStreaming }: { readonly text: string; readonly isStreaming: boolean }) {
+  const title = isStreaming ? (
+    <>
+      Think<span className="mx-1 text-muted-foreground">·</span>
+      <span className="max-w-[60%] truncate font-normal text-secondary-foreground">
+        {lastReasoningPreview(text)}
+      </span>
+    </>
+  ) : (
+    "Think"
+  );
+
   return (
-    <DisclosureRow
-      icon={<Brain size={14} className="shrink-0" />}
-      title="Think"
-      open={isStreaming}
-    >
-      <div className="whitespace-pre-wrap text-secondary-foreground">{text}</div>
+    <DisclosureRow icon={<Brain size={14} className="shrink-0" />} title={title}>
+      <div className="whitespace-pre-wrap text-secondary-text">{text}</div>
     </DisclosureRow>
   );
 }

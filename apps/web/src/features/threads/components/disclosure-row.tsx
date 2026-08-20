@@ -47,18 +47,18 @@ export function DisclosureRow({ icon, title, trailing, children, onToggle, open 
         }}
         aria-expanded={expandable ? expanded : undefined}
       >
-        <span className="relative mr-1.5 inline-flex h-4 w-4 flex-none items-center justify-center text-secondary-foreground">
+        <span className="relative mr-1.5 inline-flex h-4 w-4 flex-none items-center justify-center text-secondary-text">
           <span className={`transition-opacity duration-100 ${expandable ? "group-hover:opacity-0" : ""}`}>
             {icon}
           </span>
           {/* 展开提示不单独占位:可展开的行 hover 时前面的 icon 就地变成向下箭头。 */}
           {expandable ? (
-            <span className="absolute inset-0 inline-flex items-center justify-center text-muted-foreground opacity-0 transition-opacity duration-100 group-hover:opacity-100">
-              <ChevronDown size={14} />
+            <span className="absolute inset-0 inline-flex items-center justify-center text-secondary-text opacity-0 transition-opacity duration-100 group-hover:opacity-100">
+              <ChevronDown size={16} />
             </span>
           ) : null}
         </span>
-        <span className="flex-none truncate text-sm leading-6 text-secondary-foreground">
+        <span className="flex-none truncate text-sm leading-6 text-secondary-text">
           {title}
         </span>
         {trailing !== undefined ? (
@@ -67,7 +67,7 @@ export function DisclosureRow({ icon, title, trailing, children, onToggle, open 
       </button>
 
       {expandable && expanded ? (
-        <div className="mt-0.5 pl-2 text-sm leading-relaxed text-muted-foreground">
+        <div className="py-1 pl-6 text-sm leading-relaxed text-secondary-text">
           {children}
         </div>
       ) : null}
