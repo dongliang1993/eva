@@ -12,7 +12,7 @@ import type {
  * server 用它产出待落库的消息,web 用它产出待渲染的消息 —— 两边必须逐字节
  * 一致,所以只能有一份实现,放在 shared。
  *
- * 【T2 注意】等 LeadAgent 收敛成 streamText + stopWhen 之后,server 侧可以
+ * 【T2 注意】等 Agent 收敛成 streamText + stopWhen 之后,server 侧可以
  * 直接用 SDK 的 onFinish/toUIMessageStream 拿到原生 UIMessage,届时 server
  * 侧改为直接消费,本 builder 只保留给 web。
  */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
-import { createAgent } from "../packages/harness/src/agents/create-agent.js";
+import { createAgent } from "../packages/harness/src/agents/agent.js";
 import type { AgentStreamEvent } from "../packages/harness/src/agents/types.js";
 
 type FinishEvent = Extract<AgentStreamEvent, { type: "finish" }>;
@@ -32,7 +32,7 @@ const slowStreamModel = (chunkDelayInMs: number): MockLanguageModelV4 =>
     })
   });
 
-describe("LeadAgent stream protocol + abort", () => {
+describe("Agent stream protocol + abort", () => {
   it("completes normally: emits step-start, text deltas, and finish(stop) with full text", async () => {
     const agent = createAgent({ model: slowStreamModel(5) });
     const events: AgentStreamEvent[] = [];

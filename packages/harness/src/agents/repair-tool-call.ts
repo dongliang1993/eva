@@ -95,7 +95,7 @@ const buildRepairPrompt = (input: {
 export interface CreateRepairToolCallOptions {
   /** 修复用模型 —— tool 槽位(结构化杂务的既有槽位,R2 T7)。 */
   readonly repairModel: LanguageModel;
-  /** 修复成功的观测出口(LeadAgent 把 observer 的 emit 闭包传进来)。 */
+  /** 修复成功的观测出口(Agent 把 observer 的 emit 闭包传进来)。 */
   readonly emit?: (event: AgentTelemetryEvent) => void;
 }
 
@@ -117,7 +117,7 @@ export const createRepairToolCall = (
     try {
       options.emit?.(event);
     } catch {
-      // 与 LeadAgent.emit 同一惯例:observer 错误永不许打断 loop。
+      // 与 Agent.emit 同一惯例:observer 错误永不许打断 loop。
     }
   };
 

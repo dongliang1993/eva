@@ -2,7 +2,7 @@ import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
 
-import { createAgent } from "../packages/harness/src/agents/create-agent.js";
+import { createAgent } from "../packages/harness/src/agents/agent.js";
 import type { AgentTelemetryEvent } from "../packages/harness/src/agents/observer.js";
 import type { AgentStreamEvent } from "../packages/harness/src/agents/types.js";
 import { buildTool } from "../packages/harness/src/tools.js";

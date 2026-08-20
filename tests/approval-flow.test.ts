@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 
-import { createAgent } from "../packages/harness/src/agents/create-agent.js";
+import { createAgent } from "../packages/harness/src/agents/agent.js";
 import type { AgentStreamEvent } from "../packages/harness/src/agents/types.js";
 import { APPROVAL_DENIED_PREFIX, withApproval } from "../packages/harness/src/tools/with-approval.js";
 import { buildTool } from "../packages/harness/src/tools.js";

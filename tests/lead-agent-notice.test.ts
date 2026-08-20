@@ -1,7 +1,7 @@
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { describe, expect, it } from "vitest";
 
-import { createAgent } from "../packages/harness/src/agents/create-agent.js";
+import { createAgent } from "../packages/harness/src/agents/agent.js";
 import type { AgentStreamEvent } from "../packages/harness/src/agents/types.js";
 import type { RunInjectedNotice } from "@eva/shared";
 
@@ -53,7 +53,7 @@ const collect = async (
   return out;
 };
 
-describe("LeadAgent 子代理通知注入 (S7 push)", () => {
+describe("Agent 子代理通知注入 (S7 push)", () => {
   it("drainNotices 返回通知 → 再跑一圈,且 yield 出消息边界帧", async () => {
     const { model, calls } = talkingModel();
     const agent = createAgent({ model, tools: [], systemPrompt: "sys" });

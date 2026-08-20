@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../apps/server/src/db/index.js";
 import { ApprovalRepository } from "../apps/server/src/db/repositories/approval-repository.js";
 import { ApprovalGateway } from "../apps/server/src/services/approval-gateway.js";
-import { createAgent } from "../packages/harness/src/agents/create-agent.js";
+import { createAgent } from "../packages/harness/src/agents/agent.js";
 import type { AgentStreamEvent } from "../packages/harness/src/agents/types.js";
 import { buildTool } from "../packages/harness/src/tools.js";
 

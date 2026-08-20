@@ -10,6 +10,7 @@ import type { StreamToolCallSummary, StreamTokenUsage } from "@eva/shared";
 
 import type { AgentTool } from "../tools.js";
 import { toToolSet } from "../tools.js";
+import { withApproval } from "../tools/with-approval.js";
 import { buildAgentSystemPrompt } from "../prompts/prompt-builder.js";
 import {
   ZERO_TOKEN_USAGE,
@@ -44,7 +45,8 @@ import type {
   AgentRunResult,
   AgentStreamEvent,
   AgentToolCallResult,
-  Agent
+  Agent as AgentInterface,
+  CreateAgentOptions
 } from "./types.js";
 
 type FinishReason = "stop" | "aborted" | "error" | "max-steps";
@@ -114,7 +116,7 @@ const finalText = (accumulated: string, isMaxSteps: boolean, maxSteps: number): 
       "The work so far is preserved in this conversation — ask me to continue and I'll pick up where I left off."
     : (accumulated.trim() || "The model returned an empty response.");
 
-export interface LeadAgentOptions {
+interface AgentOptions {
   model: LanguageModel;
   tools?: AgentTool[];
   systemPrompt?: string | SystemModelMessage;
@@ -126,14 +128,20 @@ export interface LeadAgentOptions {
   callSettings?: AgentCallSettings;
 }
 
-export class LeadAgent implements Agent {
+/**
+ * 模块内部实现,不导出 —— createAgent 是造 agent 的唯一入口。
+ * 审批(withApproval)、修复(repairToolCall)等横切全部收敛在那里装配,
+ * 任何人 new 不了这个类 = 闸门没有可绕过的第二条路。
+ * (类名与 types.ts 的 Agent 接口同名,import 时别名 AgentInterface 避让。)
+ */
+class Agent implements AgentInterface {
   private readonly toolsByName: Map<string, AgentTool>;
   private readonly systemMessage: SystemModelMessage;
   private readonly maxSteps: number;
   private readonly observer: AgentObserver | undefined;
   private readonly contextPolicy: ContextWindowPolicy;
 
-  constructor(private readonly options: LeadAgentOptions) {
+  constructor(private readonly options: AgentOptions) {
     this.toolsByName = new Map((options.tools ?? []).map((tool) => [tool.name, tool]));
     this.systemMessage = resolveSystemMessage(options.systemPrompt);
     this.maxSteps = options.maxSteps ?? 5;
@@ -461,3 +469,33 @@ export class LeadAgent implements Agent {
     };
   }
 }
+
+/**
+ * 造 agent 的唯一入口,也是本模块唯一的导出 —— Agent 实现类故意不导出,
+ * 任何人 new 不了它 = 闸门没有可绕过的第二条路。
+ * 横切装配全部收敛在这里:危险工具审批(withApproval)、T18 修复模型……
+ */
+export const createAgent = (options: CreateAgentOptions): AgentInterface => {
+  const { requestApproval, ...rest } = options;
+
+  // 危险工具统一在这一层包装 execute —— 审批逻辑完全收敛到 withApproval。
+  // (子代理 fork-join 半成品已在 T4 移除,S7 会从零实现带独立流式通道与消息落库的版本。)
+  const tools = requestApproval
+    ? (rest.tools ?? []).map((t) => withApproval(t, requestApproval))
+    : rest.tools;
+
+  return new Agent({
+    model: rest.model,
+    ...(tools !== undefined ? { tools } : {}),
+    ...(rest.systemPrompt !== undefined
+      ? { systemPrompt: rest.systemPrompt }
+      : {}),
+    ...(rest.maxSteps !== undefined ? { maxSteps: rest.maxSteps } : {}),
+    ...(rest.observer !== undefined ? { observer: rest.observer } : {}),
+    ...(rest.contextPolicy !== undefined
+      ? { contextPolicy: rest.contextPolicy }
+      : {}),
+    ...(rest.callSettings !== undefined ? { callSettings: rest.callSettings } : {}),
+    ...(rest.repairModel !== undefined ? { repairModel: rest.repairModel } : {})
+  });
+};

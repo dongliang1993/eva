@@ -109,7 +109,7 @@ export interface RunInjectedNotice {
   readonly text: string;
 }
 
-/** harness 产出的事件（coalesce 后从 LeadAgent.stream 流出）。 */
+/** harness 产出的事件（coalesce 后从 Agent.stream 流出）。 */
 export type RunAgentStreamEvent =
   | RunTextDeltaEvent
   | RunReasoningDeltaEvent

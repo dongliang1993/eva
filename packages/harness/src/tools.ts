@@ -1,7 +1,7 @@
 import { tool, type Tool, type ToolSet } from "ai";
 import type { z } from "zod";
 
-// ai 的 Tool 不带 name(name 是 ToolSet 的 key),但 eva 的 LeadAgent 要按 name 查工具
+// ai 的 Tool 不带 name(name 是 ToolSet 的 key),但 eva 的 Agent 要按 name 查工具
 // (toolCall.name → tool)。所以 AgentTool 包一层 name,内部持有 ai Tool。
 export interface AgentTool {
   readonly name: string;

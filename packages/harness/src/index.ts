@@ -1,5 +1,5 @@
 export * from "./agents/coalesce-stream.js";
-export * from "./agents/create-agent.js";
+export * from "./agents/agent.js";
 export * from "./agents/context-strategy.js";
 export * from "./agents/observer.js";
 export * from "./agents/repair-tool-call.js";

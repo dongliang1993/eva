@@ -6,7 +6,7 @@ import {
   type SubagentNotice
 } from "../packages/harness/src/subagents/types.js";
 
-/** 把 AgentTool 的 execute 拉出来单独调(不跑 LeadAgent)。 */
+/** 把 AgentTool 的 execute 拉出来单独调(不跑 Agent)。 */
 const exec = (tool: { tool: { execute?: unknown } }) =>
   (input: Record<string, unknown>): Promise<string> => {
     if (!tool.tool.execute) throw new Error("report tool missing execute");

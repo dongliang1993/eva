@@ -76,7 +76,7 @@ export const shouldContinueForMaxOutput = (
   finishReason === "length" && usedRecoveries < policy.maxOutputRecoveryLimit;
 
 /**
- * reactive compact 在 lead-agent 的 catch 里直接用 —— 不再包一层。
+ * reactive compact 在 agent.ts 的 catch 里直接用 —— 不再包一层。
  * 返回的 messages 由调用方赋回 state.messages。
  */
 export { applyReactiveLoopCompactWithStats };

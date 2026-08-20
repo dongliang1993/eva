@@ -3,7 +3,7 @@ import { InvalidToolInputError } from "ai";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 
-import { createAgent } from "../packages/harness/src/agents/create-agent.js";
+import { createAgent } from "../packages/harness/src/agents/agent.js";
 import type { AgentStreamEvent, AgentTelemetryEvent } from "../packages/harness/src/agents/types.js";
 import { createRepairToolCall, repairToolName } from "../packages/harness/src/agents/repair-tool-call.js";
 import { buildTool, toToolSet } from "../packages/harness/src/tools.js";

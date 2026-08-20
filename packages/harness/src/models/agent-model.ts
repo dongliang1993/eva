@@ -1,7 +1,7 @@
 import type { LanguageModel } from "ai";
 
 // 迁移到 Vercel AI SDK:AgentModel 不再是自定义接口,直接用 LanguageModel。
-// LeadAgent 用 streamText({ model, ... }) 调用,不再 model.invoke/stream。
+// Agent 用 streamText({ model, ... }) 调用,不再 model.invoke/stream。
 // 保留一个工厂类型,封装 provider 选择 + 多模型槽(mainModel/toolModel)。
 export type AgentModel = LanguageModel;
 
