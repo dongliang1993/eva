@@ -3,6 +3,7 @@ import { z } from "zod";
 import { describe, expect, it } from "vitest";
 
 import { createAgent } from "../packages/harness/src/agents/create-agent.js";
+import type { AgentTelemetryEvent } from "../packages/harness/src/agents/observer.js";
 import type { AgentStreamEvent } from "../packages/harness/src/agents/types.js";
 import { buildTool } from "../packages/harness/src/tools.js";
 
@@ -132,7 +133,7 @@ describe("工具循环", () => {
     expect(finishes[0]!.text).toBe("done");
   });
 
-  it("达到 maxSteps → finish(max-steps) + 固定兜底文本", async () => {
+  it("达到 maxSteps → finish(max-steps) + 文案带实际步数与继续路径 + observer 留痕", async () => {
     const calls = { count: 0 };
     // 每一步都产 tool-call,永不输出文本 → 触顶
     const model = new MockLanguageModelV4({
@@ -150,13 +151,24 @@ describe("工具循环", () => {
         };
       }
     });
-    const agent = createAgent({ model, tools: [echoTool()], maxSteps: 2 });
+    const telemetry: AgentTelemetryEvent[] = [];
+    const agent = createAgent({
+      model,
+      tools: [echoTool()],
+      maxSteps: 2,
+      observer: (event) => telemetry.push(event)
+    });
 
     const events = await collect(agent);
     const finishes = events.filter(isFinish);
     expect(finishes).toHaveLength(1);
     expect(finishes[0]!.finishReason).toBe("max-steps");
-    expect(finishes[0]!.text).toBe("The agent reached the maximum tool-calling steps without producing a final answer.");
+    // 文案必须带实际步数(2,不是硬编码 100)与"怎么续"的路径
+    expect(finishes[0]!.text).toContain("(2)");
+    expect(finishes[0]!.text).toContain("continue");
+    // 撞顶是异常,异常必须在事件流留痕(将来排查"agent 为什么停了"不靠问用户)
+    const transitions = telemetry.filter((e) => e.type === "loop_transition");
+    expect(transitions.some((e) => e.reason === "max_steps")).toBe(true);
   });
 
   it("模型只产 tool-call 从不说话 → finish 文本是空响应兜底", async () => {

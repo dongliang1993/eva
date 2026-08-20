@@ -22,8 +22,12 @@ export const MAX_DEPTH = 2;
 /** 前台 subagent(run_in_background=false)等待的硬上限。子代理死循环时主 agent 不能植物人。 */
 export const JOIN_TIMEOUT_MS = 120_000;
 
-/** 子代理单轮步数上限(独立于主 loop 的 25)。 */
-export const SUBAGENT_MAX_STEPS = 20;
+/**
+ * 子代理单轮步数上限(独立于主 loop 的 100)。
+ * 不同步到 100:子代理是无人值守的成本中心,步数闸是它的熔断器不是束缚 ——
+ * 50 步跑不完的窄任务,正确动作是主 agent 拆开再派,不是让子代理硬撑。
+ */
+export const SUBAGENT_MAX_STEPS = 50;
 
 /** 首批三个角色:都是"只给结论"型(上下文隔离最划算)。 */
 const BUILTIN_ROLES: readonly SubagentRole[] = [

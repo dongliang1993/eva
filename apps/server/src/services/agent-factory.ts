@@ -35,6 +35,13 @@ import {
 } from "./providers/model-resolver.js";
 import { loadAppSettings } from "./settings/app-settings.js";
 
+/**
+ * 主 agent 单轮步数上限。对齐 Alma(docs 04 §8.4.2 的 100 步 + 134 步真实会话实证)。
+ * 上下文两道防线(R1 compact 三件套 + T20 tool-overflow 治理)已经在,
+ * 步数闸不该比上下文闸先响 —— 25 对"读一个模块再改三个文件"的日常任务都不够。
+ */
+export const MAIN_AGENT_MAX_STEPS = 100;
+
 export class AgentUnavailableError extends Error {
   constructor(
     message = "Agent is not configured. Configure an enabled provider and default model in Settings."
@@ -244,7 +251,7 @@ export class AgentFactory {
       model: this.getModel(models.chat),
       tools,
       systemPrompt: buildAgentSystemPrompt({ sections }),
-      maxSteps: 25,
+      maxSteps: MAIN_AGENT_MAX_STEPS,
       callSettings: {
         temperature: models.temperature,
         ...defined("maxOutputTokens", models.chat.maxOutputTokens)

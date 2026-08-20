@@ -103,13 +103,15 @@ const resolveSystemMessage = (prompt: string | SystemModelMessage | undefined): 
     : { role: "system", content: (typeof prompt === "string" ? prompt : undefined)?.trim() || buildAgentSystemPrompt() };
 
 /**
- * 终态文本兜底(与重构前逐字一致)。max-steps 给固定兜底;否则累计文本为空时给空响应。
- * 注意:行为变化 —— 老代码按"本步既无文本也无 tool call"判空响应,新代码按"整个 run
- * 累计文本为空"判。后者更准确(用户看到的确实是空回复),commit 正文已说明。
+ * 终态文本兜底。max-steps 分支必须带**实际步数**(100 撞顶与 3 撞顶的诊断含义
+ * 完全不同,且测试传小值时文案说小值,硬编码会让断言变成谎言)与**继续路径**
+ * (主链消息都在,新一轮 run 能接着干 —— 但用户不知道,得告诉它)。
+ * 空响应分支按"整个 run 累计文本为空"判。
  */
-const finalText = (accumulated: string, isMaxSteps: boolean): string =>
+const finalText = (accumulated: string, isMaxSteps: boolean, maxSteps: number): string =>
   isMaxSteps
-    ? "The agent reached the maximum tool-calling steps without producing a final answer."
+    ? `The agent reached the maximum tool-calling steps (${maxSteps}) without producing a final answer. ` +
+      "The work so far is preserved in this conversation — ask me to continue and I'll pick up where I left off."
     : (accumulated.trim() || "The model returned an empty response.");
 
 export interface LeadAgentOptions {
@@ -416,6 +418,11 @@ export class LeadAgent implements Agent {
 
       // ---- 终态:stop / max-steps / 空响应 ----
       const isMaxSteps = stepsUsed >= maxSteps;
+      if (isMaxSteps) {
+        // 撞顶是异常(尤其 100 步撞顶),必须在事件流留痕 —— 否则将来排查
+        // "agent 为什么停了"只能问用户要截图。
+        this.emitTransition(stepsUsed, "max_steps");
+      }
       yield this.finish(
         continuedText + text,
         toolCalls,
@@ -446,7 +453,7 @@ export class LeadAgent implements Agent {
 
     return {
       type: "finish",
-      text: finalText(text, finishReason === "max-steps"),
+      text: finalText(text, finishReason === "max-steps", this.maxSteps),
       toolCalls: toolCalls.map(toStreamToolCallSummary),
       finishReason,
       ...(usage.totalTokens > 0 ? { usage: toStreamTokenUsage(usage) } : {}),
