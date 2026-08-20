@@ -37,14 +37,12 @@ export function ModelSettings() {
   const { data: models = [] } = useModels();
 
   const [toolModel, setToolModel] = useState("");
-  const [embeddingModel, setEmbeddingModel] = useState("");
   const [logLevel, setLogLevel] = useState("info");
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (data) {
       setToolModel(data.models.tool ?? "");
-      setEmbeddingModel(data.models.embedding ?? "");
       setLogLevel(data.security.logLevel ?? "info");
       setDirty(false);
     }
@@ -58,8 +56,8 @@ export function ModelSettings() {
     saveSettings({
       ...data,
       models: {
-        ...(toolModel ? { tool: toolModel } : {}),
-        ...(embeddingModel ? { embedding: embeddingModel } : {})
+        ...data.models,
+        ...(toolModel ? { tool: toolModel } : {})
       },
       security: {
         ...data.security,
@@ -85,17 +83,6 @@ export function ModelSettings() {
           options={modelOptions}
           onChange={(v) => {
             setToolModel(v);
-            setDirty(true);
-          }}
-        />
-
-        <SlotField
-          label="Embedding Model"
-          description="记忆向量检索。不配置时语义检索降级为纯关键词检索(不报错)。"
-          value={embeddingModel}
-          options={modelOptions}
-          onChange={(v) => {
-            setEmbeddingModel(v);
             setDirty(true);
           }}
         />

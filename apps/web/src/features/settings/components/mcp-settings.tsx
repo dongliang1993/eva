@@ -216,11 +216,9 @@ export function McpSettings() {
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto">
       <section>
-        <h2 className="mb-1 text-base font-semibold text-foreground">MCP Servers</h2>
+        <h2 className="mb-1 text-base font-semibold text-foreground">MCP 服务器</h2>
         <p className="mb-4 text-sm text-muted-foreground">
-          接入 MCP server 就能给 agent 加一组工具，不用改代码。也可以把配置写进{" "}
-          <code>~/.eva/mcp.json</code>（重启后同步，标记为 mcp.json 的条目只能在这里启停）。
-          非只读工具默认需要审批。
+          管理模型上下文协议 (MCP) 服务器以扩展 AI 能力
         </p>
 
         {mcp.servers.length === 0 ? (

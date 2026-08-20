@@ -13,6 +13,8 @@ import {
 
 import { apiFetch } from "../../../../shared/api/fetch";
 import { useSettings } from "../../hooks/use-settings";
+import { useModels } from "../../../../shared/hooks/use-models";
+import { ModelSelect } from "../../../../shared/ui/model-select";
 import {
   useMemories,
   useMemoryStats,
@@ -64,15 +66,13 @@ function Toggle({
           role="switch"
           aria-checked={checked}
           disabled={disabled}
-          className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
-            checked ? "bg-primary" : "bg-muted"
-          } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+          className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${checked ? "bg-primary" : "bg-muted"
+            } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
           onClick={() => onChange(!checked)}
         >
           <span
-            className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${
-              checked ? "translate-x-4" : "translate-x-0.5"
-            } mt-0.5`}
+            className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${checked ? "translate-x-4" : "translate-x-0.5"
+              } mt-0.5`}
           />
         </button>
       </div>
@@ -155,9 +155,8 @@ function MetaChip({
 }) {
   return (
     <span
-      className={`inline-flex max-w-full items-center gap-1 rounded-full border border-border/70 bg-background px-2.5 py-1 text-xs text-muted-foreground ${
-        mono ? "font-mono" : ""
-      }`}
+      className={`inline-flex max-w-full items-center gap-1 rounded-full border border-border/70 bg-background px-2.5 py-1 text-xs text-muted-foreground ${mono ? "font-mono" : ""
+        }`}
       title={value}
     >
       <span className="text-muted-foreground/70">{label}</span>
@@ -286,6 +285,41 @@ function MemoryCard({
   );
 }
 
+/** 记忆工具模型(models.embedding)—— 跟着 memory tab 走,选中即保存,
+ *  不走通用页底部的 Save 条。 */
+function EmbeddingModelSection({
+  settings,
+  disabled,
+  onSave
+}: {
+  readonly settings: AppSettings;
+  readonly disabled: boolean;
+  readonly onSave: (models: AppSettings["models"]) => void;
+}) {
+  const { data: models = [] } = useModels();
+  const value = settings.models.embedding ?? null;
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-6">
+      <h2 className="text-base font-semibold text-foreground">记忆工具模型</h2>
+      <p className="mt-1 mb-3 text-sm text-muted-foreground">
+        为记忆操作指定专用工具模型。留空则使用通用工具模型。
+      </p>
+      <ModelSelect
+        models={models}
+        value={value}
+        onChange={(modelId) => onSave({ ...settings.models, embedding: modelId })}
+        placeholder="不配置"
+        triggerClassName="flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors hover:border-ring/60 focus:border-ring disabled:opacity-50"
+        contentClassName="w-[var(--radix-popover-trigger-width)]"
+      />
+      {disabled ? (
+        <p className="mt-2 text-xs text-muted-foreground">Saving...</p>
+      ) : null}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -402,96 +436,113 @@ export function MemorySettings() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto pr-1 space-y-6">
+        {/* ── Section 0: 记忆开关 ── */}
+        <div className="rounded-xl border border-border bg-card p-6">
+          <h2 className="text-base font-semibold text-foreground">记忆功能</h2>
 
-        {/* ── Section 1: Memory Settings ── */}
-        <div className="rounded-xl border border-border bg-card p-6 space-y-5">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Memory Settings</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Control how the agent stores and retrieves long-term memory.
-            </p>
+          <div className="mt-4">
+            <Toggle
+              checked={memorySettings.enabled}
+              onChange={(v) => updateMemorySettings({ enabled: v })}
+              label="启用记忆"
+              description="开启后,agent 可以跨会话记住重要信息,用于提供更个性化的回复。"
+              disabled={isSavingSettings}
+            />
           </div>
-
-          <Toggle
-            checked={memorySettings.enabled}
-            onChange={(v) => updateMemorySettings({ enabled: v })}
-            label="Enable Memory"
-            description="When enabled, the agent can remember important information across conversations and use it to provide more personalized responses."
-            disabled={isSavingSettings}
-          />
-
-          {memorySettings.enabled ? (
-            <>
-              <div className="border-t border-border pt-5 space-y-5">
-                <h3 className="text-sm font-medium text-foreground">Retrieval</h3>
-
-                <Toggle
-                  checked={memorySettings.autoRetrieve}
-                  onChange={(v) => updateMemorySettings({ autoRetrieve: v })}
-                  label="Auto-retrieve Memories"
-                  description="Automatically search and inject relevant memories into context at the start of each conversation turn."
-                  disabled={isSavingSettings}
-                />
-
-                {memorySettings.autoRetrieve ? (
-                  <div className="pl-12 space-y-5">
-                    <Toggle
-                      checked={memorySettings.queryRewriting}
-                      onChange={(v) => updateMemorySettings({ queryRewriting: v })}
-                      label="Query Rewriting"
-                      description="Use the tool model to rewrite your message into a better search query before retrieving memories."
-                      disabled={isSavingSettings}
-                    />
-
-                    <SliderField
-                      label="Max Retrieved Memories"
-                      description="Maximum number of memories injected into the prompt context per turn (1-20)."
-                      value={memorySettings.maxRetrievedMemories}
-                      min={1}
-                      max={20}
-                      onChange={(v) => updateMemorySettings({ maxRetrievedMemories: v })}
-                    />
-
-                    <SliderField
-                      label="Similarity Threshold"
-                      description="Minimum similarity score for retrieved memories. Higher values mean stricter matching."
-                      value={memorySettings.similarityThreshold}
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      formatValue={(v) => `${Math.round(v * 100)}%`}
-                      onChange={(v) => updateMemorySettings({ similarityThreshold: v })}
-                    />
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="border-t border-border pt-5 space-y-5">
-                <h3 className="text-sm font-medium text-foreground">Auto-summarize</h3>
-
-                <Toggle
-                  checked={memorySettings.autoSummarize}
-                  onChange={(v) => updateMemorySettings({ autoSummarize: v })}
-                  label="Auto-summarize Conversations"
-                  description="Automatically extract and store important information from conversations as new memories."
-                  disabled={isSavingSettings}
-                />
-              </div>
-            </>
-          ) : null}
         </div>
 
-        {/* ── Section 2: Stats ── */}
-        {stats ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
-              <StatCard value={stats.count} label="Total Memories" />
-              <StatCard value={stats.autoGenerated} label="Auto-generated" />
-              <StatCard value={stats.manualAdded} label="Manually Added" />
+        {/* ── Section 1: 记忆工具模型 ── */}
+        <EmbeddingModelSection
+          settings={settings}
+          disabled={isSavingSettings}
+          onSave={async (models) => {
+            setActionError(null);
+            try {
+              await saveSettingsAsync({ ...settings, models });
+            } catch (e) {
+              setActionError(toErrorMessage(e));
+            }
+          }}
+        />
+
+
+        {/* ── Section 2: 记忆设置(仅启用记忆时可见) ── */}
+        {memorySettings.enabled ? (
+          <div className="rounded-xl border border-border bg-card p-6 space-y-5">
+            <h2 className="text-base font-semibold text-foreground">记忆设置</h2>
+
+            <div className="border-t border-border pt-5 space-y-5">
+              <h3 className="text-sm font-medium text-foreground">检索</h3>
+
+              <Toggle
+                checked={memorySettings.autoRetrieve}
+                onChange={(v) => updateMemorySettings({ autoRetrieve: v })}
+                label="自动检索记忆"
+                description="每轮对话开始时,自动检索相关记忆并注入上下文。"
+                disabled={isSavingSettings}
+              />
+
+              {memorySettings.autoRetrieve ? (
+                <div className="pl-12 space-y-5">
+                  <Toggle
+                    checked={memorySettings.queryRewriting}
+                    onChange={(v) => updateMemorySettings({ queryRewriting: v })}
+                    label="查询改写"
+                    description="检索前用工具模型把你的消息改写成更适合搜索的查询。"
+                    disabled={isSavingSettings}
+                  />
+
+                  <SliderField
+                    label="最大检索条数"
+                    description="每轮注入 prompt 上下文的记忆条数上限(1-20)。"
+                    value={memorySettings.maxRetrievedMemories}
+                    min={1}
+                    max={20}
+                    onChange={(v) => updateMemorySettings({ maxRetrievedMemories: v })}
+                  />
+
+                  <SliderField
+                    label="相似度阈值"
+                    description="检索记忆的最低相似度,值越高匹配越严格。"
+                    value={memorySettings.similarityThreshold}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    formatValue={(v) => `${Math.round(v * 100)}%`}
+                    onChange={(v) => updateMemorySettings({ similarityThreshold: v })}
+                  />
+                </div>
+              ) : null}
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-border bg-card px-5 py-3">
+
+            <div className="border-t border-border pt-5 space-y-5">
+              <h3 className="text-sm font-medium text-foreground">自动总结</h3>
+
+              <Toggle
+                checked={memorySettings.autoSummarize}
+                onChange={(v) => updateMemorySettings({ autoSummarize: v })}
+                label="自动总结对话"
+                description="自动从对话中提取重要信息并存为新记忆。"
+                disabled={isSavingSettings}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {/* ── Section: 统计 ── */}
+        {stats ? (
+          <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+            <h2 className="text-base font-semibold text-foreground">统计</h2>
+
+            <div className="grid grid-cols-3 gap-4">
+              <StatCard value={stats.count} label="记忆总数" />
+              <StatCard value={stats.autoGenerated} label="自动生成" />
+              <StatCard value={stats.manualAdded} label="手动添加" />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
               <div className="text-sm text-muted-foreground">
-                Embeddings: <span className="font-medium text-foreground">{stats.embedding.ready}</span> ready, <span className="font-medium text-foreground">{stats.embedding.pending}</span> pending
+                向量索引:<span className="font-medium text-foreground">{stats.embedding.ready}</span> 已就绪,<span className="font-medium text-foreground">{stats.embedding.pending}</span> 待处理
               </div>
               {stats.embedding.ready < stats.count ? (
                 <button
@@ -506,44 +557,39 @@ export function MemorySettings() {
                     }
                   }}
                 >
-                  Reindex
+                  重建索引
                 </button>
               ) : null}
             </div>
           </div>
         ) : null}
 
-        {/* ── Section 3: Add Memory ── */}
+        {/* ── Section 3: 手动添加 ── */}
         <div className="rounded-xl border border-border bg-card p-6">
-          <h2 className="text-base font-semibold text-foreground">Add Memory</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Manually add a fact you want the agent to remember across conversations.
-          </p>
+          <h2 className="text-base font-semibold text-foreground">添加记忆</h2>
 
           <textarea
             className="mt-4 min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-ring"
-            placeholder="Enter what you want the AI to remember..."
+            placeholder="输入想让 AI 记住的内容..."
             value={newContent}
             onChange={(e) => setNewContent(e.target.value)}
           />
 
-          <div className="mt-3 flex justify-end">
-            <button
-              type="button"
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={handleCreate}
-              disabled={newContent.trim().length === 0 || isCreating}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                {isCreating ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Plus size={14} />
-                )}
-                Add Memory
-              </span>
-            </button>
-          </div>
+          <button
+            type="button"
+            className="mt-3 w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={handleCreate}
+            disabled={newContent.trim().length === 0 || isCreating}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              {isCreating ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Plus size={14} />
+              )}
+              添加记忆
+            </span>
+          </button>
         </div>
 
         {/* ── Error display ── */}
@@ -557,12 +603,7 @@ export function MemorySettings() {
         <div className="overflow-hidden rounded-xl border border-border bg-card">
           <div className="flex flex-col gap-3 border-b border-border px-5 py-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-base font-semibold text-foreground">Memory List</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {activeSearchQuery
-                  ? `Showing results for "${activeSearchQuery}".`
-                  : `All stored memories.`}
-              </p>
+              <h2 className="text-base font-semibold text-foreground">记忆列表</h2>
             </div>
 
             <div className="flex items-center gap-2">

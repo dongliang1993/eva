@@ -7,8 +7,8 @@ import { ThemeToggle } from "../../shared/ui/theme-toggle";
 
 const NAV_ITEMS = [
   { to: "/settings/models", label: "通用", icon: SettingsIcon },
-  { to: "/settings/providers", label: "Providers", icon: Store },
-  { to: "/settings/memory", label: "Memory", icon: Brain },
+  { to: "/settings/providers", label: "供应商", icon: Store },
+  { to: "/settings/memory", label: "记忆", icon: Brain },
   { to: "/settings/security", label: "Security", icon: ShieldCheck },
   { to: "/settings/mcp", label: "MCP", icon: Plug }
 ];
