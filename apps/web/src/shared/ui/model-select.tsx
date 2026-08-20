@@ -36,11 +36,11 @@ function groupModels(models: readonly ModelSummary[], search: string): ModelGrou
   const filtered = lower === ""
     ? models
     : models.filter(
-        (m) =>
-          m.name.toLowerCase().includes(lower) ||
-          m.provider.toLowerCase().includes(lower) ||
-          m.id.toLowerCase().includes(lower)
-      );
+      (m) =>
+        m.name.toLowerCase().includes(lower) ||
+        m.provider.toLowerCase().includes(lower) ||
+        m.id.toLowerCase().includes(lower)
+    );
 
   const map = new Map<string, { providerName: string; models: ModelSummary[] }>();
   for (const m of filtered) {
@@ -70,8 +70,8 @@ export function ModelSelectContent({ models, selectedId, onSelect }: ModelSelect
 
   return (
     <>
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-        <Search size={14} className="shrink-0 text-muted-foreground" />
+      <div className="flex items-center gap-2 border-b border-border px-2 py-2">
+        <Search size={16} className="shrink-0 text-muted-foreground" />
         <input
           type="text"
           className="flex-1 bg-transparent text-sm text-foreground placeholder-muted-foreground outline-none"
@@ -93,7 +93,7 @@ export function ModelSelectContent({ models, selectedId, onSelect }: ModelSelect
           grouped.map((group) => (
             <div key={group.providerName}>
               <div className="flex items-center gap-2 px-3 py-2">
-                <span className="text-xs font-medium text-muted-foreground">
+                <span className="text-xs font-bold text-muted-foreground">
                   {group.providerName}
                 </span>
               </div>
@@ -102,25 +102,27 @@ export function ModelSelectContent({ models, selectedId, onSelect }: ModelSelect
                 <button
                   key={model.id}
                   type="button"
-                  className={`flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors ${model.id === selectedId
+                  className={`flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors ${model.id === selectedId
                     ? "bg-accent"
                     : "hover:bg-accent/50"
                     }`}
                   onClick={() => onSelect(model.id)}
                 >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-foreground">
-                      {model.name}
-                    </div>
-                    {formatContextWindow(model.capabilities?.contextWindow) ? (
-                      <div className="mt-0.5 text-xs text-muted-foreground">
-                        {formatContextWindow(model.capabilities?.contextWindow)}
-                      </div>
-                    ) : null}
-                  </div>
-                  <span className="ml-2 shrink-0 font-mono text-xs text-muted-foreground/50">
-                    {model.id}
+                  {/* 名称保优先:不截断、可收缩,挤的是右侧 modelId */}
+                  <span className="min-w-0 shrink whitespace-nowrap text-sm font-medium text-foreground">
+                    {model.name}
                   </span>
+                  {formatContextWindow(model.capabilities?.contextWindow) ? (
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {formatContextWindow(model.capabilities?.contextWindow)}
+                    </span>
+                  ) : null}
+                  {/* id 里的 "providerId:" 前缀和分组标题重复,剥掉
+                  <span className="min-w-0 flex-1 truncate text-right font-mono text-xs text-muted-foreground/50">
+                    {model.id.startsWith(`${model.providerId}:`)
+                      ? model.id.slice(model.providerId.length + 1)
+                      : model.id}
+                  </span> */}
                 </button>
               ))}
             </div>
@@ -163,8 +165,8 @@ export function ModelSelect({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button type="button" className={triggerClassName}>
-          <span className="truncate">{selected ? selected.name : placeholder}</span>
-          <ChevronDown size={12} className="mt-[2px] shrink-0" />
+          <span className="truncate text-foreground">{selected ? selected.name : placeholder}</span>
+          <ChevronDown size={14} className="mt-[2px] shrink-0" />
         </button>
       </PopoverTrigger>
 

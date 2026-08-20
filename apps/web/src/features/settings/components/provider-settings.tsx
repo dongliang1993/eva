@@ -236,8 +236,8 @@ function ProviderDetail({
     : preset.apiKeyHint;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1">
         <div className="mb-1 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold text-foreground">{provider.name}</h2>
@@ -374,8 +374,8 @@ function ProviderDetail({
           </div>
 
           {enabledFirst.length > 0 ? (
-            <div className="max-h-[40vh] overflow-clip rounded-xl border border-border">
-              <div className="max-h-[40vh] divide-y divide-border overflow-y-auto">
+            <div className="overflow-clip rounded-xl border border-border">
+              <div className="divide-y divide-border">
                 {enabledFirst.map((model) => {
                   const contextWindow = formatContextWindow(model.capabilities?.contextWindow);
 
@@ -416,7 +416,7 @@ function ProviderDetail({
         </div>
       </div>
 
-      <div className="sticky bottom-0 mt-8 flex items-center justify-between border-t border-border bg-background py-4">
+      <div className="mt-4 flex shrink-0 items-center justify-between border-t border-border bg-background pt-4">
         <span className="text-xs text-muted-foreground">
           {saveSuccess && !dirty ? "All changes saved" : dirty ? "Unsaved changes" : ""}
         </span>
@@ -477,8 +477,8 @@ export function ProviderSettings() {
   }
 
   return (
-    <div className="flex flex-1 gap-6 h-full">
-      <div className="w-54 shrink-0 space-y-1.5 overflow-y-auto">
+    <div className="flex flex-1 gap-6 h-full min-h-0">
+      <div className="w-54 shrink-0 space-y-1.5 overflow-y-auto pr-1">
         {providers.map((provider) => {
           const preset = getProviderPreset(provider.id, provider.name);
 
@@ -509,7 +509,7 @@ export function ProviderSettings() {
         })}
       </div>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 min-h-0 flex-1">
         {selectedProvider ? (
           <ProviderDetail
             key={selectedProvider.id}
