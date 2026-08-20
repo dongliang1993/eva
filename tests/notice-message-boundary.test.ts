@@ -13,8 +13,10 @@ import {
 } from "../apps/server/src/db/index.js";
 import { ApprovalRepository } from "../apps/server/src/db/repositories/approval-repository.js";
 import { DrizzleMessageRepository } from "../apps/server/src/db/repositories/message-repository.js";
+import { DrizzleRunRepository } from "../apps/server/src/db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../apps/server/src/db/repositories/session-repository.js";
 import { ApprovalGateway } from "../apps/server/src/services/approval-gateway.js";
+import { RunLedger } from "../apps/server/src/services/runs/run-ledger.js";
 import { RunRegistry } from "../apps/server/src/services/run-registry.js";
 import { SessionService } from "../apps/server/src/services/session.js";
 import { registerRunRoutes } from "../apps/server/src/routes/runs.js";
@@ -135,6 +137,7 @@ const startApp = async (agentOverride?: Agent): Promise<void> => {
       new DrizzleMessageRepository(db)
     ),
     approvals: new ApprovalGateway(new ApprovalRepository(db)),
+    runLedger: new RunLedger(new DrizzleRunRepository(db)),
     runRegistry: new RunRegistry(),
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });
@@ -226,7 +229,7 @@ const foregroundForkingModel = (): MockLanguageModelV4 => {
 
 describe("子代理通知的消息边界 (S7 push 落库)", () => {
   it("主链变成 user → assistant(派发) → user(通知) → assistant(回应)", async () => {
-    const events = await streamRun({ text: "并行研究一下" });
+    const events = await streamRun({ text: "并行研究一下", modelId: "openai:test" });
     const sessionId = String(events.find((e) => e.type === "run_start")?.sessionId);
 
     const chain = activeChain(sessionId);
@@ -244,7 +247,7 @@ describe("子代理通知的消息边界 (S7 push 落库)", () => {
   });
 
   it("通知条带任务名与报告内容(刷新后仍在上下文里)", async () => {
-    const events = await streamRun({ text: "并行研究一下" });
+    const events = await streamRun({ text: "并行研究一下", modelId: "openai:test" });
     const sessionId = String(events.find((e) => e.type === "run_start")?.sessionId);
 
     const notice = activeChain(sessionId).find(
@@ -259,7 +262,7 @@ describe("子代理通知的消息边界 (S7 push 落库)", () => {
   });
 
   it("续跑那条 assistant 不重复派发那条的正文(builder 必须换新)", async () => {
-    const events = await streamRun({ text: "并行研究一下" });
+    const events = await streamRun({ text: "并行研究一下", modelId: "openai:test" });
     const sessionId = String(events.find((e) => e.type === "run_start")?.sessionId);
 
     const assistants = activeChain(sessionId).filter((m) => m.role === "assistant");
@@ -275,7 +278,7 @@ describe("子代理通知的消息边界 (S7 push 落库)", () => {
   });
 
   it("子代理进程消息仍被隔离在主链之外(parentToolCallId 红线)", async () => {
-    const events = await streamRun({ text: "并行研究一下" });
+    const events = await streamRun({ text: "并行研究一下", modelId: "openai:test" });
     const sessionId = String(events.find((e) => e.type === "run_start")?.sessionId);
 
     const all = new DrizzleMessageRepository(db).findBySessionId(sessionId, { limit: 100 });
@@ -287,7 +290,7 @@ describe("子代理通知的消息边界 (S7 push 落库)", () => {
   });
 
   it("SSE 里有 notice-injected 与 subagent_report 帧", async () => {
-    const events = await streamRun({ text: "并行研究一下" });
+    const events = await streamRun({ text: "并行研究一下", modelId: "openai:test" });
 
     expect(events.some((e) => e.type === "subagent_report")).toBe(true);
     expect(events.some((e) => e.type === "notice-injected")).toBe(true);
@@ -296,7 +299,7 @@ describe("子代理通知的消息边界 (S7 push 落库)", () => {
   });
 
   it("runs 台账的 assistant_message_id 指向最后一条 assistant", async () => {
-    const events = await streamRun({ text: "并行研究一下" });
+    const events = await streamRun({ text: "并行研究一下", modelId: "openai:test" });
     const sessionId = String(events.find((e) => e.type === "run_start")?.sessionId);
 
     const assistants = activeChain(sessionId).filter((m) => m.role === "assistant");
@@ -314,7 +317,7 @@ describe("子代理通知的消息边界 (S7 push 落库)", () => {
     const mainAgent = createAgent({ model: foregroundForkingModel(), tools: [], maxSteps: 6 });
     await startApp(mainAgent);
 
-    const events = await streamRun({ text: "前台派一个" });
+    const events = await streamRun({ text: "前台派一个", modelId: "openai:test" });
     const sessionId = String(events.find((e) => e.type === "run_start")?.sessionId);
 
     expect(events.some((e) => e.type === "notice-injected")).toBe(false);

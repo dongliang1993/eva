@@ -13,8 +13,10 @@ import {
 } from "../apps/server/src/db/index.js";
 import { ApprovalRepository } from "../apps/server/src/db/repositories/approval-repository.js";
 import { DrizzleMessageRepository } from "../apps/server/src/db/repositories/message-repository.js";
+import { DrizzleRunRepository } from "../apps/server/src/db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../apps/server/src/db/repositories/session-repository.js";
 import { ApprovalGateway } from "../apps/server/src/services/approval-gateway.js";
+import { RunLedger } from "../apps/server/src/services/runs/run-ledger.js";
 import { RunRegistry } from "../apps/server/src/services/run-registry.js";
 import { SessionService } from "../apps/server/src/services/session.js";
 import { registerRunRoutes } from "../apps/server/src/routes/runs.js";
@@ -65,6 +67,7 @@ const startApp = async (): Promise<void> => {
       new DrizzleMessageRepository(db)
     ),
     approvals: new ApprovalGateway(new ApprovalRepository(db)),
+    runLedger: new RunLedger(new DrizzleRunRepository(db)),
     runRegistry: new RunRegistry(),
     mcp: { ensureConnected: async () => {}, listTools: () => [] },
     workspaces: {} as never
@@ -121,7 +124,7 @@ const service = (): SessionService => new SessionService(sessionRepo(), messageR
 
 /** 发一条消息,返回新会话 id。此时该会话应为 [user(A), assistant(v1)],activeLeaf = v1。 */
 const startSession = async (): Promise<string> => {
-  const { events, status } = await streamRun({ text: "hello" });
+  const { events, status } = await streamRun({ text: "hello", modelId: "openai:test" });
   expect(status).toBe(200);
   const start = events.find((e) => e.type === "run_start")!;
   return start.sessionId as string;
@@ -220,7 +223,7 @@ describe("T12 重生成 + 版本切换(API 级)", () => {
     await app.inject({ method: "POST", url: `/api/v1/messages/${v1.id}/switch-version` });
 
     // 再发新消息 —— 必须接在 v1 后面,而不是时间上最晚的 v2。
-    const { status } = await streamRun({ sessionId, text: "continuation" });
+    const { status } = await streamRun({ sessionId, text: "continuation", modelId: "openai:test" });
     expect(status).toBe(200);
 
     const userMessages = users(sessionId);
@@ -228,6 +231,23 @@ describe("T12 重生成 + 版本切换(API 级)", () => {
     expect(continuation.parentId).toBe(v1.id);
     expect(continuation.parentId).not.toBe(v2.id);
     // 时间序里 v2 在 v1 之后,parent 若取"时间上最后一条"会错误指向 v2 —— 这里必须取 tree 里的 v1。
+  });
+
+  it("send 不带 modelId → 400(模型是 per-run 必选,没有全局默认兜底)", async () => {
+    const { status } = await streamRun({ text: "hello" });
+    expect(status).toBe(400);
+  });
+
+  it("retry 不带 modelId → 沿用会话记录的模型(上一轮选的那个)", async () => {
+    const sessionId = await startSession();
+    const v1 = assistants(sessionId)[0]!;
+
+    // 会话记录里存着 send 那轮选的模型。
+    expect(sessionRepo().findById(sessionId)?.model).toBe("openai:test");
+
+    const { status } = await streamRun({ sessionId, retryMessageId: v1.id });
+    expect(status).toBe(200);
+    expect(assistants(sessionId)).toHaveLength(2);
   });
 
   it("非法 retry:非 assistant / 跨会话都无法重生成 → 400", async () => {

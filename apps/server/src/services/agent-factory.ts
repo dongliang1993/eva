@@ -7,7 +7,7 @@ import {
   buildBaseTools,
   createConfiguredAgent,
   toAgentModel,
-  type ResolvedWorkspaceContext
+  type WorkspaceContext
 } from "../agent.js";
 import type { AppInfrastructure } from "../types/common.js";
 import {
@@ -19,7 +19,7 @@ import { loadAppSettings } from "./settings/app-settings.js";
 export interface AgentResolveOptions {
   readonly requestedModelId?: string | undefined;
   readonly requestApproval?: RequestApproval | undefined;
-  readonly workspace?: ResolvedWorkspaceContext | undefined;
+  readonly workspace?: WorkspaceContext | undefined;
   /** 进程级外部工具（MCP）；由路由从 registry 取好传进来。 */
   readonly extraTools?: readonly AgentTool[] | undefined;
   /** per-run 读好的人类可读记忆 section（L1 MEMORY.md + 近几天日记）。 */
@@ -55,7 +55,7 @@ const modelCacheKey = (b: ModelBinding): string =>
 export class AgentFactory {
   private readonly models = new Map<string, LanguageModel>();
 
-  constructor(private readonly infra: AppInfrastructure) {}
+  constructor(private readonly infra: AppInfrastructure) { }
 
   /** provider / settings 变更后失效缓存(apiKey、baseURL 可能已改)。 */
   invalidate(): void {
@@ -144,11 +144,21 @@ export class AgentFactory {
    */
   buildSubagent(options: {
     readonly role: import("@eva/harness").SubagentRole;
-    readonly workspace?: ResolvedWorkspaceContext | undefined;
+    readonly workspace?: WorkspaceContext | undefined;
     readonly extraTools?: readonly AgentTool[] | undefined;
     readonly temperature?: number | undefined;
+    /**
+     * 本轮主链选定的 chat 模型("providerId:modelId")。
+     * 子代理的 tool 槽位回落 chat 时需要它 —— 没有全局 chat 默认兜底了,
+     * 所以子代理必须沿用本轮主链的模型,不能自己另开一条解析路径。
+     */
+    readonly requestedModelId?: string | undefined;
   }): Agent {
-    const models = this.resolveModels();
+    const models = this.resolveModels({
+      ...(options.requestedModelId !== undefined
+        ? { requestedModelId: options.requestedModelId }
+        : {})
+    });
     const baseTools = buildBaseTools(
       {
         skills: [...this.infra.skills],

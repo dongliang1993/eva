@@ -36,7 +36,7 @@ export class AgentUnavailableError extends Error {
 }
 
 /** 一次 run 的工作区上下文 —— 路径 + 已读好的项目文档 section。 */
-export interface ResolvedWorkspaceContext {
+export interface WorkspaceContext {
   readonly id: string;
   readonly root: string;
   readonly docsSection?: PromptSection | undefined;
@@ -51,7 +51,7 @@ export interface ConfiguredAgentOptions {
   /** 进程级注册的外部工具（当前来源：MCP registry）。 */
   readonly extraTools?: readonly AgentTool[] | undefined;
   /** 本次 run 的工作区;缺省则不注入 fs 工具(纯聊天会话)。 */
-  readonly workspace?: ResolvedWorkspaceContext | undefined;
+  readonly workspace?: WorkspaceContext | undefined;
   /**
    * 本次 run 的人类可读记忆(L1 MEMORY.md + 近几天日记),与工作区无关(~/.eva 是全局的)。
    * 单独一条通道,不塞进 workspace —— 没绑工作区的纯聊天会话也要注入(T16 §2.2)。
@@ -99,7 +99,7 @@ export const toAgentModel = (binding: ModelBinding): LanguageModel => {
 export const buildBaseTools = (
   options: {
     readonly skills: readonly Skill[];
-    readonly workspace?: ResolvedWorkspaceContext | undefined;
+    readonly workspace?: WorkspaceContext | undefined;
     readonly extraTools?: readonly AgentTool[] | undefined;
   },
   getToolModel: (binding: ModelBinding) => LanguageModel,

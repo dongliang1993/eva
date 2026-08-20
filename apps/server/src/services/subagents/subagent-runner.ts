@@ -16,8 +16,8 @@ import type {
 
 import type { AppDatabase } from "../../db/index.js";
 import { BackgroundTaskRepository } from "../../db/repositories/background-task-repository.js";
-import type { IMessageRepository } from "../../db/repositories/types.js";
-import type { ResolvedWorkspaceContext } from "../../agent.js";
+import { DrizzleMessageRepository } from "../../db/repositories/message-repository.js";
+import type { WorkspaceContext } from "../../agent.js";
 import type { AgentFactory } from "../agent-factory.js";
 import { SqliteTaskStore } from "./sqlite-task-store.js";
 import { SubagentRecorder } from "./subagent-recorder.js";
@@ -28,7 +28,7 @@ export interface SubagentRunnerOptions {
   readonly runId?: string | undefined;
   readonly model?: string | undefined;
   /** 本轮工作区(角色白名单照它过滤真实工具)。 */
-  readonly workspace?: ResolvedWorkspaceContext | undefined;
+  readonly workspace?: WorkspaceContext | undefined;
   /** 进程级外部工具(MCP) —— 子代理按角色从此收窄。 */
   readonly extraTools?: readonly AgentTool[] | undefined;
   /** 后台子代理共享 run 的 AbortSignal —— 用户点停止,子代理一起停(T15 §2.7)。 */
@@ -51,12 +51,13 @@ export interface SubagentRunnerOptions {
 export class SubagentRunner {
   private readonly taskStore: SqliteTaskStore;
   private readonly crew = new CrewRegistry();
+  private readonly messages: DrizzleMessageRepository;
 
   constructor(
     private readonly agents: AgentFactory,
-    private readonly messages: IMessageRepository,
     private readonly options: SubagentRunnerOptions
   ) {
+    this.messages = new DrizzleMessageRepository(options.db);
     this.taskStore = new SqliteTaskStore(
       options.db,
       new BackgroundTaskRepository(options.db)
@@ -163,6 +164,11 @@ export class SubagentRunner {
       ],
       ...(this.options.workspace !== undefined
         ? { workspace: this.options.workspace }
+        : {}),
+      // 子代理沿用本轮主链选定的 chat 模型 —— 没有全局 chat 默认兜底,
+      // tool 槽位回落 chat 时必须用主链同一个模型,不能另起解析。
+      ...(this.options.model !== undefined
+        ? { requestedModelId: this.options.model }
         : {})
     });
 

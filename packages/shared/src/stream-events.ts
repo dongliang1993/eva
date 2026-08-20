@@ -4,7 +4,8 @@
  * 设计依据 docs/plans/s1/s1-wrapup-technical-design.md §3：
  * - AI SDK 域：事件名与 ai@7 UIMessageChunk 类型逐字对齐（kebab-case），直转 SDK chunk，不造协议；
  * - Eva 自有域：snake_case（run_start / end），仅服务端产生；
- * - 所有帧统一 `{ seq, type, ...payload }`，seq 由路由层补（harness 事件不自带 seq）。
+ * - 所有帧统一 `{ seq, type, ...payload }`，seq 由 server SSE transport 补
+ *   （harness 事件不自带 seq）。
  */
 
 export type StreamFinishReason = "stop" | "aborted" | "error" | "max-steps";
@@ -91,7 +92,8 @@ export interface RunErrorEvent {
  * 子代理通知已注入本轮对话（S7 push）。
  *
  * 它同时是**消息边界**信号：注入意味着「上一条 assistant 收口 → 通知作为一条
- * 主链消息 → 新起一条 assistant 续跑」，route 靠这一帧切分落库（见 routes/runs.ts）。
+ * 主链消息 → 新起一条 assistant 续跑」，server recorder 靠这一帧切分落库
+ * （见 services/runs/assistant-message-recorder.ts）。
  */
 export interface RunNoticeInjectedEvent {
   type: "notice-injected";

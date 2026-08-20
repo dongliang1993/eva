@@ -74,8 +74,8 @@ Eva 是一个**本地优先的 work agent 桌面应用**：Electron 壳 fork 一
 ```
 apps/web          表现层：聊天 UI、流式渲染、设置、审批卡片、槽位容器
    │  HTTP / SSE
-apps/server       服务层：路由 → services → repositories；审批网关、compact、
-   │              provider runtime、memory runtime、workspace
+apps/server       接入/服务层：routes → transports / services → repositories；
+   │              SSE、审批网关、compact、provider runtime、memory runtime、workspace
    │
 packages/harness  内核层：agent loop（streamText + stopWhen）、模型适配、
    │              工具集、tool-overflow、子代理 fork-join、skill 加载、
@@ -489,5 +489,4 @@ POST /api/v1/chat/completions                 OpenAI 兼容端点（供外部工
 | 多 agent | fork-join + 编排 skill 化 | 子代理注册表 + 终态收割 | **fork-join + 终态收割 + 编排 skill 化** |
 
 【全文完】
-
 

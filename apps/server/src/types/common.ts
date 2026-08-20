@@ -12,6 +12,7 @@ import type { AgentFactory } from "../services/agent-factory.js";
 import type { McpRegistry } from "../services/mcp/mcp-registry.js";
 import type { ApprovalGateway } from "../services/approval-gateway.js";
 import type { RunRegistry } from "../services/run-registry.js";
+import type { RunLedger } from "../services/runs/run-ledger.js";
 import type { SessionService } from "../services/session.js";
 import type { WorkspaceStore } from "../services/workspaces/workspace-store.js";
 
@@ -29,6 +30,7 @@ export interface AppServices {
   agents: AgentFactory;
   session: SessionService;
   approvals: ApprovalGateway;
+  runLedger: RunLedger;
   runRegistry: RunRegistry;
   workspaces: WorkspaceStore;
   mcp: McpRegistry;

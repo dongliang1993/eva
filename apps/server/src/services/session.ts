@@ -74,6 +74,11 @@ export class SessionService {
     };
   }
 
+  /** 回滚一次尚未真正启动 run 的新会话。 */
+  deleteSession(sessionId: string): boolean {
+    return this.sessions.deleteById(sessionId);
+  }
+
   /**
    * 模型可见历史。只包含激活链上的消息(切版本后旧分支不可见)。
    * @param leafId 从哪条回溯;缺省用 session.activeLeafId;retry 模式传

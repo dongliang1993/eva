@@ -60,7 +60,7 @@ const toRecord = (row: typeof runs.$inferSelect): RunRecord => ({
 });
 
 export class DrizzleRunRepository {
-  constructor(private readonly db: AppDatabase) {}
+  constructor(private readonly db: AppDatabase) { }
 
   start(input: StartRunInput): void {
     this.db

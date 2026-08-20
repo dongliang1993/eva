@@ -16,6 +16,7 @@ import { ApprovalRepository } from "../apps/server/src/db/repositories/approval-
 import { DrizzleMessageRepository } from "../apps/server/src/db/repositories/message-repository.js";
 import { DrizzleSessionRepository } from "../apps/server/src/db/repositories/session-repository.js";
 import { ApprovalGateway } from "../apps/server/src/services/approval-gateway.js";
+import { RunLedger } from "../apps/server/src/services/runs/run-ledger.js";
 import { RunRegistry } from "../apps/server/src/services/run-registry.js";
 import { SessionService } from "../apps/server/src/services/session.js";
 import { registerRunRoutes } from "../apps/server/src/routes/runs.js";
@@ -77,6 +78,7 @@ const startApp = async (agent: Agent): Promise<void> => {
       new DrizzleMessageRepository(db)
     ),
     approvals: new ApprovalGateway(new ApprovalRepository(db)),
+    runLedger: new RunLedger(new DrizzleRunRepository(db)),
     runRegistry: new RunRegistry(),
     // 本用例不测 MCP:给个空 registry 桩,证明"没配 MCP 时 run 照常跑"
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
@@ -133,7 +135,7 @@ const runsRepo = (): DrizzleRunRepository => new DrizzleRunRepository(db);
 
 describe("run 台账", () => {
   it("正常完成 → runs 一行 completed,带 assistant_message_id", async () => {
-    const { events } = await streamRun({ text: "hi" });
+    const { events } = await streamRun({ text: "hi", modelId: "openai:test" });
 
     const end = events.find((e) => e.type === "end");
     expect(end).toBeDefined();
@@ -173,7 +175,7 @@ describe("run 台账", () => {
     });
     await startApp(errorAgent);
 
-    const { status } = await streamRun({ text: "hi" });
+    const { status } = await streamRun({ text: "hi", modelId: "openai:test" });
 
     // 错误在写头之后才发生,所以是 200 + error 帧
     expect(status).toBe(200);
@@ -227,14 +229,14 @@ describe("契约", () => {
   });
 
   it("未知 sessionId → 当成新会话,run_start 帧带回新 id", async () => {
-    const { events } = await streamRun({ text: "hi", sessionId: "does-not-exist" });
+    const { events } = await streamRun({ text: "hi", modelId: "openai:test", sessionId: "does-not-exist" });
     const runStart = events.find((e) => e.type === "run_start") as { sessionId: string } | undefined;
     expect(runStart).toBeDefined();
     expect(runStart!.sessionId).not.toBe("does-not-exist");
   });
 
   it("seq 在所有帧中严格单调递增", async () => {
-    const { events } = await streamRun({ text: "hi" });
+    const { events } = await streamRun({ text: "hi", modelId: "openai:test" });
     const seqs = events.map((e) => e.seq as number);
     for (let i = 1; i < seqs.length; i++) {
       expect(seqs[i]).toBeGreaterThan(seqs[i - 1]!);
