@@ -9,6 +9,7 @@ import {
 import type {
   AgentTool,
   ForkRunner,
+  RequestApproval,
   SubagentEventSink,
   SubagentNotice,
   SubagentRole
@@ -34,6 +35,11 @@ export interface SubagentRunnerOptions {
   readonly extraTools?: readonly AgentTool[] | undefined;
   /** 后台子代理共享 run 的 AbortSignal —— 用户点停止,子代理一起停(T15 §2.7)。 */
   readonly abortSignal?: AbortSignal | undefined;
+  /**
+   * 子代理的审批闸(T17):进闸门、自动通过、落台账。
+   * 路由从主 agent 的 requestApproval 旁派生 —— 不传则危险工具在子代理里裸奔。
+   */
+  readonly requestApproval?: RequestApproval | undefined;
   readonly onSubagentEvent?: SubagentEventSink | undefined;
   /**
    * 子代理回报/收尾时的通知出口(S7 push)。route 把它接到 ReportGateway,
@@ -165,6 +171,9 @@ export class SubagentRunner {
       ],
       ...(this.options.workspace !== undefined
         ? { workspace: this.options.workspace }
+        : {}),
+      ...(this.options.requestApproval !== undefined
+        ? { requestApproval: this.options.requestApproval }
         : {}),
       // 子代理沿用本轮主链选定的 chat 模型 —— 没有全局 chat 默认兜底,
       // tool 槽位回落 chat 时必须用主链同一个模型,不能另起解析。

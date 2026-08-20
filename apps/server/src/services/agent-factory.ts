@@ -286,6 +286,12 @@ export class AgentFactory {
     readonly extraTools?: readonly AgentTool[] | undefined;
     readonly temperature?: number | undefined;
     /**
+     * 子代理的审批闸(T17)。注入后危险工具照包 withApproval ——
+     * 只是闭包第一格是"自动通过并落台账"(docs 04 §8.6.1 分支 2)。
+     * 不传 = 危险工具裸奔,那是 R4 的遗留状态,不是设计。
+     */
+    readonly requestApproval?: RequestApproval | undefined;
+    /**
      * 本轮主链选定的 chat 模型("providerId:modelId")。必填 ——
      * 子代理的 tool 槽位回落 chat 时需要它,没有全局 chat 默认兜底,
      * 所以子代理必须沿用本轮主链的模型,不能自己另开一条解析路径。
@@ -324,6 +330,7 @@ export class AgentFactory {
       callSettings: {
         ...defined("temperature", options.temperature)
       },
+      ...defined("requestApproval", options.requestApproval),
       ...defined("observer", this.infra.observer)
     });
   }

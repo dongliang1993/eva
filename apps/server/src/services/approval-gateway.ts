@@ -48,6 +48,19 @@ export class ApprovalGateway {
 
   constructor(private readonly repo: ApprovalRepository) {}
 
+  /**
+   * 子代理的自动通过分支(docs 04 §8.6.1 分支 2)。
+   *
+   * 与 ask() 的唯一区别:不等用户 —— 落库即 granted,返回 true。
+   * 仍然落库:审批表是"危险工具做过什么"的唯一台账,自动通过也必须可追溯。
+   * 不进 pending Map:没有待决态,cancelByRun 自然碰不到它。
+   */
+  autoApprove(callId: string, input: ApprovalAskInput): boolean {
+    this.repo.create({ id: callId, ...input });
+    this.repo.decide(callId, "granted");
+    return true;
+  }
+
   /** 发起一次审批请求,返回解析为「是否允许」的 Promise。 */
   ask(callId: string, input: ApprovalAskInput): Promise<boolean> {
     this.repo.create({ id: callId, ...input });

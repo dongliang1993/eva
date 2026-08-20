@@ -68,6 +68,17 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       return approved;
     };
 
+    // 子代理分支(T17,docs 04 §8.6.1):后台子代理没人能点弹窗 —— 进闸门、
+    // 自动通过、落台账。不发 approval_request:后台的 SSE 帧混进主流会让前端
+    // 冒出 runId 相同但 toolCallId 陌生的审批卡片。
+    const subagentRequestApproval: RequestApproval = async ({ toolCallId, toolName, args }) =>
+      app.services.approvals.autoApprove(toolCallId, {
+        runId,
+        sessionId,
+        tool: toolName,
+        args
+      });
+
     try {
       const body = runRequestSchema.parse(request.body ?? {});
 
@@ -122,6 +133,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
           ...(runInput.workspace !== undefined ? { workspace: runInput.workspace } : {}),
           extraTools: app.services.mcp.listTools(),
           abortSignal: controller.signal,
+          requestApproval: subagentRequestApproval,
           onSubagentEvent: (event) => {
             emit({ type: "subagent_update", ...event });
           },
