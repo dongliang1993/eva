@@ -33,15 +33,25 @@ describe("readSessionUsage", () => {
     sessionRepo.create({ id: "s-u" });
 
     // started_at 是秒粒度,手动指定逐渐递增的 ISO 时间保证 lastRun 顺序确定。
+    // T21 起聚合读走 usage_records:旧列 runs.usage 与 usage_records 双写(模拟 settle)。
     const sqlite = (db as unknown as { $client: import("better-sqlite3").Database }).$client;
-    const insert = sqlite.prepare(
+    const insertRun = sqlite.prepare(
       `INSERT INTO runs (id, session_id, status, model, usage, started_at, ended_at)
        VALUES (?, ?, ?, 'openai:test', ?, ?, ?)`
     );
+    const insertUsage = sqlite.prepare(
+      `INSERT INTO usage_records
+         (id, run_id, session_id, model, date, input_tokens, output_tokens, total_tokens)
+       VALUES (?, ?, 's-u', 'openai:test', '2026-08-20', ?, ?, ?)`
+    );
     const iso = (msAgo: number): string => new Date(Date.now() - msAgo).toISOString();
-    insert.run("run-1", "s-u", "completed", JSON.stringify(runUsageA), iso(3000), iso(2000));
-    insert.run("run-2", "s-u", "completed", JSON.stringify(runUsageB), iso(2000), iso(1000));
-    insert.run("run-3", "s-u", "running", null, iso(1000), null);
+    const insertSettled = (id: string, usage: typeof runUsageA, start: string, end: string) => {
+      insertRun.run(id, "s-u", "completed", JSON.stringify(usage), start, end);
+      insertUsage.run(randomUUID(), id, usage.inputTokens, usage.outputTokens, usage.totalTokens);
+    };
+    insertSettled("run-1", runUsageA, iso(3000), iso(2000));
+    insertSettled("run-2", runUsageB, iso(2000), iso(1000));
+    insertRun.run("run-3", "s-u", "running", null, iso(1000), null);
 
     // 造一条消息让 contextTokens 非零。
     new DrizzleMessageRepository(db).create({

@@ -1,8 +1,11 @@
-import { and, desc, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+
+import { and, count, desc, eq } from "drizzle-orm";
 import type { StreamFinishReason, StreamTokenUsage } from "@eva/shared";
 
 import type { AppDatabase } from "../index.js";
 import { runs, type RunStatus } from "../schema.js";
+import { UsageRecordRepository } from "./usage-record-repository.js";
 
 export interface RunRecord {
   readonly id: string;
@@ -75,20 +78,49 @@ export class DrizzleRunRepository {
   }
 
   settle(runId: string, input: SettleRunInput): void {
-    this.db
-      .update(runs)
-      .set({
-        status: input.status,
-        endedAt: new Date().toISOString(),
-        ...(input.finishReason !== undefined ? { finishReason: input.finishReason } : {}),
-        ...(input.assistantMessageId !== undefined
-          ? { assistantMessageId: input.assistantMessageId }
-          : {}),
-        ...(input.usage !== undefined ? { usage: JSON.stringify(input.usage) } : {}),
-        ...(input.error !== undefined ? { error: input.error } : {})
-      })
-      .where(eq(runs.id, runId))
-      .run();
+    const now = new Date().toISOString();
+    // 双写事务:runs.usage 是既有契约(双写过渡,删列留给下下轮),
+    // usage_records 是聚合读路径 —— 两处要么都写要么都不写。
+    this.db.transaction((tx) => {
+      tx.update(runs)
+        .set({
+          status: input.status,
+          endedAt: now,
+          ...(input.finishReason !== undefined ? { finishReason: input.finishReason } : {}),
+          ...(input.assistantMessageId !== undefined
+            ? { assistantMessageId: input.assistantMessageId }
+            : {}),
+          ...(input.usage !== undefined ? { usage: JSON.stringify(input.usage) } : {}),
+          ...(input.error !== undefined ? { error: input.error } : {})
+        })
+        .where(eq(runs.id, runId))
+        .run();
+
+      if (input.usage !== undefined) {
+        // model/sessionId 从 run 行读(坑 3):settle 时该行已有,调用方拿的不一定一致。
+        const runRow = tx
+          .select({ model: runs.model, sessionId: runs.sessionId })
+          .from(runs)
+          .where(eq(runs.id, runId))
+          .get();
+        if (!runRow) {
+          throw new Error(`settle: run ${runId} 不存在,usage 无法入账`);
+        }
+
+        new UsageRecordRepository(tx).insert({
+          id: randomUUID(),
+          runId,
+          sessionId: runRow.sessionId,
+          model: runRow.model,
+          date: now.slice(0, 10), // UTC YYYY-MM-DD(与 started_at 的 datetime('now') 同基准,坑 4)
+          inputTokens: input.usage.inputTokens ?? 0,
+          outputTokens: input.usage.outputTokens ?? 0,
+          reasoningTokens: input.usage.reasoningTokens ?? 0,
+          cachedInputTokens: input.usage.cachedInputTokens ?? 0,
+          totalTokens: input.usage.totalTokens ?? 0
+        });
+      }
+    });
   }
 
   findBySessionId(sessionId: string, limit = 50): readonly RunRecord[] {
@@ -124,31 +156,27 @@ export class DrizzleRunRepository {
       .map((row) => row.sessionId);
   }
 
-  /** 该会话所有 run 的 usage 累加(null usage 跳过)。 */
+  /**
+   * 该会话所有 run 的 usage 累加。
+   *
+   * T21 起改走 usage_records 的 SQL 聚合(不再是 SELECT 全部 JSON 应用层累加)。
+   * 注意:启用前的历史 run 在新表无行,累计会少一块 —— 有意为之(不回填,
+   * 见 r5 T21 §2.5)。
+   *
+   * runCount 单独查 runs 表(坑 2):语义是"该会话 run 总数(含无 usage 的)",
+   * 不是"有 usage 记录的行数",两个数不能用一个 SQL 糊弄。
+   */
   sumUsageBySessionId(sessionId: string): {
     readonly usage: StreamTokenUsage;
     readonly runCount: number;
   } {
-    const rows = this.db
-      .select({ usage: runs.usage })
-      .from(runs)
-      .where(eq(runs.sessionId, sessionId))
-      .all();
-
-    const usage: StreamTokenUsage = {};
-    let runCount = 0;
-
-    for (const row of rows) {
-      runCount += 1;
-      if (!row.usage) continue;
-
-      const parsed = JSON.parse(row.usage) as StreamTokenUsage;
-      usage.inputTokens = (usage.inputTokens ?? 0) + (parsed.inputTokens ?? 0);
-      usage.outputTokens = (usage.outputTokens ?? 0) + (parsed.outputTokens ?? 0);
-      usage.totalTokens = (usage.totalTokens ?? 0) + (parsed.totalTokens ?? 0);
-      usage.reasoningTokens = (usage.reasoningTokens ?? 0) + (parsed.reasoningTokens ?? 0);
-      usage.cachedInputTokens = (usage.cachedInputTokens ?? 0) + (parsed.cachedInputTokens ?? 0);
-    }
+    const usage = new UsageRecordRepository(this.db).sumBySessionId(sessionId);
+    const runCount =
+      this.db
+        .select({ value: count() })
+        .from(runs)
+        .where(eq(runs.sessionId, sessionId))
+        .get()?.value ?? 0;
 
     return { usage, runCount };
   }

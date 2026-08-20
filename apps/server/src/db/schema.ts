@@ -202,6 +202,41 @@ export const runs = sqliteTable(
   ]
 );
 
+/**
+ * token 用量独立表(T21)。runs.usage JSON 里 SQL 进不去,按天/按模型聚合
+ * 与 cache 命中成本核算都要这张表。写入是 settle 时与 runs.usage 双写;
+ * 历史 JSON 不回填(本地单机库,历史用量没有决策价值)。
+ */
+export const usageRecords = sqliteTable(
+  "usage_records",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    /** "providerId:modelId" —— 与 runs.model 同源,冗余进本表免得聚合时 JOIN。 */
+    model: text("model"),
+    /** YYYY-MM-DD(UTC) —— 按天聚合的 GROUP BY 键,settle 时算好写入。 */
+    date: text("date").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    reasoningTokens: integer("reasoning_tokens").notNull().default(0),
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`)
+  },
+  (table) => [
+    index("idx_usage_records_session").on(table.sessionId),
+    index("idx_usage_records_date").on(table.date),
+    index("idx_usage_records_model").on(table.model)
+  ]
+);
+
 export const sessionCompactions = sqliteTable(
   "session_compactions",
   {
