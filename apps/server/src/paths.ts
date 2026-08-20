@@ -5,6 +5,13 @@ import path from "node:path";
 export const evaDataDir = (): string => path.join(os.homedir(), ".eva");
 
 /**
+ * apiKey 加密密钥文件(AES-256-GCM,0600)。与 DB 同根:
+ * 防"只拷走 eva.db",不防"整目录被端"(威胁模型见 r5 00-overview §4)。
+ * 删了它 = 所有已加密 apiKey 永远解不开,需重新配置。
+ */
+export const secretKeyPath = (): string => path.join(evaDataDir(), ".secret-key");
+
+/**
  * 工具超长输出的落盘目录。
  * 按 workspaceId 分目录:溢出日志属于"哪个项目的哪次调用"要一眼能看出来。
  * 不再落在用户仓库内 —— agent 不应该往用户的项目里写自己的运行时垃圾。

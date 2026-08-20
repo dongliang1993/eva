@@ -147,7 +147,7 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
         : {})
     };
     reply.code(201);
-    const created = createProvider(app.infra.db, input);
+    const created = createProvider(app.infra.db, input, app.infra.encryptor);
     app.services.agents.invalidate();
     return created;
   });
@@ -156,7 +156,7 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
     "/api/v1/providers/:id/test",
     async (request, reply): Promise<ProviderConnectionTestResult | { error: string }> => {
       const { id } = request.params as { id: string };
-      const provider = findStoredProviderById(app.infra.db, id);
+      const provider = findStoredProviderById(app.infra.db, id, app.infra.encryptor);
       if (!provider) {
         reply.code(404);
         return { error: "Provider not found" };
@@ -173,7 +173,7 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
     "/api/v1/providers/:id/models",
     async (request, reply): Promise<ProviderModelsPayload | { error: string }> => {
       const { id } = request.params as { id: string };
-      const provider = findStoredProviderById(app.infra.db, id);
+      const provider = findStoredProviderById(app.infra.db, id, app.infra.encryptor);
       if (!provider) {
         reply.code(404);
         return { error: "Provider not found" };
@@ -186,7 +186,7 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
     "/api/v1/providers/:id/models/fetch",
     async (request, reply): Promise<ProviderModelsPayload | { error: string }> => {
       const { id } = request.params as { id: string };
-      const provider = findStoredProviderById(app.infra.db, id);
+      const provider = findStoredProviderById(app.infra.db, id, app.infra.encryptor);
       if (!provider) {
         reply.code(404);
         return { error: "Provider not found" };
@@ -242,7 +242,7 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
         ? { availableModels: normalizeProviderModels(body.availableModels) }
         : {})
     };
-    const updated = updateProvider(app.infra.db, id, input);
+    const updated = updateProvider(app.infra.db, id, input, app.infra.encryptor);
     if (!updated) {
       reply.code(404);
       return { error: "Provider not found" };

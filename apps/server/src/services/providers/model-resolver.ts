@@ -2,6 +2,7 @@ import type { ModelSlot, ProviderKind, ProviderType } from "@eva/shared";
 
 import type { AppConfig } from "../../config.js";
 import type { AppDatabase } from "../../db/index.js";
+import type { Encryptor } from "../crypto/encryptor.js";
 import { findProviderSpec, resolveProviderBaseURL } from "./provider-catalog.js";
 import { findStoredProviderById } from "./provider-repository.js";
 import { loadAppSettings } from "../settings/app-settings.js";
@@ -44,7 +45,8 @@ export const resolveModelSlot = (
   db: AppDatabase,
   config: AppConfig,
   slot: ModelSlot,
-  override?: string
+  override?: string,
+  encryptor?: Encryptor
 ): ModelResolution => {
   const settings = loadAppSettings(db, config);
   // chat 槽位:override 是唯一来源;没给就是没选模型,不回落全局默认。
@@ -65,7 +67,7 @@ export const resolveModelSlot = (
     };
   }
 
-  const provider = findStoredProviderById(db, ref.providerId);
+  const provider = findStoredProviderById(db, ref.providerId, encryptor);
   if (!provider) {
     return { ok: false, reason: `Provider "${ref.providerId}" 不存在。` };
   }

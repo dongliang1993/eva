@@ -13,6 +13,7 @@ import {
   replaceAppSettings
 } from "../apps/server/src/services/settings/app-settings.js";
 import { updateProvider } from "../apps/server/src/services/providers/provider-repository.js";
+import { IdentityEncryptor } from "../apps/server/src/services/crypto/encryptor.js";
 import type { AppInfrastructure } from "../apps/server/src/types/common.js";
 
 let db: AppDatabase;
@@ -44,7 +45,8 @@ const makeInfra = (): AppInfrastructure => ({
   config: loadConfig({ env: {}, cwd: "/tmp" }),
   db,
   logger: silentLogger,
-  skills: []
+  skills: [],
+  encryptor: new IdentityEncryptor()
 });
 
 beforeEach(() => {
@@ -153,7 +155,8 @@ describe("AgentFactory 不依赖装配期单例", () => {
       const infra: AppInfrastructure = {
         config: loadConfig({ env: {}, cwd: "/tmp" }),
         db: bare,
-        skills: []
+        skills: [],
+        encryptor: new IdentityEncryptor()
       };
       const factory = new AgentFactory(infra);
 

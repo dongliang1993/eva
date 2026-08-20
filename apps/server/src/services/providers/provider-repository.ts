@@ -10,7 +10,11 @@ import type {
 
 import type { AppDatabase } from "../../db/index.js";
 import { providers } from "../../db/schema.js";
+import { IdentityEncryptor, type Encryptor } from "../crypto/encryptor.js";
 import { PROVIDER_CATALOG } from "./provider-catalog.js";
+
+/** 缺省 = 明文直通(无加密版行为);装配了 AES 的调用方从 app.infra.encryptor 传进来。 */
+const PLAINTEXT: Encryptor = new IdentityEncryptor();
 
 export interface StoredProviderConfig extends Provider {
   apiKey: string;
@@ -161,9 +165,17 @@ export const parseProviderRow = (row: typeof providers.$inferSelect): Provider =
   };
 };
 
-export const parseStoredProviderRow = (row: typeof providers.$inferSelect): StoredProviderConfig => ({
+/**
+ * 含 apiKey 的服务端内部版。解密只在这里发生 ——
+ * `parseProviderRow`(UI 版)刻意不含 apiKey,给它接解密等于把明文 key
+ * 送到了原本拿不到它的路径(坑 2)。
+ */
+export const parseStoredProviderRow = (
+  row: typeof providers.$inferSelect,
+  encryptor: Encryptor = PLAINTEXT
+): StoredProviderConfig => ({
   ...parseProviderRow(row),
-  apiKey: row.apiKey
+  apiKey: encryptor.decrypt(row.apiKey)
 });
 
 /**
@@ -197,11 +209,12 @@ export const ensureProvidersSeeded = (db: AppDatabase): void => {
 
 export const findStoredProviderById = (
   db: AppDatabase,
-  id: string
+  id: string,
+  encryptor?: Encryptor
 ): StoredProviderConfig | undefined => {
   ensureProvidersSeeded(db);
   const row = db.select().from(providers).where(eq(providers.id, id)).get();
-  return row ? parseStoredProviderRow(row) : undefined;
+  return row ? parseStoredProviderRow(row, encryptor) : undefined;
 };
 
 export const findProviderById = (db: AppDatabase, id: string): Provider | undefined => {
@@ -215,7 +228,11 @@ export const listProviders = (db: AppDatabase): readonly Provider[] => {
   return db.select().from(providers).all().map(parseProviderRow);
 };
 
-export const createProvider = (db: AppDatabase, input: ProviderCreateInput): Provider => {
+export const createProvider = (
+  db: AppDatabase,
+  input: ProviderCreateInput,
+  encryptor: Encryptor = PLAINTEXT
+): Provider => {
   ensureProvidersSeeded(db);
   const id = ensureUniqueProviderId(db, input.id ?? input.name);
   const timestamp = new Date().toISOString();
@@ -227,7 +244,8 @@ export const createProvider = (db: AppDatabase, input: ProviderCreateInput): Pro
     name: input.name,
     type: input.type,
     enabled: input.enabled === true,
-    apiKey: input.apiKey ?? "",
+    // 空串直通(不加密)= "没配 key" 的语义锚点(坑 1)
+    apiKey: input.apiKey ? encryptor.encrypt(input.apiKey) : "",
     baseUrl: input.baseURL ?? "",
     models: JSON.stringify(models),
     availableModels: JSON.stringify(availableModels),
@@ -241,7 +259,8 @@ export const createProvider = (db: AppDatabase, input: ProviderCreateInput): Pro
 export const updateProvider = (
   db: AppDatabase,
   id: string,
-  input: ProviderUpdateInput
+  input: ProviderUpdateInput,
+  encryptor: Encryptor = PLAINTEXT
 ): Provider | undefined => {
   ensureProvidersSeeded(db);
   const existing = db.select().from(providers).where(eq(providers.id, id)).get();
@@ -254,7 +273,8 @@ export const updateProvider = (
   if (input.type !== undefined) updates.type = input.type;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   if (input.baseURL !== undefined) updates.baseUrl = input.baseURL;
-  if (input.apiKey !== undefined) updates.apiKey = input.apiKey;
+  // 只有 key 被显式 update 时才加密(懒迁移的触发点);clearApiKey 写 "" 直通
+  if (input.apiKey !== undefined) updates.apiKey = encryptor.encrypt(input.apiKey);
   else if (input.clearApiKey) updates.apiKey = "";
   if (input.models !== undefined) updates.models = serializeModels(input.models);
   if (input.availableModels !== undefined) updates.availableModels = serializeModels(input.availableModels);

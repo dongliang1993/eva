@@ -157,6 +157,8 @@ server/node_modules, web/dist}`。用户数据与技能在 `~/.eva/`（`~/.eva/s
 ## Configuration
 
 > **Model configuration does not go through environment variables.** Providers and API keys live in the `providers` table in SQLite (`~/.eva/eva.db`), managed via the Settings page; the DB is the single source of truth. Environment variables only govern process-level concerns.
+>
+> **API keys are encrypted at rest** (AES-256-GCM, ciphertext `enc:v1:…`). The key lives at `~/.eva/.secret-key` (0600, generated on first boot) — deleting it permanently bricks every stored apiKey (re-enter them in Settings). Lazy migration: any key update (even to the same value) encrypts that row; untouched legacy rows stay plaintext but keep working. If the key file is unreadable the server degrades to plaintext storage with a startup warning.
 
 Environment variables loaded from `.env.local` at workspace root (`apps/server/src/config.ts`):
 

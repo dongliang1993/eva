@@ -187,12 +187,16 @@ export class AgentFactory {
     /** 本轮选定的 chat 模型。必填 —— chat 槽位只认它,没给就是没有。 */
     modelId: string;
   }): ResolvedModels {
-    const chat = resolveModelSlot(this.infra.db, this.infra.config, "chat", options.modelId);
+    const chat = resolveModelSlot(
+      this.infra.db, this.infra.config, "chat", options.modelId, this.infra.encryptor
+    );
     if (!chat.ok) {
       throw new AgentUnavailableError(chat.reason);
     }
 
-    const tool = resolveModelSlot(this.infra.db, this.infra.config, "tool");
+    const tool = resolveModelSlot(
+      this.infra.db, this.infra.config, "tool", undefined, this.infra.encryptor
+    );
 
     return {
       chat: chat.binding,

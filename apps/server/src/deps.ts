@@ -17,7 +17,9 @@ import {
   migrateLegacySettings,
   migrateSecurityToAlwaysAllowTools
 } from "./services/settings/migrate-legacy.js";
-import { userSkillsDir } from "./paths.js";
+import { secretKeyPath, userSkillsDir } from "./paths.js";
+import { AesGcmEncryptor, IdentityEncryptor, type Encryptor } from "./services/crypto/encryptor.js";
+import { loadSecretKey } from "./services/crypto/secret-key.js";
 import type { AppInfrastructure, AppServices } from "./types/common.js";
 
 export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
@@ -71,11 +73,22 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
     logger.warn({ staleTasks }, "marked in-flight subagent tasks as failed after restart");
   }
 
+  // apiKey 落库加密:key 文件读不出 → 明文降级(与 Alma 的 safeStorage 降级同款哲学,
+  // docs 04 §8.3.2)—— 绝不让"key 文件损坏"变成"整个 provider 体系全灭"。
+  const secretKey = loadSecretKey(secretKeyPath());
+  const encryptor: Encryptor = secretKey
+    ? new AesGcmEncryptor(secretKey)
+    : new IdentityEncryptor();
+  if (!secretKey) {
+    logger.warn("apiKey 加密不可用(secret-key 读取失败),明文降级");
+  }
+
   return {
     config,
     db,
     logger,
     skills,
+    encryptor,
     observer,
     soulSection
   };
