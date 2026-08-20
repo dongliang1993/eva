@@ -9,7 +9,14 @@ import { maybeOverflow } from "./tool-overflow.js";
 const execFileAsync = promisify(execFile);
 
 const bashSchema = z.object({
-  command: z.string().describe("Shell command to run within the workspace.")
+  command: z.string().describe("Shell command to run within the workspace."),
+  description: z
+    .string()
+    .describe(
+      'Clear, concise description of what this command does in active voice, 5-10 words ' +
+        '(shown in the UI as the row title). Examples: "ls" → "List files in current directory"; ' +
+        '"git status" → "Show working tree status"; "npm install" → "Install package dependencies".'
+    )
 });
 
 export const createBashTool = (options: FsToolBaseOptions): AgentTool =>

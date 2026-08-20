@@ -1,10 +1,12 @@
 import type { EvaUIMessage } from "@eva/shared";
 
 import type { PendingApproval } from "../api";
+import { useWorkspaces } from "../../workspaces/hooks/use-workspaces";
 import { MessageList } from "./message-list";
 import { ApprovalCard } from "./approval-card";
 import { ChatInput } from "./chat-input";
 import { ContextUsage } from "./context-usage";
+import { WorkspaceNameProvider } from "./workspace-name-context";
 import { useStickToBottom } from "../hooks/use-stick-to-bottom";
 
 interface ChatViewProps {
@@ -42,10 +44,18 @@ export function ChatView({
 }: ChatViewProps) {
   const { containerRef, isAtBottom, scrollToBottom } = useStickToBottom(streamingMessage);
 
+  // bash 命令行的主机标签(work-mi 这种)用工作区名 —— 它就是"命令在哪跑"。
+  const { workspaces } = useWorkspaces();
+  const workspaceName =
+    workspaceId !== null
+      ? workspaces.find((w) => w.id === workspaceId)?.name ?? null
+      : null;
+
   return (
-    <div className="flex h-full flex-col bg-background">
-      <ContextUsage sessionId={sessionId} />
-      <MessageList
+    <WorkspaceNameProvider name={workspaceName}>
+      <div className="flex h-full flex-col bg-background">
+        <ContextUsage sessionId={sessionId} />
+        <MessageList
         messages={messages}
         streamingMessage={streamingMessage}
         containerRef={containerRef}
@@ -74,5 +84,6 @@ export function ChatView({
         onSelectWorkspace={onSelectWorkspace}
       />
     </div>
+    </WorkspaceNameProvider>
   );
 }

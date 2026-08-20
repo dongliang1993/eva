@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  createBashTool,
   createEditTool,
   createReadFileTool,
   createWriteTool,
@@ -131,5 +132,31 @@ describe("readableRoots(overflow 白名单)", () => {
       { messages: [], toolCallId: "c-write", context: {} }
     );
     expect(String(writeRes)).toContain("workspace");
+  });
+});
+
+describe("bash tool", () => {
+  it("需要 description 参数 —— 缺它时 schema 解析失败,execute 不应被调用", async () => {
+    const root = await makeWorkspace();
+    const bashTool = createBashTool({ workRoot: root });
+
+    // buildTool 在 execute 内 parse schema;只给 command 不给 description → parse 抛错 →
+    // 被包装成 [Tool Error] 输出,命令不会真的执行。
+    const res = await bashTool.tool.execute!(
+      { command: "echo hi" } as unknown as { command: string; description: string },
+      { messages: [], toolCallId: "c-bash-1", context: {} }
+    );
+    expect(String(res)).toContain("[Tool Error]");
+  });
+
+  it("command + description 齐全 → 在工作区内执行,输出含命令结果", async () => {
+    const root = await makeWorkspace();
+    const bashTool = createBashTool({ workRoot: root });
+
+    const res = await bashTool.tool.execute!(
+      { command: "printf 'hello-bash'", description: "Print a marker string" },
+      { messages: [], toolCallId: "c-bash-2", context: {} }
+    );
+    expect(String(res)).toContain("hello-bash");
   });
 });
