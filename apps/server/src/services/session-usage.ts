@@ -3,6 +3,7 @@ import type { RunStatus, StreamTokenUsage } from "@eva/shared";
 import type { AppConfig } from "../config.js";
 import type { AppDatabase } from "../db/index.js";
 import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
+import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
 import { resolveModelSlot } from "./providers/model-resolver.js";
 import { estimateModelHistoryTokens } from "./token-estimator.js";
 import type { SessionService } from "./session.js";
@@ -34,8 +35,14 @@ export const readSessionUsage = (
   const history = session.buildModelHistory(db, sessionId);
   const contextTokens = estimateModelHistoryTokens(history);
 
-  const chat = resolveModelSlot(db, config, "chat");
-  const contextWindow = chat.ok ? chat.binding.contextWindow ?? null : null;
+  // 窗口大小来自**这个会话绑定的模型**(sessions.model = 最近一轮 run 选定的),
+  // 不是全局设置 —— 主对话模型是 per-thread 的,两个会话可以用不同窗口的模型。
+  // 会话还没跑过 run(model 为 null)时没有窗口可言,占用条不显示分母。
+  const sessionModel = new DrizzleSessionRepository(db).findById(sessionId)?.model;
+  const chat = sessionModel
+    ? resolveModelSlot(db, config, "chat", sessionModel)
+    : undefined;
+  const contextWindow = chat?.ok ? chat.binding.contextWindow ?? null : null;
 
   const runRepo = new DrizzleRunRepository(db);
   const { usage: totalUsage, runCount } = runRepo.sumUsageBySessionId(sessionId);

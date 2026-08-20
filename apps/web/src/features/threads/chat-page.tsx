@@ -80,6 +80,24 @@ export function ChatPage() {
   const sessionWorkspaceId =
     threads?.find((t) => t.id === sessionId)?.workspaceId ?? null;
 
+  // 模型是 per-thread 的:切换会话时把服务端存的 model(最近一轮 run 落库的)
+  // 回填到选择器;新建会话(sessionId 为 null)时清回空,交给 SelectModel 默认第一个。
+  // 只在 sessionId 变化那一刻同步 —— threads 10s 轮询会把 updateModel 的落库结果带回来,
+  // 若跟着 currentThreadModel 走,用户手选会被轮询闪回覆盖。
+  const syncedSessionRef = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (sessionId === syncedSessionRef.current) return;
+    if (threads === undefined) return; // 列表还没到,等下一轮
+
+    syncedSessionRef.current = sessionId;
+    setSelectedModel(
+      sessionId === null
+        ? null
+        : threads.find((t) => t.id === sessionId)?.model ?? null
+    );
+  }, [sessionId, threads]);
+
   // 新会话还没有 sessionId,没法 PUT —— 先把用户选的工作区暂存在这里。
   // 等第一条消息让服务端建出会话(sessionId 出现)后再 PUT。这是"还没有 session 可绑"的过渡态。
   const [pendingWorkspaceId, setPendingWorkspaceId] = useState<string | null>(null);
@@ -181,7 +199,11 @@ export function ChatPage() {
               streamingMessage={streamingMessage}
               isStreaming={isStreaming}
               selectedModel={selectedModel}
-              onSend={(text) => sendMessage(text, selectedModel ?? undefined)}
+              onSend={(text) => {
+                // ChatInput 在 selectedModel 为空时禁用发送,所以这里必有模型。
+                if (selectedModel === null) return;
+                sendMessage(text, selectedModel);
+              }}
               onStop={stopStreaming}
               onSelectModel={setSelectedModel}
               workspaceId={displayWorkspaceId}

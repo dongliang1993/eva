@@ -244,14 +244,14 @@ const resolveEmbeddingProvider = (db: AppDatabase, config: AppConfig) => {
 
 /**
  * Resolve the tool model for query rewriting。
- * 槽位 = tool,不可用回落 chat(与 AgentFactory 一致)。
+ *
+ * 只认 tool 槽位:这里拿不到会话上下文,而主对话模型是 per-thread 的(没有全局
+ * chat 槽位可回落)。tool 没配 → 返回 undefined,调用方跳过改写用原始查询 ——
+ * 查询改写是可降级的增强,不该为它编一个模型出来。
  */
 const resolveToolModelProvider = (db: AppDatabase, config: AppConfig) => {
   const tool = resolveModelSlot(db, config, "tool");
-  if (tool.ok) return tool.binding;
-
-  const chat = resolveModelSlot(db, config, "chat");
-  return chat.ok ? chat.binding : undefined;
+  return tool.ok ? tool.binding : undefined;
 };
 
 /**

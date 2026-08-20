@@ -14,6 +14,7 @@ import { compactSession } from "../services/compact.js";
 import { deriveSessionStatus, readSessionRuntimeStatus } from "../services/session-status.js";
 import { readSessionUsage } from "../services/session-usage.js";
 import { createModelSummarizer } from "../services/summarize-with-model.js";
+import { resolveModelSlot } from "../services/providers/model-resolver.js";
 import { messages } from "../db/schema.js";
 
 const listThreadsQuerySchema = z.object({
@@ -161,12 +162,22 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
         return { error: "Thread not found" };
       }
 
-      // 手动压缩同样用 tool 槽位模型写摘要;模型没配好时不注入 summarizer,
-      // compactSession 回落确定性拼接 —— 摘要质量可以降级,这条路由不能挂。
+      // 手动压缩用 tool 槽位模型写摘要;tool 没配则回落**这个会话绑定的模型**
+      // (thread.model = 最近一轮 run 选定的)—— 主对话模型是 per-thread 的,
+      // 没有全局 chat 槽位可问。两者都没有时不注入 summarizer,compactSession
+      // 回落确定性拼接:摘要质量可以降级,这条路由不能挂。
       let summarize: ReturnType<typeof createModelSummarizer> | undefined;
       try {
-        const tool = app.services.agents.resolveModels().tool;
-        summarize = createModelSummarizer(tool, app.log);
+        const toolSlot = resolveModelSlot(app.infra.db, app.infra.config, "tool");
+        const sessionSlot = thread.model
+          ? resolveModelSlot(app.infra.db, app.infra.config, "chat", thread.model)
+          : undefined;
+        const binding = toolSlot.ok
+          ? toolSlot.binding
+          : sessionSlot?.ok
+            ? sessionSlot.binding
+            : undefined;
+        summarize = binding !== undefined ? createModelSummarizer(binding, app.log) : undefined;
       } catch {
         summarize = undefined;
       }

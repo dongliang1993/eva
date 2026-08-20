@@ -8,6 +8,7 @@ import { DrizzleSessionRepository } from "../apps/server/src/db/repositories/ses
 import { DrizzleMessageRepository } from "../apps/server/src/db/repositories/message-repository.js";
 import { SessionService } from "../apps/server/src/services/session.js";
 import { readSessionUsage } from "../apps/server/src/services/session-usage.js";
+import { updateProvider } from "../apps/server/src/services/providers/provider-repository.js";
 import { createUserUIMessage } from "../packages/shared/src/index.js";
 
 let db: AppDatabase;
@@ -58,7 +59,29 @@ describe("readSessionUsage", () => {
     expect(result.contextTokens).toBeGreaterThan(0);
   });
 
-  it("chat 槽位未解析时 contextWindow 为 null(不抛)", () => {
+  it("会话绑定了模型 → contextWindow 取该模型的窗口(不是全局设置)", () => {
+    updateProvider(db, "openai", {
+      enabled: true,
+      apiKey: "k",
+      baseURL: "https://db.example/v1",
+      models: [
+        { id: "m-big", name: "Big", capabilities: { contextWindow: 200_000 } }
+      ],
+      availableModels: []
+    });
+
+    const sessionRepo = new DrizzleSessionRepository(db);
+    sessionRepo.create({ id: "s-bound" });
+    // 一轮 run 跑完后 sessions.model 记着这轮选的模型。
+    sessionRepo.updateModel("s-bound", "openai:m-big");
+
+    const sessionService = new SessionService(sessionRepo, new DrizzleMessageRepository(db));
+    const result = readSessionUsage(db, config, sessionService, "s-bound");
+
+    expect(result.contextWindow).toBe(200_000);
+  });
+
+  it("会话还没绑定模型时 contextWindow 为 null(不抛)", () => {
     const sessionRepo = new DrizzleSessionRepository(db);
     sessionRepo.create({ id: "s-empty" });
 
