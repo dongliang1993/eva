@@ -39,7 +39,7 @@ afterEach(() => {
 const config = { LOG_LEVEL: "info", PORT: 8082, HOST: "127.0.0.1", DB_PATH: "" } as never;
 
 describe("migrateLegacySettings", () => {
-  it("旧四字段 → models 三个槽位对得上", () => {
+  it("旧字段 → tool/embedding 槽位对得上,chat.defaultModel 不再进 models", () => {
     writeLegacyBlock("chat", { defaultModel: "openai:gpt-4o", temperature: 0.5, autoCompact: true });
     writeLegacyBlock("toolModel", { model: "openai:gpt-4.1-mini" });
     writeLegacyBlock("memory", { enabled: true, embedding: {} });
@@ -47,7 +47,8 @@ describe("migrateLegacySettings", () => {
     migrateLegacySettings(db, silentLogger);
 
     const migrated = loadAppSettings(db, config);
-    expect(migrated.models.chat).toBe("openai:gpt-4o");
+    // 主对话模型已是 per-run 决策(请求的 modelId / sessions.model),没有全局槽位。
+    expect((migrated.models as Record<string, string>).chat).toBeUndefined();
     expect(migrated.models.tool).toBe("openai:gpt-4.1-mini");
     expect(migrated.models.embedding).toBeUndefined();
   });

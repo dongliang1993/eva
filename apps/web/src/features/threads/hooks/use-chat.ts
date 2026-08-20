@@ -35,7 +35,8 @@ interface UseChatReturn {
   readonly sessionId: string | null;
   /** id → 同槽位全部版本 id。服务端算准,前端只在 run 结束/load/switch 时整体替换。 */
   readonly siblingIdsById: SiblingIdsById;
-  readonly sendMessage: (text: string, modelId?: string) => void;
+  /** modelId 必填 —— 模型是 per-run 选定的,没选模型时发送按钮就是禁用的。 */
+  readonly sendMessage: (text: string, modelId: string) => void;
   /** 重新生成激活链最后一条 assistant 消息(同槽位落新版本)。 */
   readonly regenerate: (messageId: string) => void;
   /** 切到某条消息所在分支的叶子(前端只在同槽位版本间调)。 */
@@ -106,6 +107,7 @@ export function useChat(handlers: UseChatHandlers = {}): UseChatReturn {
   const startRun = useCallback((
     assistantId: string,
     body: { text?: string; retryMessageId?: string },
+    /** send 必给;retry 不给(服务端沿用被重试那轮的模型)。 */
     modelId?: string
   ): void => {
     builderRef.current = new UiMessageBuilder(assistantId);
@@ -169,7 +171,7 @@ export function useChat(handlers: UseChatHandlers = {}): UseChatReturn {
     });
   }, [queryClient, settleRun]);
 
-  const sendMessage = useCallback((text: string, modelId?: string) => {
+  const sendMessage = useCallback((text: string, modelId: string) => {
     const trimmed = text.trim();
     if (isStreamingRef.current || trimmed.length === 0) {
       return;

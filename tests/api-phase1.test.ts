@@ -93,19 +93,20 @@ describe("Phase 1 API routes", () => {
     expect(current.statusCode).toBe(200);
 
     const settings = current.json() as {
-      models: { chat: string };
+      models: Record<string, string>;
       security: { logLevel: string };
       providers?: unknown;
     };
 
     expect(settings.providers).toBeUndefined();
-    expect(settings.models.chat).toContain(":");
+    // 主对话模型不是 settings 项 —— 它 per-run 由请求的 modelId 给。
+    expect(settings.models.chat).toBeUndefined();
 
     const updated = {
       ...settings,
       models: {
         ...settings.models,
-        chat: "openai:gpt-4o"
+        tool: "openai:gpt-4o-mini"
       },
       security: {
         ...settings.security,
@@ -121,9 +122,11 @@ describe("Phase 1 API routes", () => {
 
     expect(put.statusCode).toBe(200);
     expect(put.json()).toMatchObject({
-      models: { chat: "openai:gpt-4o" },
+      models: { tool: "openai:gpt-4o-mini" },
       security: { logLevel: "debug" }
     });
+    // chat 不该被 PUT 写进去(它不在契约里)。
+    expect((put.json() as { models: Record<string, string> }).models.chat).toBeUndefined();
   });
 
   it("returns providers and aggregates enabled models", async () => {

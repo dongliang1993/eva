@@ -45,7 +45,8 @@ describe("resolveModelSlot", () => {
     });
     setModel(config, "chat", "openai:gpt-4o");
 
-    const resolved = resolveModelSlot(db, config, "chat");
+    // chat 槽位无全局默认兜底:override 是唯一来源(此处显式传)。
+    const resolved = resolveModelSlot(db, config, "chat", "openai:gpt-4o");
 
     expect(resolved).toMatchObject({
       ok: true,
@@ -101,12 +102,28 @@ describe("resolveModelSlot", () => {
     });
     setModel(config, "chat", "openai:gpt-4.1-mini");
 
-    const resolved = resolveModelSlot(db, config, "chat");
+    // chat 槽位无全局默认兜底:override 是唯一来源。
+    const resolved = resolveModelSlot(db, config, "chat", "openai:gpt-4.1-mini");
 
     expect(resolved).toMatchObject({
       ok: true,
       binding: { contextWindow: 256_000, maxOutputTokens: 16_000 }
     });
+  });
+
+  it("chat 槽位不回落 settings —— 无 override 即 ok:false(模型是 per-run 选的)", () => {
+    const config = loadConfig({ env: {}, cwd: "/tmp" });
+    updateProvider(db, "openai", {
+      enabled: true,
+      apiKey: "openai-key",
+      models: [{ id: "gpt-4o", name: "GPT-4o" }],
+      availableModels: [{ id: "gpt-4o", name: "GPT-4o" }]
+    });
+    setModel(config, "chat", "openai:gpt-4o");
+
+    // settings 配了 chat,但 chat 槽位不读 settings —— 没 override 就是没选模型。
+    const resolved = resolveModelSlot(db, config, "chat");
+    expect(resolved).toMatchObject({ ok: false });
   });
 
   it("chat 未配置 → ok:false 且 reason 可读", () => {

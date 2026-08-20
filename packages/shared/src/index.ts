@@ -68,9 +68,13 @@ export interface Provider {
 export type ModelSlot = "chat" | "tool" | "embedding";
 
 export interface ModelSlotSettings {
-  /** 主对话。必填。 */
-  readonly chat: string;
-  /** 杂务档(compact 摘要 / web-fetch 摘要);缺省回落 chat。 */
+  /**
+   * 杂务档(compact 摘要 / web-fetch 摘要 / 子代理);缺省回落本轮主链模型。
+   *
+   * 注意这里没有 chat —— 主对话模型是 per-run 决策(新建 thread 时选、聊天中可切换),
+   * 由请求的 modelId 给,会话记录 sessions.model 是它的落库结果。放进全局 settings
+   * 会造出第二个事实源:用户在 UI 换了模型,settings 还留着旧值。
+   */
   readonly tool?: string;
   /** 记忆向量;缺省 = 语义检索禁用,降级为纯 FTS。 */
   readonly embedding?: string;

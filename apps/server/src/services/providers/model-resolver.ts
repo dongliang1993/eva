@@ -32,6 +32,13 @@ const toNonEmpty = (value?: string): string | undefined => {
 /**
  * override 优先于 settings(用户在 UI 里临时换模型走这条)。
  * 模型标识必须是 `providerId:modelId`,不含 `:` 直接拒绝 —— 不猜 provider。
+ *
+ * **chat 槽位只认 override,没有任何默认值。** 主对话模型是 per-run 决策:新建
+ * thread 时选、聊天中可切换,由请求的 modelId 给,落库进 sessions.model。所以
+ * 调用方拿不到 override 时(如会话外的用量查询),要么传会话记录的模型,要么
+ * 接受 ok:false 并降级 —— 不许在这里编一个默认模型出来。
+ *
+ * tool/embedding 槽位仍从 settings 取默认(它们不是 per-run 决策)。
  */
 export const resolveModelSlot = (
   db: AppDatabase,
@@ -40,7 +47,11 @@ export const resolveModelSlot = (
   override?: string
 ): ModelResolution => {
   const settings = loadAppSettings(db, config);
-  const configured = toNonEmpty(override) ?? settings.models[slot];
+  // chat 槽位:override 是唯一来源;没给就是没选模型,不回落全局默认。
+  const configured =
+    slot === "chat"
+      ? toNonEmpty(override)
+      : toNonEmpty(override) ?? settings.models[slot];
 
   if (!configured) {
     return { ok: false, reason: `未配置 ${slot} 模型。` };

@@ -8,8 +8,8 @@ import {
 } from "../services/settings/app-settings.js";
 
 const appSettingsSchema = z.object({
+  // 没有 chat —— 主对话模型 per-run 由请求的 modelId 给,不是全局设置项。
   models: z.object({
-    chat: z.string(),
     tool: z.string().optional(),
     embedding: z.string().optional()
   }),

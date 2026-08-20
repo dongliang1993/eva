@@ -71,12 +71,19 @@ afterEach(() => {
 });
 
 describe("AgentFactory", () => {
-  it("per-request modelId 覆盖默认模型", () => {
+  it("requestedModelId 是 chat 模型的唯一来源(无全局默认兜底)", () => {
     const config = makeInfra().config;
     setDefaultModel(config, "openai:gpt-4o");
     const factory = new AgentFactory(makeInfra());
 
-    expect(factory.resolve().mainModel.qualifiedModelId).toBe("openai:gpt-4o");
+    // 不给 requestedModelId → chat 槽位无来源 → 抛 AgentUnavailableError。
+    // settings.models.chat 不再兜底:chat 模型是 per-run 选的。
+    expect(() => factory.resolve()).toThrow(AgentUnavailableError);
+
+    expect(
+      factory.resolve({ requestedModelId: "openai:gpt-4o" })
+        .mainModel.qualifiedModelId
+    ).toBe("openai:gpt-4o");
     expect(
       factory.resolve({ requestedModelId: "anthropic:claude-sonnet-4-6" })
         .mainModel.qualifiedModelId
@@ -88,8 +95,8 @@ describe("AgentFactory", () => {
     setDefaultModel(config, "openai:gpt-4o");
     const factory = new AgentFactory(makeInfra());
 
-    factory.resolve();
-    factory.resolve();
+    factory.resolve({ requestedModelId: "openai:gpt-4o" });
+    factory.resolve({ requestedModelId: "openai:gpt-4o" });
 
     expect(factory.modelCacheSize).toBe(1);
   });
@@ -99,13 +106,13 @@ describe("AgentFactory", () => {
     setDefaultModel(config, "openai:gpt-4o");
     const factory = new AgentFactory(makeInfra());
 
-    factory.resolve();
+    factory.resolve({ requestedModelId: "openai:gpt-4o" });
     expect(factory.modelCacheSize).toBe(1);
 
     factory.invalidate();
     expect(factory.modelCacheSize).toBe(0);
 
-    factory.resolve();
+    factory.resolve({ requestedModelId: "openai:gpt-4o" });
     expect(factory.modelCacheSize).toBe(1);
   });
 
@@ -120,7 +127,7 @@ describe("AgentFactory", () => {
         skills: []
       });
 
-      expect(() => factory.resolve()).toThrow(AgentUnavailableError);
+      expect(() => factory.resolve({ requestedModelId: "openai:gpt-4o" })).toThrow(AgentUnavailableError);
     } finally {
       closeDb(dbEmpty);
     }
@@ -131,14 +138,14 @@ describe("AgentFactory", () => {
     setDefaultModel(config, "openai:gpt-4o");
     const factory = new AgentFactory(makeInfra());
 
-    expect(factory.resolve().mainModel.apiKey).toBe("openai-key");
+    expect(factory.resolve({ requestedModelId: "openai:gpt-4o" }).mainModel.apiKey).toBe("openai-key");
 
     updateProvider(db, "openai", {
       apiKey: "rotated-key"
     });
     factory.invalidate();
 
-    expect(factory.resolve().mainModel.apiKey).toBe("rotated-key");
+    expect(factory.resolve({ requestedModelId: "openai:gpt-4o" }).mainModel.apiKey).toBe("rotated-key");
   });
 });
 
@@ -157,7 +164,7 @@ describe("AgentFactory 不依赖装配期单例", () => {
 
       // 构造本身绝不抛 —— 这是对「解析从装配期移到请求期」的回归。
       expect(factory).toBeInstanceOf(AgentFactory);
-      expect(() => factory.resolve()).toThrow(AgentUnavailableError);
+      expect(() => factory.resolve({ requestedModelId: "openai:gpt-4o" })).toThrow(AgentUnavailableError);
     } finally {
       closeDb(bare);
     }

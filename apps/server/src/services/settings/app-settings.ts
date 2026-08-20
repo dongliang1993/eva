@@ -27,11 +27,9 @@ const normalizeLogLevel = (
   }
 };
 
-/** 默认值。chat 槽位给一个指向 seed provider 的 id。 */
+/** 默认值。models 全为空 —— 主对话模型 per-run 选,tool/embedding 未配即降级。 */
 const createDefaultSettings = (): AppSettings => ({
-  models: {
-    chat: "openai:gpt-4.1-mini"
-  },
+  models: {},
   chat: {
     temperature: 0.1,
     autoCompact: true,
@@ -84,9 +82,11 @@ export const loadAppSettings = (
       if (!isRecord(parsed)) continue;
 
       if (key === "models") {
+        // 刻意不读 parsed.chat:老库里可能还留着 R2 迁移写进去的值,但主对话模型
+        // 已改成 per-run 决策(请求的 modelId / sessions.model)。读回来就会多出
+        // 一个过期的事实源 —— 用户在 UI 换了模型,这里还是旧值。
         current.models = {
           ...current.models,
-          ...(typeof parsed.chat === "string" ? { chat: parsed.chat } : {}),
           ...(typeof parsed.tool === "string" ? { tool: parsed.tool } : {}),
           ...(typeof parsed.embedding === "string" ? { embedding: parsed.embedding } : {})
         };

@@ -40,7 +40,7 @@ export const migrateLegacySettings = (db: AppDatabase, logger: InfoLogger): void
   const toolModel = readBlock(db, "toolModel");
   const memory = readBlock(db, "memory");
 
-  const chatModel = typeof chat?.defaultModel === "string" ? chat.defaultModel : "";
+  // chat.defaultModel 不再搬:主对话模型已是 per-run 决策,没有全局槽位可搬进去。
   const toolModelValue =
     (typeof toolModel?.model === "string" && toolModel.model)
     || (typeof memory?.toolModel === "string" && memory.toolModel)
@@ -75,7 +75,6 @@ export const migrateLegacySettings = (db: AppDatabase, logger: InfoLogger): void
   }
 
   const modelsBlock = {
-    ...(chatModel ? { chat: chatModel } : {}),
     ...(toolModelValue ? { tool: toolModelValue } : {}),
     ...(embeddingRef ? { embedding: embeddingRef } : {})
   };
@@ -112,7 +111,6 @@ export const migrateLegacySettings = (db: AppDatabase, logger: InfoLogger): void
 
   logger.info(
     {
-      chatModel: chatModel || undefined,
       toolModel: toolModelValue || undefined,
       embedding: embeddingRef
     },
