@@ -6,7 +6,7 @@ import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
 import { ThemeToggle } from "../../shared/ui/theme-toggle";
 
 const NAV_ITEMS = [
-  { to: "/settings/models", label: "Models", icon: SettingsIcon },
+  { to: "/settings/models", label: "通用", icon: SettingsIcon },
   { to: "/settings/providers", label: "Providers", icon: Store },
   { to: "/settings/memory", label: "Memory", icon: Brain },
   { to: "/settings/security", label: "Security", icon: ShieldCheck },

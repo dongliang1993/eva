@@ -12,6 +12,7 @@
   "dependencies": {
     "@eva/shared": "workspace:*",
     "@radix-ui/react-popover": "^1.1.15",
+    "@radix-ui/react-select": "^2.3.7",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, FileCode2, Plug, RefreshCw, Trash2 } from "lucide-react";
 
 import { useMcpServers } from "../hooks/use-mcp-servers";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../shared/ui/select";
 import type {
   McpConnectionState,
   McpServerConfig,
@@ -261,16 +262,20 @@ export function McpSettings() {
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
-            <select
-              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+            <Select
               value={form.transport}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, transport: e.target.value as McpServerInput["transport"] }))
+              onValueChange={(v) =>
+                setForm((f) => ({ ...f, transport: v as McpServerInput["transport"] }))
               }
             >
-              <option value="stdio">stdio</option>
-              <option value="http">http</option>
-            </select>
+              <SelectTrigger className="h-auto w-32 py-1.5">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="stdio">stdio</SelectItem>
+                <SelectItem value="http">http</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {form.transport === "stdio" ? (

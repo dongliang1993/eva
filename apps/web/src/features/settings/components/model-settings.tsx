@@ -3,12 +3,15 @@ import { Check } from "lucide-react";
 
 import { useSettings } from "../hooks/use-settings";
 import { useModels } from "../../../shared/hooks/use-models";
+import { ModelSelect } from "../../../shared/ui/model-select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../shared/ui/select";
+import type { ModelSummary } from "@eva/shared";
 
 interface SlotFieldProps {
   readonly label: string;
   readonly description: string;
   readonly value: string;
-  readonly options: readonly { id: string; name: string }[];
+  readonly options: readonly ModelSummary[];
   readonly onChange: (value: string) => void;
 }
 
@@ -17,17 +20,14 @@ function SlotField({ label, description, value, options, onChange }: SlotFieldPr
     <div className="rounded-xl border border-border bg-card p-6">
       <h2 className="text-base font-semibold text-foreground mb-1">{label}</h2>
       <p className="text-sm text-muted-foreground mb-3">{description}</p>
-      <select
-        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring transition-colors"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {options.map((model) => (
-          <option key={model.id} value={model.id}>
-            {model.id}
-          </option>
-        ))}
-      </select>
+      <ModelSelect
+        models={options}
+        value={value === "" ? null : value}
+        onChange={onChange}
+        placeholder="不配置"
+        triggerClassName="flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors hover:border-ring/60 focus:border-ring"
+        contentClassName="w-[var(--radix-popover-trigger-width)]"
+      />
     </div>
   );
 }
@@ -36,7 +36,6 @@ export function ModelSettings() {
   const { data, isLoading, saveSettings, isSaving, saveSuccess } = useSettings();
   const { data: models = [] } = useModels();
 
-  const [chatModel, setChatModel] = useState("");
   const [toolModel, setToolModel] = useState("");
   const [embeddingModel, setEmbeddingModel] = useState("");
   const [logLevel, setLogLevel] = useState("info");
@@ -44,7 +43,6 @@ export function ModelSettings() {
 
   useEffect(() => {
     if (data) {
-      setChatModel(data.models.chat ?? "");
       setToolModel(data.models.tool ?? "");
       setEmbeddingModel(data.models.embedding ?? "");
       setLogLevel(data.security.logLevel ?? "info");
@@ -52,7 +50,7 @@ export function ModelSettings() {
     }
   }, [data]);
 
-  const modelOptions = models.map((m) => ({ id: m.id, name: m.name }));
+  const modelOptions = models;
 
   const handleSave = () => {
     if (!data) return;
@@ -60,7 +58,6 @@ export function ModelSettings() {
     saveSettings({
       ...data,
       models: {
-        chat: chatModel,
         ...(toolModel ? { tool: toolModel } : {}),
         ...(embeddingModel ? { embedding: embeddingModel } : {})
       },
@@ -79,20 +76,11 @@ export function ModelSettings() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+        {/* 主对话模型不在这里配 —— 它是 per-thread 选择(聊天框左下角的模型选择器),
+            新建会话时选、聊天中可切换。放全局 settings 会造出第二个事实源。 */}
         <SlotField
-          label="Chat Model"
-          description="主对话模型。所有 agent 回复都用它。"
-          value={chatModel}
-          options={modelOptions}
-          onChange={(v) => {
-            setChatModel(v);
-            setDirty(true);
-          }}
-        />
-
-        <SlotField
-          label="Tool Model"
-          description="杂务模型 —— compact 摘要、web 内容摘要。选个便宜的;留空回落 chat 模型。"
+          label="工具模型"
+          description="在保证生成质量的前提下尽可能快的模型,用于对话标题生成、记忆相关操作等自动化任务。"
           value={toolModel}
           options={modelOptions}
           onChange={(v) => {
@@ -115,19 +103,23 @@ export function ModelSettings() {
         <div className="rounded-xl border border-border bg-card p-6">
           <h2 className="text-base font-semibold text-foreground mb-1">Log Level</h2>
           <p className="text-sm text-muted-foreground mb-3">Server-side logging verbosity.</p>
-          <select
-            className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring transition-colors"
+          <Select
             value={logLevel}
-            onChange={(e) => {
-              setLogLevel(e.target.value);
+            onValueChange={(v) => {
+              setLogLevel(v);
               setDirty(true);
             }}
           >
-            <option value="debug">debug</option>
-            <option value="info">info</option>
-            <option value="warn">warn</option>
-            <option value="error">error</option>
-          </select>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="debug">debug</SelectItem>
+              <SelectItem value="info">info</SelectItem>
+              <SelectItem value="warn">warn</SelectItem>
+              <SelectItem value="error">error</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
