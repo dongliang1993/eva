@@ -374,7 +374,7 @@ function ProviderDetail({
           </div>
 
           {enabledFirst.length > 0 ? (
-            <div className="overflow-clip rounded-xl border border-border">
+            <div className="overflow-clip rounded-xl border border-border bg-card">
               <div className="divide-y divide-border">
                 {enabledFirst.map((model) => {
                   const contextWindow = formatContextWindow(model.capabilities?.contextWindow);
@@ -478,35 +478,37 @@ export function ProviderSettings() {
 
   return (
     <div className="flex flex-1 gap-6 h-full min-h-0">
-      <div className="w-54 shrink-0 space-y-1.5 overflow-y-auto pr-1">
-        {providers.map((provider) => {
-          const preset = getProviderPreset(provider.id, provider.name);
+      <div className="w-64 shrink-0 overflow-y-auto rounded-xl border border-border bg-card p-2">
+        <div className="space-y-1.5">
+          {providers.map((provider) => {
+            const preset = getProviderPreset(provider.id, provider.name);
 
-          return (
-            <button
-              key={provider.id}
-              type="button"
-              className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors ${
-                provider.id === selectedId
-                  ? "border-primary/30 bg-primary/5 text-primary font-medium"
-                  : "border-border bg-card text-foreground hover:bg-accent"
-              }`}
-              onClick={() => setSelectedId(provider.id)}
-            >
-              <div className="flex items-center gap-2.5">
-                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-secondary text-xs font-bold text-secondary-foreground">
-                  {preset.icon}
-                </span>
-                <span>{provider.name}</span>
-              </div>
-              <span
-                className={`h-2.5 w-2.5 rounded-full ${
-                  provider.enabled ? "bg-primary" : "bg-border"
+            return (
+              <button
+                key={provider.id}
+                type="button"
+                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                  provider.id === selectedId
+                    ? "border-primary/30 bg-primary/5 text-primary font-medium"
+                    : "border-border bg-card text-foreground hover:bg-accent"
                 }`}
-              />
-            </button>
-          );
-        })}
+                onClick={() => setSelectedId(provider.id)}
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-md bg-secondary text-xs font-bold text-secondary-foreground">
+                    {preset.icon}
+                  </span>
+                  <span>{provider.name}</span>
+                </div>
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    provider.enabled ? "bg-primary" : "bg-border"
+                  }`}
+                />
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="min-w-0 min-h-0 flex-1">
