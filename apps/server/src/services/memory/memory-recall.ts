@@ -2,16 +2,16 @@ import { eq } from "drizzle-orm";
 
 import { createMemoryPromptSection, type MemoryEntry } from "@eva/harness";
 
-import type { AppConfig } from "../config.js";
-import type { AppDatabase } from "../db/index.js";
-import { isVecAvailable } from "../db/index.js";
-import { MemoryEmbeddingRepository } from "../db/repositories/memory-embedding-repository.js";
-import type { IMemoryRepository } from "../db/repositories/memory-repository.js";
-import type { IMessageSearchRepository, MessageSearchHit } from "../db/repositories/message-search-repository.js";
-import { memories } from "../db/schema.js";
+import type { AppConfig } from "../../config.js";
+import type { AppDatabase } from "../../db/index.js";
+import { isVecAvailable } from "../../db/index.js";
+import { MemoryEmbeddingRepository } from "../../db/repositories/memory-embedding-repository.js";
+import type { IMemoryRepository } from "../../db/repositories/memory-repository.js";
+import type { IMessageSearchRepository, MessageSearchHit } from "../../db/repositories/message-search-repository.js";
+import { memories } from "../../db/schema.js";
 import { generateEmbedding } from "./memory-embedding.js";
-import { estimateTokens } from "./token-estimator.js";
-import { resolveModelSlot } from "./providers/model-resolver.js";
+import { estimateTokens } from "../token-estimator.js";
+import { resolveModelSlot } from "../providers/model-resolver.js";
 
 const QUERY_REWRITE_SYSTEM_PROMPT = `You are a query rewriting assistant. Your task is to rewrite conversational user messages into concise search queries optimized for semantic memory retrieval.
 

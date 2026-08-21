@@ -11,19 +11,19 @@ import {
   type MemoryStore
 } from "@eva/harness";
 
-import type { AppConfig } from "../config.js";
-import type { AppDatabase } from "../db/index.js";
-import { DrizzleMemoryRepository } from "../db/repositories/memory-repository.js";
-import { DrizzleMessageSearchRepository } from "../db/repositories/message-search-repository.js";
-import { evaDataDir } from "../paths.js";
-import { MemoryFileStore } from "./memory/memory-file-store.js";
+import type { AppConfig } from "../../config.js";
+import type { AppDatabase } from "../../db/index.js";
+import { DrizzleMemoryRepository } from "../../db/repositories/memory-repository.js";
+import { DrizzleMessageSearchRepository } from "../../db/repositories/message-search-repository.js";
+import { evaDataDir } from "../../paths.js";
+import { MemoryFileStore } from "./memory-file-store.js";
 import { embedAndStoreMemory } from "./memory-embedding.js";
 import {
   calculateMemoryContextTokenBudget,
   recallMemories,
   renderRecallPromptContext
 } from "./memory-recall.js";
-import { loadAppSettings } from "./settings/app-settings.js";
+import { loadAppSettings } from "../settings/app-settings.js";
 
 export interface MemoryRuntimeModelLimits {
   readonly contextWindow?: number;

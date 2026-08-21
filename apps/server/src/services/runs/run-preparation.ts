@@ -16,12 +16,12 @@ import { DrizzleRunRepository } from "../../db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../../db/repositories/session-repository.js";
 import type { Session } from "../../db/repositories/types.js";
 import type { RunRequest } from "../../types/runs.js";
-import { autoCompactIfNeeded, createAutoCompactConfig } from "../auto-compact.js";
-import { buildMemoryRuntimeSupport } from "../memory-runtime.js";
+import { autoCompactIfNeeded, createAutoCompactConfig } from "../compact/auto-compact.js";
+import { buildMemoryRuntimeSupport } from "../memory/memory-runtime.js";
 import type { ModelBinding } from "../providers/model-resolver.js";
 import type { MessagePosition, SessionService } from "../session.js";
 import { loadAppSettings } from "../settings/app-settings.js";
-import { createModelSummarizer } from "../summarize-with-model.js";
+import { createModelSummarizer } from "../compact/summarize-with-model.js";
 import { estimateModelHistoryTokens } from "../token-estimator.js";
 import { loadProjectDocsSection } from "../workspaces/project-docs.js";
 import {

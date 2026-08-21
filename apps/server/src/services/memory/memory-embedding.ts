@@ -1,11 +1,11 @@
 import { eq, sql } from "drizzle-orm";
 
-import type { AppConfig } from "../config.js";
-import type { AppDatabase } from "../db/index.js";
-import { isVecAvailable } from "../db/index.js";
-import { MemoryEmbeddingRepository } from "../db/repositories/memory-embedding-repository.js";
-import { memories } from "../db/schema.js";
-import { resolveModelSlot } from "./providers/model-resolver.js";
+import type { AppConfig } from "../../config.js";
+import type { AppDatabase } from "../../db/index.js";
+import { isVecAvailable } from "../../db/index.js";
+import { MemoryEmbeddingRepository } from "../../db/repositories/memory-embedding-repository.js";
+import { memories } from "../../db/schema.js";
+import { resolveModelSlot } from "../providers/model-resolver.js";
 
 export interface EmbeddingResult {
   readonly embedding: Float32Array;

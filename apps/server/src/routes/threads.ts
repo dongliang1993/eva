@@ -10,10 +10,10 @@ import { DrizzleMessageRepository } from "../db/repositories/message-repository.
 import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
 import { buildActiveChain, resolveLeafFrom } from "../services/message-tree.js";
-import { compactSession } from "../services/compact.js";
+import { compactSession } from "../services/compact/compact.js";
 import { deriveSessionStatus, readSessionRuntimeStatus } from "../services/session-status.js";
 import { readSessionUsage } from "../services/session-usage.js";
-import { createModelSummarizer } from "../services/summarize-with-model.js";
+import { createModelSummarizer } from "../services/compact/summarize-with-model.js";
 import { resolveModelSlot } from "../services/providers/model-resolver.js";
 import { messages } from "../db/schema.js";
 

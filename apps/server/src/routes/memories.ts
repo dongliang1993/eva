@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { MemoryRecord, MemoryStats } from "@eva/shared";
 
-import { backfillPendingEmbeddings, embedAndStoreMemory } from "../services/memory-embedding.js";
+import { backfillPendingEmbeddings, embedAndStoreMemory } from "../services/memory/memory-embedding.js";
 
 import {
   DrizzleMemoryRepository,

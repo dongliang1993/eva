@@ -10,13 +10,13 @@ import {
 } from "../apps/server/src/db/repositories/memory-repository.js";
 import {
   buildMemoryRuntimeSupport,
-} from "../apps/server/src/services/memory-runtime.js";
+} from "../apps/server/src/services/memory/memory-runtime.js";
 import {
   calculateMemoryContextTokenBudget,
   renderRecallPromptContext,
   type RecalledHistoryHit,
   type RecalledMemoryEntry
-} from "../apps/server/src/services/memory-recall.js";
+} from "../apps/server/src/services/memory/memory-recall.js";
 
 let db: AppDatabase;
 let repo: IMemoryRepository;
