@@ -309,6 +309,168 @@ describe("abort", () => {
     expect(events.some((e) => e.type === "error")).toBe(false);
   });
 });
+
+describe("abort 在飞工具收口(T26)", () => {
+  const usage2 = usage;
+
+  /** 第一步发 count 个 tool-call 后挂住工具;第二步本不该到达。 */
+  const twoCallModel = (): MockLanguageModelV4 =>
+    new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start", warnings: [] },
+            { type: "tool-input-start", id: "tc-1", toolName: "hung" },
+            {
+              type: "tool-call",
+              toolCallId: "tc-1",
+              toolName: "hung",
+              input: JSON.stringify({}),
+            },
+            { type: "tool-input-start", id: "tc-2", toolName: "hung" },
+            {
+              type: "tool-call",
+              toolCallId: "tc-2",
+              toolName: "hung",
+              input: JSON.stringify({}),
+            },
+            { type: "finish", finishReason: "tool-calls", usage: usage2 },
+          ],
+        }),
+      }),
+    });
+
+  const neverTool = () =>
+    buildTool({
+      name: "hung",
+      description: "never resolves",
+      inputSchema: z.object({}),
+      execute: () => new Promise<string>(() => {}),
+    });
+
+  const collectUntilFinish = (
+    agent: ReturnType<typeof createAgent>,
+    controller: AbortController,
+    abortWhen: (event: AgentStreamEvent) => boolean,
+  ): Promise<AgentStreamEvent[]> =>
+    (async () => {
+      const events: AgentStreamEvent[] = [];
+      for await (const event of agent.stream({
+        messages: [{ role: "user", content: "hi" }],
+        abortSignal: controller.signal,
+      })) {
+        events.push(event);
+        if (abortWhen(event) && !controller.signal.aborted) {
+          controller.abort();
+        }
+      }
+      return events;
+    })();
+
+  it("工具在飞时 abort → finish 前补发取消 tool-result,finish 汇总带它", async () => {
+    const controller = new AbortController();
+    const agent = createAgent({ model: twoCallModel(), tools: [neverTool()] });
+
+    const events = await collectUntilFinish(agent, controller, (e) => {
+      // 两个 tool-call 都发起后 abort;工具永不 resolve,SDK 丢弃在飞结果。
+      if (e.type === "tool-call" && e.toolCallId === "tc-2") {
+        // 让 SDK 把 tool-call 消费完、进入工具执行阶段后再断。
+        return true;
+      }
+      return false;
+    });
+
+    const finishes = events.filter(isFinish);
+    expect(finishes).toHaveLength(1);
+    expect(finishes[0]!.finishReason).toBe("aborted");
+
+    const finishIndex = events.findIndex((e) => e.type === "finish");
+    const canceled = events.filter(
+      (e, i) =>
+        e.type === "tool-result" && e.status === "error" && i < finishIndex,
+    );
+    expect(canceled.map((e) => (e as { toolCallId: string }).toolCallId)).toEqual([
+      "tc-1",
+      "tc-2",
+    ]);
+    for (const e of canceled) {
+      expect(
+        (e as { output: string }).output.startsWith("[Tool Error]"),
+      ).toBe(true);
+    }
+
+    const summary = finishes[0]!.toolCalls;
+    expect(summary.map((t) => t.toolCallId)).toEqual(["tc-1", "tc-2"]);
+    expect(summary.every((t) => t.status === "error")).toBe(true);
+  });
+
+  it("无在飞工具时 abort(纯文本)→ 不补发任何 tool-result", async () => {
+    const controller = new AbortController();
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "1" },
+            { type: "text-delta", id: "1", delta: "Hello" },
+            { type: "text-delta", id: "1", delta: " world" },
+            { type: "text-end", id: "1" },
+            { type: "finish", finishReason: "stop", usage: usage2 },
+          ],
+          chunkDelayInMs: 60,
+        }),
+      }),
+    });
+    const agent = createAgent({ model });
+
+    const events = await collectUntilFinish(
+      agent,
+      controller,
+      (e) => e.type === "text-delta",
+    );
+
+    expect(events.some((e) => e.type === "tool-result")).toBe(false);
+    const finishes = events.filter(isFinish);
+    expect(finishes).toHaveLength(1);
+    expect(finishes[0]!.finishReason).toBe("aborted");
+    expect(finishes[0]!.toolCalls).toEqual([]);
+  });
+
+  it("单个在飞工具 abort → 补发落在 finish 之前(移除实验锚点)", async () => {
+    const controller = new AbortController();
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start", warnings: [] },
+            { type: "tool-input-start", id: "tc-1", toolName: "hung" },
+            {
+              type: "tool-call",
+              toolCallId: "tc-1",
+              toolName: "hung",
+              input: JSON.stringify({}),
+            },
+            { type: "finish", finishReason: "tool-calls", usage },
+          ],
+        }),
+      }),
+    });
+    const agent = createAgent({ model, tools: [neverTool()] });
+
+    const events = await collectUntilFinish(
+      agent,
+      controller,
+      (e) => e.type === "tool-call",
+    );
+
+    const kinds = events.map((e) => e.type);
+    const resultIndex = kinds.indexOf("tool-result");
+    const finishIndex = kinds.indexOf("finish");
+    // 补发的取消 result 必须先于 finish(SSE 在 finish 后收尾,之后的事件客户端收不到)。
+    expect(resultIndex).toBeGreaterThan(-1);
+    expect(finishIndex).toBeGreaterThan(resultIndex);
+  });
+});
 describe("工具超时(T25 toolTimeout 配置)", () => {
   const hungThenTextModel = (): MockLanguageModelV4 => {
     let callIndex = 0;

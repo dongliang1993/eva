@@ -9,7 +9,7 @@ import {
 import type { StreamToolCallSummary, StreamTokenUsage } from "@eva/shared";
 
 import type { AgentTool } from "../tools/index.js";
-import { toToolSet } from "../tools/index.js";
+import { toToolSet, TOOL_ERROR_PREFIX } from "../tools/index.js";
 import {
   DEFAULT_READ_ONLY_CONCURRENCY,
   Semaphore,
@@ -448,6 +448,41 @@ class Agent implements AgentInterface {
       }
 
       if (aborted) {
+        // T26:SDK 在 abort 时丢弃刚读出的在飞 tool-result(外层拉流循环直接 close),
+        // 不给补发的话 UI 卡片永远停在 running、落库 part 悬挂 input-available。
+        // clock 里剩下的 entry 就是"已发 tool-call、未收 tool-result"的在飞集合 ——
+        // 逐个补一条取消 result,再 yield finish(顺序不能反:SSE 在 finish 后收尾)。
+        for (const [toolCallId, inFlight] of clock) {
+          clock.delete(toolCallId);
+          const output = `${TOOL_ERROR_PREFIX} Command canceled (run aborted).`;
+          const durationMs = Date.now() - inFlight.startedAt;
+          const canceled: AgentToolCallResult = {
+            toolName: inFlight.toolName,
+            toolCallId,
+            args: {},
+            output,
+            status: "error",
+            durationMs,
+          };
+          toolCalls.push(canceled);
+          this.emit({
+            type: "tool_call_completed",
+            step: stepsUsed,
+            toolName: inFlight.toolName,
+            toolCallId,
+            status: "error",
+            durationMs,
+          });
+          yield {
+            type: "tool-result",
+            toolCallId,
+            toolName: inFlight.toolName,
+            output,
+            status: "error",
+            durationMs,
+          };
+        }
+
         yield this.finish(
           continuedText + text,
           toolCalls,

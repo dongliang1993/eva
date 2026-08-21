@@ -5,10 +5,16 @@ import type { AgentStreamEvent } from "./types.js";
 import { TOOL_ERROR_PREFIX } from "../tools/index.js";
 
 /**
- * 工具调用的计时表:tool-call 时打点,tool-result 时取差。
+ * 工具调用的在飞台账:tool-call 时登记(toolName + 打点),tool-result 时取差并销账。
  * run() 局部持有,跨 step 共享(一个 toolCallId 的 call 与 result 可能跨 step)。
+ * abort 收口时,台账里剩下的 entry 就是"已发起、未收口"的在飞调用 —— T26 据此补发取消结果。
  */
-export type ToolCallClock = Map<string, number>;
+export interface InFlightToolCall {
+  readonly toolName: string;
+  readonly startedAt: number;
+}
+
+export type ToolCallClock = Map<string, InFlightToolCall>;
 
 export interface MappedPart {
   /** 要转发给上层的事件;undefined 表示这个 part 不对外产出事件。 */
@@ -32,9 +38,9 @@ const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : "Unknown error";
 
 const takeDuration = (clock: ToolCallClock, toolCallId: string): number => {
-  const startedAt = clock.get(toolCallId);
+  const inFlight = clock.get(toolCallId);
   clock.delete(toolCallId);
-  return startedAt !== undefined ? Date.now() - startedAt : 0;
+  return inFlight !== undefined ? Date.now() - inFlight.startedAt : 0;
 };
 
 /**
@@ -65,7 +71,10 @@ export const mapStreamPart = <TOOLS extends ToolSet>(
       };
 
     case "tool-call":
-      clock.set(part.toolCallId, Date.now());
+      clock.set(part.toolCallId, {
+        toolName: part.toolName,
+        startedAt: Date.now(),
+      });
 
       return {
         event: {

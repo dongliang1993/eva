@@ -125,10 +125,14 @@ map。模型侧约束(Anthropic 最多 128 个并行 tool use、其他 provider 
 | **T23** | [`T23-write-guard-mtime.md`](./T23-write-guard-mtime.md)       | edit/write 的 mtime 快照校验:Claude Code 式乐观守卫,拒绝基于过期状态的写入            | 0.5–1 天 | —    |
 | **T24** | [`T24-concurrency-cap.md`](./T24-concurrency-cap.md)           | 只读工具并发帽(默认 10),装配层限流;web_fetch 补 `readOnly: true`                      | 0.5 天   | —    |
 | **T25** | [`T25-abort-signal-timeout.md`](./T25-abort-signal-timeout.md) | `ToolExecutionOptions` 透传 `abortSignal`;bash/web 类接信号;`streamText` 配 `timeout` | 0.5–1 天 | —    |
+| **T26** | [`T26-abort-inflight-tool-result.md`](./T26-abort-inflight-tool-result.md) | abort 时为在飞工具补发取消 tool-result:SDK 丢弃在飞结果,卡片永远 running 的收口 | 0.5 天 | T25 |
 
 > **落地记录**:T23 → commit 09c34d9;T25 → 7888d43(bash 组杀实测结论见
-> T25 坑 7:execFile 的 detached 不生效,必须 spawn);T24 → 85cc99e。
-> 439 测试全绿,三个摘除实验都变红过。
+> T25 坑 7:execFile 的 detached 不生效,必须 spawn);T24 → 85cc99e;
+> T26 → 本任务(E2E 实测发现:abort 后工具卡片停 running,根因是 SDK 外层
+> 拉流循环丢弃在飞 tool-result;ToolCallClock 升级为在飞台账,abort 收口处
+> 按台账补发)。
+> 442 测试全绿,四个摘除实验都变红过。
 
 **顺序建议**:T23 先(正确性问题,且 T24/T25 都可能踩到它暴露的既有测试)→
 T25 次之(透传是 T24 限流器想要的取消路径,但两者无文件交集,可并行)→
