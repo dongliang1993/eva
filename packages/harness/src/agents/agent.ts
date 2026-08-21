@@ -10,6 +10,11 @@ import type { StreamToolCallSummary, StreamTokenUsage } from "@eva/shared";
 
 import type { AgentTool } from "../tools/index.js";
 import { toToolSet } from "../tools/index.js";
+import {
+  DEFAULT_READ_ONLY_CONCURRENCY,
+  Semaphore,
+  withConcurrencyCap,
+} from "../tools/concurrency-cap.js";
 import { withApproval } from "../tools/with-approval.js";
 import { buildAgentSystemPrompt } from "../prompts/prompt-builder.js";
 import {
@@ -148,6 +153,8 @@ interface AgentOptions {
   callSettings?: AgentCallSettings;
   /** T25:工具超时配置,条件装配进 streamText 的 timeout。不传 = 现状(无超时)。 */
   toolTimeout?: { toolMs: number; tools?: Record<string, number> };
+  /** T24:只读工具并发帽。不传 = DEFAULT_READ_ONLY_CONCURRENCY(10)。 */
+  readOnlyConcurrency?: number;
 }
 
 /**
@@ -565,11 +572,24 @@ class Agent implements AgentInterface {
 export const createAgent = (options: CreateAgentOptions): AgentInterface => {
   const { requestApproval, ...rest } = options;
 
+  // T24:只读工具的并发帽。SDK 对一步内的 tool calls 是 Promise.all 全量
+  // 并发 —— 20 个 read_file 是内存脉冲,20 个 web_search 是限流/封禁。
+  // 只帽 readOnly:写类直通(正确性由 T23 守卫兜底,不该排队)。
+  // per-run 生命周期:与 Agent 实例对齐,两个 run 不互相抢帽子。
+  const limiter = new Semaphore(
+    rest.readOnlyConcurrency ?? DEFAULT_READ_ONLY_CONCURRENCY,
+  );
+
   // 危险工具统一在这一层包装 execute —— 审批逻辑完全收敛到 withApproval。
   // (子代理 fork-join 半成品已在 T4 移除,S7 会从零实现带独立流式通道与消息落库的版本。)
+  // 包装顺序:限流在审批内层 —— 审批弹窗可能挂很久,若限流在外层,
+  // "排队等帽的只读调用"会占着帽等一个人工确认,帽被审批拖死。
+  const capTools = (rest.tools ?? []).map((t) =>
+    withConcurrencyCap(t, limiter),
+  );
   const tools = requestApproval
-    ? (rest.tools ?? []).map((t) => withApproval(t, requestApproval))
-    : rest.tools;
+    ? capTools.map((t) => withApproval(t, requestApproval))
+    : capTools;
 
   return new Agent({
     model: rest.model,
@@ -590,6 +610,9 @@ export const createAgent = (options: CreateAgentOptions): AgentInterface => {
       : {}),
     ...(rest.toolTimeout !== undefined
       ? { toolTimeout: rest.toolTimeout }
+      : {}),
+    ...(rest.readOnlyConcurrency !== undefined
+      ? { readOnlyConcurrency: rest.readOnlyConcurrency }
       : {}),
   });
 };

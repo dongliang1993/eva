@@ -34,6 +34,8 @@ export const createWebFetchTool = (
       "Fetch the content of a URL, convert it to Markdown, and summarize it based on the given prompt. " +
       "Use this after web_search to read specific pages in detail.",
     inputSchema: webFetchSchema,
+    // T24:fetch 无副作用,归只读类 —— 此前缺标被当写类对待(并发帽不生效)。
+    readOnly: true,
     async execute(input, execOptions?: ToolExecutionOptions) {
       const startedAt = performance.now();
 

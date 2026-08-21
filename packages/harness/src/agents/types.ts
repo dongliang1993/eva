@@ -97,4 +97,11 @@ export interface CreateAgentOptions {
    * 明确不做,r6 00-overview §2.1 #4)。
    */
   toolTimeout?: { toolMs: number; tools?: Record<string, number> };
+  /**
+   * T24:只读工具的并发上限(每 agent 实例)。SDK 对一步内的 tool calls 是
+   * Promise.all 全量并发 —— 这个帽只作用于 readOnly === true 的工具,
+   * 写类直通(正确性由 T23 写守卫兜底,不该排队)。默认 10(Claude Code
+   * 同款)。server 不注入,字段留给测试和将来 workspace 级配置。
+   */
+  readOnlyConcurrency?: number;
 }

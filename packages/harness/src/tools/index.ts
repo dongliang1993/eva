@@ -8,6 +8,7 @@
  */
 export * from "./build-tool.js";
 export * from "./build-json-schema-tool.js";
+export * from "./concurrency-cap.js";
 export * from "./with-approval.js";
 export * from "./risk.js";
 export * from "./fs/index.js";
