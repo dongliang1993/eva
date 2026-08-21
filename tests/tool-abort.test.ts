@@ -23,7 +23,7 @@ const optWith = (abortSignal?: AbortSignal): ToolExecutionOptions => ({
 });
 
 describe("buildTool abortSignal 透传 + race 兜底(T25)", () => {
-  it("挂死工具 + 已 abort 的 signal → 立即返回 [Tool Error],不再悬着", async () => {
+  it("挂死工具 + 已 abort 的 signal → 立即返回 Error:,不再悬着", async () => {
     const hung = buildTool({
       name: "hung",
       description: "never resolves",
@@ -36,7 +36,7 @@ describe("buildTool abortSignal 透传 + race 兜底(T25)", () => {
       { a: 1 },
       optWith(controller.signal) as never,
     );
-    expect(String(res)).toContain("[Tool Error]");
+    expect(String(res)).toContain("Error:");
   });
 
   it("execute 开始后才 abort → race 在 abort 时点返回错误文本", async () => {
@@ -54,7 +54,7 @@ describe("buildTool abortSignal 透传 + race 兜底(T25)", () => {
     );
     setTimeout(() => controller.abort(), 10);
     const res = await pending;
-    expect(String(res)).toContain("[Tool Error]");
+    expect(String(res)).toContain("Error:");
     expect(String(res)).toMatch(/abort|cancel|timed?/i);
   });
 
@@ -94,7 +94,7 @@ describe("buildTool abortSignal 透传 + race 兜底(T25)", () => {
     );
   });
 
-  it("无 signal → 行为与现状一致(正常返回;抛错仍包 [Tool Error])", async () => {
+  it("无 signal → 行为与现状一致(正常返回;抛错仍包 Error:)", async () => {
     const ok = buildTool({
       name: "ok",
       description: "fine",
@@ -112,7 +112,7 @@ describe("buildTool abortSignal 透传 + race 兜底(T25)", () => {
       },
     });
     const res = await boom.tool.execute!({ a: 1 }, optWith() as never);
-    expect(String(res)).toContain("[Tool Error]");
+    expect(String(res)).toContain("Error:");
     expect(String(res)).toContain("kaput");
   });
 

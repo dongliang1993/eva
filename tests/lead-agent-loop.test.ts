@@ -105,7 +105,7 @@ describe("工具循环", () => {
     expect((toolResults[0] as { output: string }).output).toBe("line1\nline2");
   });
 
-  it("工具抛异常 → status 'error',output 以 [Tool Error] 开头", async () => {
+  it("工具抛异常 → status 'error',output 以 Error: 开头", async () => {
     const model = new MockLanguageModelV4({
       doStream: async () => ({
         stream: simulateReadableStream({
@@ -130,7 +130,7 @@ describe("工具循环", () => {
     expect(toolResults.length).toBeGreaterThan(0);
     const tr = toolResults[0] as { output: string; status: string };
     expect(tr.status).toBe("error");
-    expect(tr.output.startsWith("[Tool Error]")).toBe(true);
+    expect(tr.output.startsWith("Error:")).toBe(true);
     expect(tr.output).toContain("kaboom");
   });
 
@@ -395,7 +395,7 @@ describe("abort 在飞工具收口(T26)", () => {
     ]);
     for (const e of canceled) {
       expect(
-        (e as { output: string }).output.startsWith("[Tool Error]"),
+        (e as { output: string }).output.startsWith("Error:"),
       ).toBe(true);
     }
 
@@ -520,7 +520,7 @@ describe("工具超时(T25 toolTimeout 配置)", () => {
       execute: () => new Promise<string>(() => {}),
     });
 
-  it("toolMs 到点 → 挂死工具以 [Tool Error] 收口,循环继续到 finish", async () => {
+  it("toolMs 到点 → 挂死工具以 Error: 收口,循环继续到 finish", async () => {
     const startedAt = Date.now();
     const agent = createAgent({
       model: hungThenTextModel(),
@@ -535,7 +535,7 @@ describe("工具超时(T25 toolTimeout 配置)", () => {
       (e) => e.type === "tool-result",
     ) as Array<{ output: string; status: string }>;
     expect(toolResults.length).toBeGreaterThan(0);
-    expect(toolResults[0]!.output.startsWith("[Tool Error]")).toBe(true);
+    expect(toolResults[0]!.output.startsWith("Error:")).toBe(true);
     // 循环没死:模型收到错误文本后正常收尾
     const finishes = events.filter(isFinish);
     expect(finishes).toHaveLength(1);

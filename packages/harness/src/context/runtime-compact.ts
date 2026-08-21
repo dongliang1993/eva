@@ -147,12 +147,12 @@ const buildToolNameByCallId = (
   return toolNameByCallId;
 };
 
-// 从 tool result 的 output 文本判断状态(eva 的 buildTool 把错误包成 "[Tool Error] ..." 文本)。
+// 从 tool result 的 output 文本判断状态(eva 的 buildTool 把错误包成 "Error: ..." 文本)。
 const readToolStatus = (message: ToolModelMessage): "success" | "error" => {
   const result = readToolResult(message);
   if (!result) return "success";
   const text = stringifyToolOutput(result.output);
-  return text.startsWith("[Tool Error]") ? "error" : "success";
+  return text.startsWith("Error:") ? "error" : "success";
 };
 
 const summarizeMessage = (

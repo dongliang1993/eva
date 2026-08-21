@@ -105,7 +105,7 @@ describe("toAgentTools", () => {
     expect(String(result)).toBe("hit");
   });
 
-  it("client.callTool 抛错 → 返回 [Tool Error] 文本而不是抛出", async () => {
+  it("client.callTool 抛错 → 返回 Error: 文本而不是抛出", async () => {
     const [tool] = toAgentTools(
       server(),
       invoker([descriptor()], async () => {
@@ -116,7 +116,7 @@ describe("toAgentTools", () => {
 
     const result = await tool!.tool.execute!({ q: "x" }, TOOL_CALL_OPTIONS);
 
-    expect(String(result)).toContain("[Tool Error]");
+    expect(String(result)).toContain("Error:");
     expect(String(result)).toContain("timed out");
   });
 

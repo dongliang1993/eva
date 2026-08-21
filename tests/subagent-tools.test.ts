@@ -70,7 +70,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
 
     const out = await exec("subagent", tools)({ prompt: "做点什么" });
 
-    expect(out).toContain("[Tool Error]");
+    expect(out).toContain("Error:");
   });
 
   it("缺省角色是 explorer", async () => {

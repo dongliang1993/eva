@@ -82,7 +82,7 @@ describe("McpServerClient（跑真的 MCP 协议，用 InMemoryTransport）", ()
     await fake.close();
   });
 
-  it("server 报 isError → 抛错（由 buildJsonSchemaTool 包成 [Tool Error]）", async () => {
+  it("server 报 isError → 抛错（由 buildJsonSchemaTool 包成 Error:）", async () => {
     const fake = await startFakeMcpServer();
     const client = await McpServerClient.connect(addServer("fake"), logger(), fake.clientTransport);
 

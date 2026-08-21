@@ -27,7 +27,7 @@ export const createEditTool = (options: FsToolBaseOptions): AgentTool =>
     needsApproval: true,
     async execute({ path: rel, before, after }) {
       if (before.length > EDIT_MAX_BEFORE) {
-        return `[Tool Error] 'before' text too long (${before.length} > ${EDIT_MAX_BEFORE}). Edit smaller chunks.`;
+        return `Error: 'before' text too long (${before.length} > ${EDIT_MAX_BEFORE}). Edit smaller chunks.`;
       }
 
       const absolute = resolveWorkspacePath(rel, options.workRoot);
@@ -49,10 +49,10 @@ export const createEditTool = (options: FsToolBaseOptions): AgentTool =>
         // 没变过 → 就是锚文本选错了(既有语义,保留)。
         return isStale(snapshot1, snapshot2)
           ? staleFileMessage(rel)
-          : `[Tool Error] before text not found in ${rel}.`;
+          : `Error: before text not found in ${rel}.`;
       }
       if (occurrences > 1) {
-        return `[Tool Error] before text appears ${occurrences} times in ${rel}. Provide more context to make it unique.`;
+        return `Error: before text appears ${occurrences} times in ${rel}. Provide more context to make it unique.`;
       }
 
       const updated = current.replace(before, after);

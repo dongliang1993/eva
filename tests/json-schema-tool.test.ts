@@ -48,7 +48,7 @@ describe("buildJsonSchemaTool(T25 options 透传)", () => {
     );
   });
 
-  it("execute 抛错 → [Tool Error] 文本(既有行为回归)", async () => {
+  it("execute 抛错 → Error: 文本(既有行为回归)", async () => {
     const tool = buildJsonSchemaTool({
       name: "mcp__km__boom",
       description: "boom",
@@ -59,7 +59,7 @@ describe("buildJsonSchemaTool(T25 options 透传)", () => {
     });
 
     const result = await tool.tool.execute!({}, OPTIONS);
-    expect(String(result)).toContain("[Tool Error]");
+    expect(String(result)).toContain("Error:");
     expect(String(result)).toContain("connection lost");
   });
 

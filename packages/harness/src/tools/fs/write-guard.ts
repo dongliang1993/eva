@@ -32,5 +32,5 @@ export const isStale = (a: FileSnapshot, b: FileSnapshot): boolean =>
 
 /** 拒绝文案:与 Claude Code 同义,补 retry 指引(模型侧自愈路径)。 */
 export const staleFileMessage = (rel: string): string =>
-  `[Tool Error] ${rel} was modified since it was read (by a concurrent tool call or ` +
+  `Error: ${rel} was modified since it was read (by a concurrent tool call or ` +
   `an external process). Re-read the file and retry your edit.`;

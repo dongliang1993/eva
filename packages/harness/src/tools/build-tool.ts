@@ -43,11 +43,15 @@ export interface ToolDefinition<S extends z.ZodObject<z.ZodRawShape>> {
  * 工具执行失败的输出前缀。
  * `stream-part-mapper.ts` 靠它把 tool-result 判成 error 状态；`buildTool` 与
  * `buildJsonSchemaTool` 靠它包装执行异常。三处共用这一个定义，不要各自抄字面量。
+ * 文案对齐 dsh 的 "Error: tool call aborted" 形态:前缀即错误行本身。
  */
-export const TOOL_ERROR_PREFIX = "[Tool Error]";
+export const TOOL_ERROR_PREFIX = "Error:";
 
 export const toToolErrorOutput = (error: unknown): string =>
   `${TOOL_ERROR_PREFIX} ${error instanceof Error ? error.message : "Unknown error"}`;
+
+/** 取消/超时统一收口文案(dsh 同款)。 */
+export const TOOL_CALL_ABORTED_OUTPUT = `${TOOL_ERROR_PREFIX} tool call aborted`;
 
 /**
  * T25 race 兜底:signal 触发时立即以错误文本 settle,不等业务 execute。
@@ -58,10 +62,7 @@ const abortFallback = (signal: AbortSignal): Promise<string> =>
   new Promise<string>((resolve) => {
     const onAbort = () => {
       signal.removeEventListener("abort", onAbort);
-      resolve(
-        `${TOOL_ERROR_PREFIX} Tool execution was canceled or timed out; ` +
-          "it may or may not have completed."
-      );
+      resolve(TOOL_CALL_ABORTED_OUTPUT);
     };
     signal.addEventListener("abort", onAbort, { once: true });
   });
@@ -86,7 +87,7 @@ export const buildTool = <S extends z.ZodObject<z.ZodRawShape>>(
         const toolCallId = options?.toolCallId ?? `auto-${crypto.randomUUID()}`;
         const signal = options?.abortSignal;
         if (signal?.aborted) {
-          return `${TOOL_ERROR_PREFIX} Tool execution was canceled before it started.`;
+          return TOOL_CALL_ABORTED_OUTPUT;
         }
         const toolOptions: ToolExecutionOptions = {
           toolCallId,

@@ -51,7 +51,7 @@ describe("report 工具 (S7 push:子代理主动交付)", () => {
 
     const out = await exec(tool)({ output: "" });
 
-    expect(out).toContain("[Tool Error]");
+    expect(out).toContain("Error:");
     expect(got).toEqual([]);
   });
 

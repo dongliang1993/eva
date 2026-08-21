@@ -9,7 +9,7 @@ import {
 import type { StreamToolCallSummary, StreamTokenUsage } from "@eva/shared";
 
 import type { AgentTool } from "../tools/index.js";
-import { toToolSet, TOOL_ERROR_PREFIX } from "../tools/index.js";
+import { toToolSet, TOOL_CALL_ABORTED_OUTPUT } from "../tools/index.js";
 import {
   DEFAULT_READ_ONLY_CONCURRENCY,
   Semaphore,
@@ -454,7 +454,7 @@ class Agent implements AgentInterface {
         // 逐个补一条取消 result,再 yield finish(顺序不能反:SSE 在 finish 后收尾)。
         for (const [toolCallId, inFlight] of clock) {
           clock.delete(toolCallId);
-          const output = `${TOOL_ERROR_PREFIX} Command canceled (run aborted).`;
+          const output = TOOL_CALL_ABORTED_OUTPUT;
           const durationMs = Date.now() - inFlight.startedAt;
           const canceled: AgentToolCallResult = {
             toolName: inFlight.toolName,

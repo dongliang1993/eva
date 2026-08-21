@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   buildTool,
+  TOOL_CALL_ABORTED_OUTPUT,
   type AgentTool,
   type ToolExecutionOptions,
 } from "../build-tool.js";
@@ -168,7 +169,7 @@ export const createBashTool = (options: FsToolBaseOptions): AgentTool =>
         execOptions?.abortSignal,
       );
       if (canceled) {
-        return `[Tool Error] Command canceled (${command.slice(0, 60)}…).`;
+        return TOOL_CALL_ABORTED_OUTPUT;
       }
       if (timeout) {
         return maybeOverflow(

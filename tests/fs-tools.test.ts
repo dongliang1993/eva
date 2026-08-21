@@ -88,7 +88,7 @@ describe("fs tools", () => {
       { path: "../outside.txt", content: "x" },
       { messages: [], toolCallId: "c3", context: {} },
     );
-    // buildTool 把沙盒错误包成 [Tool Error] 文本返回, 而非 reject。
+    // buildTool 把沙盒错误包成 Error: 文本返回, 而非 reject。
     expect(String(res)).toContain("workspace");
   });
 
@@ -173,7 +173,7 @@ describe("bash tool", () => {
     const bashTool = createBashTool({ workRoot: root });
 
     // buildTool 在 execute 内 parse schema;只给 command 不给 description → parse 抛错 →
-    // 被包装成 [Tool Error] 输出,命令不会真的执行。
+    // 被包装成 Error: 输出,命令不会真的执行。
     const res = await bashTool.tool.execute!(
       { command: "echo hi" } as unknown as {
         command: string;
@@ -181,7 +181,7 @@ describe("bash tool", () => {
       },
       { messages: [], toolCallId: "c-bash-1", context: {} },
     );
-    expect(String(res)).toContain("[Tool Error]");
+    expect(String(res)).toContain("Error:");
   });
 
   it("command + description 齐全 → 在工作区内执行,输出含命令结果", async () => {
@@ -466,7 +466,7 @@ describe("bash 取消(T25 abortSignal 接线)", () => {
     await new Promise((r) => setTimeout(r, 200));
     controller.abort();
     const res = await pending;
-    expect(String(res)).toMatch(/cancel/i);
+    expect(String(res)).toBe("Error: tool call aborted");
 
     // 给进程表一点收敛时间,然后确认进程树无残留。
     await new Promise((r) => setTimeout(r, 300));
