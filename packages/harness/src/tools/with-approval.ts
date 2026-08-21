@@ -1,4 +1,4 @@
-import type { AgentTool } from "../tools.js";
+import type { AgentTool } from "./build-tool.js";
 import type { RequestApproval } from "../agents/types.js";
 
 export const APPROVAL_DENIED_PREFIX = "[Approval Denied]";

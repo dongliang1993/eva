@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../../tools.js";
+import { buildTool, type AgentTool } from "../build-tool.js";
 import type { FsToolBaseOptions } from "./read-file-tool.js";
 import { maybeOverflow } from "./tool-overflow.js";
 

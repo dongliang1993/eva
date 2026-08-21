@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../tools.js";
+import { buildTool, type AgentTool } from "../tools/index.js";
 
 /** report 工具把内容交给"启动我的那个 agent"—— 谁是父级由装配方闭包决定,子代理无从选择。 */
 export type ReportSink = (output: string) => void;

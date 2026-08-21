@@ -9,7 +9,7 @@ import {
   MAX_DEPTH
 } from "../packages/harness/src/subagents/crew.js";
 import type { SubagentRole } from "../packages/harness/src/subagents/types.js";
-import type { AgentTool } from "../packages/harness/src/tools.js";
+import type { AgentTool } from "../packages/harness/src/tools/build-tool.js";
 
 // a stub AgentTool
 const stubTool = (name: string): AgentTool =>

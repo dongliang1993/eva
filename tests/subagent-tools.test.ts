@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createSubagentTool } from "../packages/harness/src/subagents/subagent-tool.js";
-import { toToolSet } from "../packages/harness/src/tools.js";
+import { toToolSet } from "../packages/harness/src/tools/build-tool.js";
 
 /** 把一个 AgentTool 的 execute 拉出来可单独调用(测试不用跑 Agent)。 */
 const exec =

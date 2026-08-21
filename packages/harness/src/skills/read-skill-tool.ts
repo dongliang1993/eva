@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../tools.js";
+import { buildTool, type AgentTool } from "../tools/index.js";
 import type { Skill } from "./types.js";
 
 const readSkillSchema = z.object({

@@ -7,7 +7,7 @@ import { ApprovalRepository } from "../apps/server/src/db/repositories/approval-
 import { ApprovalGateway } from "../apps/server/src/services/approval-gateway.js";
 import { createAgent } from "../packages/harness/src/agents/agent.js";
 import type { AgentStreamEvent } from "../packages/harness/src/agents/types.js";
-import { buildTool } from "../packages/harness/src/tools.js";
+import { buildTool } from "../packages/harness/src/tools/build-tool.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createAgent } from "../packages/harness/src/agents/agent.js";
 import type { AgentTelemetryEvent } from "../packages/harness/src/agents/observer.js";
 import type { AgentStreamEvent } from "../packages/harness/src/agents/types.js";
-import { buildTool } from "../packages/harness/src/tools.js";
+import { buildTool } from "../packages/harness/src/tools/build-tool.js";
 
 type FinishEvent = Extract<AgentStreamEvent, { type: "finish" }>;
 

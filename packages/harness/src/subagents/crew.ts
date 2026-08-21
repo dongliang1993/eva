@@ -1,4 +1,4 @@
-import type { AgentTool } from "../tools.js";
+import type { AgentTool } from "../tools/index.js";
 
 export interface SubagentRole {
   readonly type: string;

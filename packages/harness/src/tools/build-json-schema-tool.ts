@@ -1,6 +1,6 @@
 import { jsonSchema, tool, type Tool } from "ai";
 
-import { toToolErrorOutput, type AgentTool } from "../tools.js";
+import { toToolErrorOutput, type AgentTool } from "./build-tool.js";
 
 export interface JsonSchemaToolDefinition {
   readonly name: string;

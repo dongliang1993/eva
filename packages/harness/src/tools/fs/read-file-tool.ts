@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../../tools.js";
+import { buildTool, type AgentTool } from "../build-tool.js";
 import { resolveReadablePath } from "./resolve-workspace-path.js";
 import { maybeOverflow } from "./tool-overflow.js";
 

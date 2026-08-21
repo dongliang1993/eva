@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../../tools.js";
+import { buildTool, type AgentTool } from "../build-tool.js";
 import type { MemoryFileStore } from "./memory-files.js";
 
 const updateLongTermMemorySchema = z.object({

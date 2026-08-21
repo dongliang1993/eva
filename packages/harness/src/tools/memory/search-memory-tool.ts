@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../../tools.js";
+import { buildTool, type AgentTool } from "../build-tool.js";
 import type { MemoryStore } from "./types.js";
 
 const searchMemorySchema = z.object({

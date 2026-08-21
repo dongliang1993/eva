@@ -8,7 +8,7 @@ import type {
 
 import type { ContextWindowPolicyOptions } from "../context/policy.js";
 import type { AgentModel } from "../models/agent-model.js";
-import type { AgentTool } from "../tools.js";
+import type { AgentTool } from "../tools/index.js";
 import type { AgentObserver } from "./observer.js";
 
 export interface AgentRunInput {

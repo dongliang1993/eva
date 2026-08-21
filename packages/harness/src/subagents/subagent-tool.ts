@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../tools.js";
+import { buildTool, type AgentTool } from "../tools/index.js";
 
 /**
  * server 层注入的 fork 边界。它知道 sessionId/depth/工具槽模型/角色白名单,

@@ -2,7 +2,7 @@ import type { TextStreamPart, ToolSet } from "ai";
 
 import type { AgentToolCallResult } from "./types.js";
 import type { AgentStreamEvent } from "./types.js";
-import { TOOL_ERROR_PREFIX } from "../tools.js";
+import { TOOL_ERROR_PREFIX } from "../tools/index.js";
 
 /**
  * 工具调用的计时表:tool-call 时打点,tool-result 时取差。

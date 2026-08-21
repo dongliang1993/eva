@@ -1,7 +1,7 @@
 import { generateText, type LanguageModel } from "ai";
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../../tools.js";
+import { buildTool, type AgentTool } from "../build-tool.js";
 import { WebFetchClient, type WebFetchClientOptions } from "./client.js";
 import { convertToMarkdown } from "./markdown.js";
 

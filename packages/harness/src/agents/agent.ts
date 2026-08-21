@@ -8,8 +8,8 @@ import {
 } from "ai";
 import type { StreamToolCallSummary, StreamTokenUsage } from "@eva/shared";
 
-import type { AgentTool } from "../tools.js";
-import { toToolSet } from "../tools.js";
+import type { AgentTool } from "../tools/index.js";
+import { toToolSet } from "../tools/index.js";
 import { withApproval } from "../tools/with-approval.js";
 import { buildAgentSystemPrompt } from "../prompts/prompt-builder.js";
 import {
