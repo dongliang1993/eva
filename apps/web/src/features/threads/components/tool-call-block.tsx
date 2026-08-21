@@ -1,16 +1,5 @@
 import { memo, useState } from "react";
-import {
-  Search,
-  Globe,
-  FileText,
-  Wrench,
-  Terminal,
-  Copy,
-  Check,
-  CheckCircle2,
-  XCircle,
-  Clock
-} from "lucide-react";
+import { Copy, Check, Clock } from "lucide-react";
 
 import type { ToolCallInfo } from "../../../shared/api/run-stream-client";
 import { SubagentCard } from "./subagent-card";
@@ -18,56 +7,34 @@ import { DisclosureRow } from "./disclosure-row";
 import { useWorkspaceName } from "./workspace-name-context";
 
 // ---------------------------------------------------------------------------
-// Semantic tool display config
+// Semantic tool display config —— 只配标题,不再配图标(行首图标位整体去除)
 // ---------------------------------------------------------------------------
 
-interface ToolDisplay {
-  readonly icon: typeof Search;
-  readonly getTitle: (args: Record<string, unknown>) => string;
-}
-
-const TOOL_DISPLAY: Record<string, ToolDisplay> = {
-  web_search: {
-    icon: Search,
-    getTitle: (args) => String(args.query ?? "Web Search")
-  },
-  web_fetch: {
-    icon: Globe,
-    getTitle: (args) => {
-      const url = String(args.url ?? "");
-      try {
-        return new URL(url).hostname;
-      } catch {
-        return "Fetch Page";
-      }
+const TOOL_TITLES: Record<string, (args: Record<string, unknown>) => string> = {
+  web_search: (args) => String(args.query ?? "Web Search"),
+  web_fetch: (args) => {
+    const url = String(args.url ?? "");
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return "Fetch Page";
     }
   },
-  read_skill: {
-    icon: FileText,
-    getTitle: (args) => `Read: ${String(args.name ?? "skill")}`
-  },
-  // 读取类工具统一 📄,对齐参考里的 Read 行。
-  read_file: {
-    icon: FileText,
-    getTitle: (args) => `Read: ${String(args.path ?? "file")}`
-  },
-  grep: {
-    icon: FileText,
-    getTitle: (args) => `Grep: ${String(args.pattern ?? args.query ?? "")}`
-  }
+  read_skill: (args) => `Read: ${String(args.name ?? "skill")}`,
+  read_file: (args) => `Read: ${String(args.path ?? "file")}`,
+  grep: (args) => `Grep: ${String(args.pattern ?? args.query ?? "")}`
 };
 
-const DEFAULT_DISPLAY: ToolDisplay = {
-  icon: Wrench,
-  getTitle: (_args) => "Tool Call"
-};
-
-function getToolDisplay(toolName: string): ToolDisplay {
+function getToolTitle(toolName: string, args: Record<string, unknown>): string {
+  const getTitle = TOOL_TITLES[toolName];
+  if (getTitle !== undefined) return getTitle(args);
   // toolName 可能为空(部分 provider 的错误 part 不带名字)——
-  return TOOL_DISPLAY[toolName] ?? {
-    ...DEFAULT_DISPLAY,
-    getTitle: () => (toolName.length > 0 ? toolName : "Tool Call")
-  };
+  return toolName.length > 0 ? toolName : "Tool Call";
+}
+
+/** 失败行首的红点 —— 参考 dsh 的 ● Code · Error 行,代替原来的尾随 ✕ icon。 */
+function ErrorDot() {
+  return <span className="size-2 rounded-full bg-destructive" aria-hidden="true" />;
 }
 
 function formatDuration(ms: number): string {
@@ -96,29 +63,26 @@ function ToolCallBlockImpl({ toolCall }: ToolCallBlockProps) {
   }
 
   // bash:终端卡片形态 —— 折叠行标题是「Bash · <一句描述>」,展开是
-  // [命令行:绿点 + 主机标签 + 命令 + 复制] → 结果,不是通用 Arguments/Result 两段。
+  // [命令行:状态点 + 主机标签 + 命令 + 复制] → 结果,不是通用 Arguments/Result 两段。
   if (toolCall.toolName === "bash") {
     return <BashToolCall toolCall={toolCall} />;
   }
 
-  const display = getToolDisplay(toolCall.toolName);
-  const Icon = display.icon;
-  const title = display.getTitle(toolCall.args);
+  const title = getToolTitle(toolCall.toolName, toolCall.args);
 
-  const isSuccess = toolCall.status === "success";
   const isError = toolCall.status === "error";
   const isRunning = !toolCall.status;
 
   return (
     <DisclosureRow
-      icon={<Icon size={14} className="shrink-0" />}
-      title={`${toolCall.toolName}${title ? ` · ${title}` : ""}`}
+      {...(isError ? { leadingDot: <ErrorDot /> } : {})}
+      title={
+        isError
+          ? `${toolCall.toolName} · Error: ${title}`
+          : `${toolCall.toolName}${title ? ` · ${title}` : ""}`
+      }
       trailing={
-        isSuccess ? (
-          <CheckCircle2 size={14} className="text-success" />
-        ) : isError ? (
-          <XCircle size={14} className="text-destructive" />
-        ) : toolCall.durationMs !== undefined ? (
+        toolCall.durationMs !== undefined && !isError ? (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock size={12} />
             {formatDuration(toolCall.durationMs)}
@@ -143,26 +107,33 @@ function ToolCallBlockImpl({ toolCall }: ToolCallBlockProps) {
 
         {/* Result */}
         {toolCall.output ? (
-          <ResultBlock output={toolCall.output} />
+          <ResultBlock output={toolCall.output} {...(isError ? { error: true } : {})} />
         ) : null}
       </div>
     </DisclosureRow>
   );
 }
 
-/** 工具结果:默认折叠超过 300px 高,底部给尺寸 + Show full output。 */
-function ResultBlock({ output }: { readonly output: string }) {
+/** 工具结果:默认折叠超过 300px 高,底部给尺寸 + Show full output;失败时红点 + 红字。 */
+function ResultBlock({ output, error }: { readonly output: string; readonly error?: boolean }) {
   const [showFull, setShowFull] = useState(false);
   const long = output.length > 500;
 
   return (
     <div>
-      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        {error === true ? (
+          <span className="size-1.5 rounded-full bg-destructive" aria-hidden="true" />
+        ) : null}
         Result
       </h4>
       <div className="overflow-hidden rounded-md border border-border bg-terminal/30">
         <div className={`p-3 ${showFull ? "" : "max-h-[300px]"}`}>
-          <pre className="font-mono text-xs whitespace-pre-wrap break-all text-foreground">
+          <pre
+            className={`font-mono text-xs whitespace-pre-wrap break-all ${
+              error === true ? "text-destructive" : "text-foreground"
+            }`}
+          >
             {output}
           </pre>
         </div>
@@ -221,18 +192,27 @@ function CopyCommandButton({ command }: { readonly command: string }) {
 
 /**
  * bash 结果:直接铺在分割线下,不再包独立块/RESULT 标签。
- * 长输出(>500 字)默认限高 300px,底部给尺寸 + Show full output。
+ * 长输出(>500 字)默认限高 300px,底部给尺寸 + Show full output;失败时红点 + 红字。
  */
-function BashResult({ output }: { readonly output: string }) {
+function BashResult({ output, error }: { readonly output: string; readonly error?: boolean }) {
   const [showFull, setShowFull] = useState(false);
   const long = output.length > 500;
 
   return (
     <div className="px-6 py-2">
       <div className={showFull ? "" : "max-h-[300px] overflow-hidden"}>
-        <pre className="font-mono text-xs whitespace-pre-wrap break-all text-foreground">
-          {output}
-        </pre>
+        <div className="flex items-start gap-2">
+          {error === true ? (
+            <span className="mt-1 size-1.5 shrink-0 rounded-full bg-destructive" aria-hidden="true" />
+          ) : null}
+          <pre
+            className={`font-mono text-xs whitespace-pre-wrap break-all ${
+              error === true ? "text-destructive" : "text-foreground"
+            }`}
+          >
+            {output}
+          </pre>
+        </div>
       </div>
       {long ? (
         <div className="mt-2 flex items-center justify-between">
@@ -257,12 +237,16 @@ function BashResult({ output }: { readonly output: string }) {
 function BashBody({ toolCall }: { readonly toolCall: ToolCallInfo }) {
   const command = typeof toolCall.args.command === "string" ? toolCall.args.command : "";
   const workspaceName = useWorkspaceName();
+  const isError = toolCall.status === "error";
 
   return (
     <div className="overflow-hidden rounded-md border border-border bg-terminal/30">
-      {/* 标题行:绿点 + 主机标签 + 命令 + 复制 */}
+      {/* 标题行:状态点(失败红/其余绿)+ 主机标签 + 命令 + 复制 */}
       <div className="flex items-center gap-2 px-2.5 py-1.5">
-        <span className="size-2 shrink-0 rounded-full bg-success" aria-hidden="true" />
+        <span
+          className={`size-2 shrink-0 rounded-full ${isError ? "bg-destructive" : "bg-success"}`}
+          aria-hidden="true"
+        />
         {workspaceName !== null ? (
           <span className="shrink-0 font-mono text-xs text-secondary-foreground">
             {workspaceName}
@@ -278,7 +262,7 @@ function BashBody({ toolCall }: { readonly toolCall: ToolCallInfo }) {
       {toolCall.output ? (
         <>
           <div className="border-t border-border" />
-          <BashResult output={toolCall.output} />
+          <BashResult output={toolCall.output} {...(isError ? { error: true } : {})} />
         </>
       ) : null}
     </div>
@@ -291,20 +275,15 @@ function BashToolCall({ toolCall }: ToolCallBlockProps) {
   // 标题优先描述;没描述退到命令 —— 旧会话/模型没给 description 时仍有可读标题。
   const subtitle = description.length > 0 ? description : command.length > 0 ? command : "bash";
 
-  const isSuccess = toolCall.status === "success";
   const isError = toolCall.status === "error";
   const isRunning = !toolCall.status;
 
   return (
     <DisclosureRow
-      icon={<Terminal size={14} className="shrink-0" />}
-      title={`Bash · ${subtitle}`}
+      {...(isError ? { leadingDot: <ErrorDot /> } : {})}
+      title={isError ? `Bash · Error: ${subtitle}` : `Bash · ${subtitle}`}
       trailing={
-        isSuccess ? (
-          <CheckCircle2 size={14} className="text-success" />
-        ) : isError ? (
-          <XCircle size={14} className="text-destructive" />
-        ) : toolCall.durationMs !== undefined ? (
+        toolCall.durationMs !== undefined && !isError ? (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock size={12} />
             {formatDuration(toolCall.durationMs)}

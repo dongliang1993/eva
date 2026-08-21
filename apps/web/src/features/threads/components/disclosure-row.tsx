@@ -10,9 +10,14 @@ import { ChevronDown } from "lucide-react";
  * _title 14px / line-height 24)。
  */
 interface DisclosureRowProps {
-  /** 主图标(如 ⚡/🧠/📄)。 */
-  readonly icon: ReactNode;
+  /** 主图标(如 ⚡/🧠/📄);不传则行首没有图标位。 */
+  readonly icon?: ReactNode;
   readonly title: ReactNode;
+  /**
+   * 行首状态点(如失败的红点,参考 dsh 的 ● Code · Error 行)。
+   * 渲染在 icon 位之前;hover 换 chevron 的动画对它不生效 —— 状态必须常显。
+   */
+  readonly leadingDot?: ReactNode;
   /** 行右侧的状态/元信息(成功/失败/时长…),可空。 */
   readonly trailing?: ReactNode;
   /** 展开区内容;undefined 表示不可展开。 */
@@ -27,7 +32,7 @@ interface DisclosureRowProps {
   readonly onToggle?: () => void;
 }
 
-export function DisclosureRow({ icon, title, trailing, children, onToggle, open }: DisclosureRowProps) {
+export function DisclosureRow({ icon, title, leadingDot, trailing, children, onToggle, open }: DisclosureRowProps) {
   const [selfOpen, setSelfOpen] = useState(false);
   const expandable = children !== undefined;
   // open 是流式期间的自动展开提示,和用户点击攒出的 selfOpen 取或 ——
@@ -47,17 +52,24 @@ export function DisclosureRow({ icon, title, trailing, children, onToggle, open 
         }}
         aria-expanded={expandable ? expanded : undefined}
       >
-        <span className="relative mr-1.5 inline-flex h-4 w-4 flex-none items-center justify-center text-secondary-text">
-          <span className={`transition-opacity duration-100 ${expandable ? "group-hover:opacity-0" : ""}`}>
-            {icon}
+        {leadingDot !== undefined ? (
+          <span className="mr-1.5 inline-flex h-4 w-2 flex-none items-center justify-center">
+            {leadingDot}
           </span>
-          {/* 展开提示不单独占位:可展开的行 hover 时前面的 icon 就地变成向下箭头。 */}
-          {expandable ? (
-            <span className="absolute inset-0 inline-flex items-center justify-center text-secondary-text opacity-0 transition-opacity duration-100 group-hover:opacity-100">
-              <ChevronDown size={16} />
+        ) : null}
+        {icon !== undefined ? (
+          <span className="relative mr-1.5 inline-flex h-4 w-4 flex-none items-center justify-center text-secondary-text">
+            <span className={`transition-opacity duration-100 ${expandable ? "group-hover:opacity-0" : ""}`}>
+              {icon}
             </span>
-          ) : null}
-        </span>
+            {/* 展开提示不单独占位:可展开的行 hover 时前面的 icon 就地变成向下箭头。 */}
+            {expandable ? (
+              <span className="absolute inset-0 inline-flex items-center justify-center text-secondary-text opacity-0 transition-opacity duration-100 group-hover:opacity-100">
+                <ChevronDown size={16} />
+              </span>
+            ) : null}
+          </span>
+        ) : null}
         <span className="flex-none truncate text-sm leading-6 text-secondary-text">
           {title}
         </span>
