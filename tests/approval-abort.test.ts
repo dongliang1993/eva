@@ -17,7 +17,7 @@ describe("abort 与 pending 审批", () => {
     closeDb(db);
   });
 
-  it("审批挂起时 abort → 审批立刻按拒绝返回,不等超时", async () => {
+  it("审批挂起时 abort → 审批立刻按拒绝返回", async () => {
     const registry = new RunRegistry();
     const approvals = new ApprovalGateway(new ApprovalRepository(db));
     const runId = "run-1";
@@ -47,7 +47,7 @@ describe("abort 与 pending 审批", () => {
     expect(approvals.listPending("session-a").map((p) => p.callId)).toEqual(["call-a"]);
     expect(approvals.listPending("session-b").map((p) => p.callId)).toEqual(["call-b"]);
 
-    // 收尾:两条 ask 的 5 分钟 timer 不清掉会挂住 vitest 进程
+    // 收尾:审批不超时,未决的两条只能靠 cancelByRun 收
     approvals.cancelByRun("run-a");
     approvals.cancelByRun("run-b");
   });

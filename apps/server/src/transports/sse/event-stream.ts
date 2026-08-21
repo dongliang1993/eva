@@ -8,6 +8,9 @@ const SSE_HEADERS = {
   "X-Accel-Buffering": "no"
 } as const;
 
+/** 静默连接的保活间隔 —— 比常见的 60s idle 超时留足余量。 */
+const HEARTBEAT_MS = 15_000;
+
 const formatFrame = (frame: RunStreamFrame): string =>
   `event: ${frame.type}\ndata: ${JSON.stringify(frame)}\n\n`;
 
@@ -21,11 +24,28 @@ const formatFrame = (frame: RunStreamFrame): string =>
 export class RunEventStream {
   private seq = 0;
   private closed = false;
+  private heartbeat: NodeJS.Timeout | undefined;
 
   constructor(private readonly reply: FastifyReply) {}
 
   open(): void {
     this.reply.raw.writeHead(200, SSE_HEADERS);
+
+    // 心跳:大工具可能几分钟不产帧,中间层会把这种静默连接当 idle 掐断。
+    // 注释帧对客户端是透明的(parseSSEBuffer 只认 event: / data: 前缀)。
+    // unref:这条定时器不该拖着进程/测试进程不退出。
+    this.heartbeat = setInterval(() => this.write(": ping\n\n"), HEARTBEAT_MS);
+    this.heartbeat.unref();
+  }
+
+  /** 写之前统一挡一次死 socket —— 迟到事件不能触发 write-after-end。 */
+  private write(chunk: string): boolean {
+    if (this.closed || this.reply.raw.writableEnded || this.reply.raw.destroyed) {
+      return false;
+    }
+
+    this.reply.raw.write(chunk);
+    return true;
   }
 
   emit(event: RunStreamEvent): void {
@@ -37,7 +57,7 @@ export class RunEventStream {
 
     this.seq += 1;
     const frame = { ...event, seq: this.seq } as RunStreamFrame;
-    this.reply.raw.write(formatFrame(frame));
+    this.write(formatFrame(frame));
   }
 
   onDisconnect(listener: () => void): void {
@@ -49,9 +69,23 @@ export class RunEventStream {
   }
 
   close(): void {
-    if (this.closed) return;
+    // 与 emit 同一套守卫:订阅者先断连、run 之后才 closeAll 是常态,
+    // 那时 socket 已经死了,end() 会抛 ERR_STREAM_ALREADY_FINISHED。
+    if (this.closed || this.reply.raw.writableEnded || this.reply.raw.destroyed) {
+      this.stopHeartbeat();
+      this.closed = true;
+      return;
+    }
 
+    this.stopHeartbeat();
     this.closed = true;
     this.reply.raw.end();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat !== undefined) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = undefined;
+    }
   }
 }

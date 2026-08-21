@@ -11,7 +11,6 @@ interface PendingRequest {
   /** T14:ask 时即时算一次,SSE 与 listApprovals 两条路径共用这份画像。 */
   readonly risk: ToolRisk;
   resolve: (allowed: boolean) => void;
-  timer: NodeJS.Timeout;
 }
 
 /** 一次审批请求的归属与内容。 */
@@ -34,14 +33,22 @@ export interface PendingApprovalView {
 /**
  * 审批网关 —— 危险工具执行前的闸门。
  *
- * - `ask()` 把审批请求落库(pending),并返回一个 Promise;该 Promise 由
- *   前端通过 `decide(callId, allowed)` 显式 resolve,或超时后自动拒绝。
+ * - `ask()` 把审批请求落库(pending),并返回一个 Promise;
  * - 同进程内用内存 Map 待决表桥接阻塞的 agent tool 与异步的用户决策。
+ *
+ * **审批永远等人,不超时。** 出口只有三个:
+ *   ① `decide()` —— 用户点了允许/拒绝;
+ *   ② `cancelByRun()` —— 用户点停止,或 run 收尾;
+ *   ③ 进程重启 —— 内存 Map 随进程消失,DB 里的 pending 行由启动清扫
+ *      (`ApprovalRepository.failStalePending`,见 deps.ts)收成 denied。
+ *
+ * 为什么删掉了 5 分钟自动拒绝:SSE 断连不再 abort run 之后,「刷新页面 → 卡片
+ * 回来 → 慢慢看清楚再决定」是正常用法,倒计时会把这条路重新掐断。代价是
+ * 卡在审批上的 run 一直是 running,该会话因此被 409 挡住新消息 —— 所以侧栏的
+ * requires_action 圆点与 Stop 按钮从「体验」升级成「功能」。
  *
  * 信任模型(04 §5.2):本机进程是自己人,审批只防「AI 乱来」。
  */
-/** 审批挂起的上限。超时按拒绝处理,避免 run 永久吊死。 */
-const PENDING_TIMEOUT_MS = 5 * 60 * 1000;
 
 export class ApprovalGateway {
   private readonly pending = new Map<string, PendingRequest>();
@@ -66,27 +73,19 @@ export class ApprovalGateway {
     this.repo.create({ id: callId, ...input });
 
     return new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(callId);
-        this.repo.decide(callId, "denied");
-        resolve(false);
-      }, PENDING_TIMEOUT_MS);
-
       this.pending.set(callId, {
         ...input,
         risk: classifyToolRisk(input.tool, (input.args ?? {}) as Record<string, unknown>),
-        resolve,
-        timer
+        resolve
       });
     });
   }
 
-  /** 前端提交决策:允许或拒绝。若该请求已超时/不存在,返回 false。 */
+  /** 前端提交决策:允许或拒绝。该请求不存在(已决策/已取消/跨进程)时返回 false。 */
   decide(callId: string, allowed: boolean): boolean {
     const entry = this.pending.get(callId);
     if (!entry) return false;
 
-    clearTimeout(entry.timer);
     this.pending.delete(callId);
     this.repo.decide(callId, allowed ? "granted" : "denied");
     entry.resolve(allowed);
@@ -107,7 +106,6 @@ export class ApprovalGateway {
       if (entry.runId !== runId) {
         continue;
       }
-      clearTimeout(entry.timer);
       this.pending.delete(callId);
       this.repo.decide(callId, "denied");
       entry.resolve(false);

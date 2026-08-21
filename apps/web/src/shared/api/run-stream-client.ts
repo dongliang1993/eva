@@ -34,6 +34,11 @@ export interface StreamCallbacks {
   readonly onSubagentReport?: (event: RunSubagentReportEvent) => void;
   readonly onError: (message: string) => void;
   readonly onEnd: (finishReason: StreamFinishReason) => void;
+  /**
+   * 会话里已经有一轮在飞(HTTP 409)—— 不是错误,调用方应该转去 attach 那个 run。
+   * 服务端从 SSE 断连不再 abort run 之后,「刷新完立刻又发一句」会走到这条路。
+   */
+  readonly onBusy?: (activeRunId: string) => void;
 }
 
 export interface StreamRequest {
@@ -136,23 +141,17 @@ const dispatchEvent = (ev: RunStreamEvent, callbacks: StreamCallbacks): void => 
   }
 };
 
-export async function streamChat(
-  request: StreamRequest,
-  callbacks: StreamCallbacks
+/**
+ * 读一条 SSE 响应直到结束 —— streamChat(新 run)与 attachRun(重连)共用。
+ *
+ * seq 是**每条连接**自己的:重连流从 1 重新连号,所以每次进来都要一个新的
+ * DeltaAccumulator(它是 lastSeq=0 + 严格连号,复用会让第一帧永远卡在 pending)。
+ */
+async function consume(
+  response: Response,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal
 ): Promise<void> {
-  const response = await fetch("/api/v1/runs/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request)
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    callbacks.onError(`HTTP ${response.status}: ${text}`);
-    callbacks.onEnd("error");
-    return;
-  }
-
   const reader = response.body?.getReader();
 
   if (!reader) {
@@ -203,11 +202,91 @@ export async function streamChat(
         }
       }
     }
+  } catch (error) {
+    // 主动 abort(切会话/卸载)是正常收场:调用方已经自己收拾状态了,
+    // 不该再回调 onEnd —— 否则会去 settle 一个已经换掉的会话。
+    if (signal?.aborted) return;
+    callbacks.onError(error instanceof Error ? error.message : String(error));
+    callbacks.onEnd("error");
+    return;
   } finally {
     reader.releaseLock();
   }
 
   callbacks.onEnd("stop");
+}
+
+export async function streamChat(
+  request: StreamRequest,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await fetch("/api/v1/runs/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+    ...(signal ? { signal } : {})
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+
+    // 409 带着在飞的 runId —— 交给 onBusy 去 attach,不走 onError/onEnd。
+    if (response.status === 409 && callbacks.onBusy) {
+      const activeRunId = parseActiveRunId(text);
+      if (activeRunId) {
+        callbacks.onBusy(activeRunId);
+        return;
+      }
+    }
+
+    callbacks.onError(`HTTP ${response.status}: ${text}`);
+    callbacks.onEnd("error");
+    return;
+  }
+
+  await consume(response, callbacks, signal);
+}
+
+const parseActiveRunId = (body: string): string | undefined => {
+  try {
+    const parsed = JSON.parse(body) as { activeRunId?: unknown };
+    return typeof parsed.activeRunId === "string" ? parsed.activeRunId : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * 挂回一个已经在飞的 run —— 刷新页面后续跟流。
+ *
+ * 服务端会先补齐已经流过的部分(由在飞快照反推出的合成帧),再继续推新帧,
+ * 所以这里与全新 run 走的是同一套 dispatch,没有任何"重连专用"分支。
+ *
+ * 404 = run 在刷新与这次请求之间跑完了:静默收场,页面退回只读 DB 消息。
+ */
+export async function attachRun(
+  runId: string,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await fetch(`/api/v1/runs/${runId}/stream`, {
+    ...(signal ? { signal } : {})
+  });
+
+  if (response.status === 404) {
+    callbacks.onEnd("stop");
+    return;
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    callbacks.onError(`HTTP ${response.status}: ${text}`);
+    callbacks.onEnd("error");
+    return;
+  }
+
+  await consume(response, callbacks, signal);
 }
 
 export async function abortRun(runId: string): Promise<void> {

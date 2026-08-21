@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  EvaUIMessage,
   RunAgentStreamEvent,
   StreamFinishReason,
   StreamTokenUsage
@@ -61,6 +62,17 @@ export class AssistantMessageRecorder {
       this.finishReason = "error";
       this.streamError = event.message;
     }
+  }
+
+  /**
+   * 当前在飞 assistant 消息的快照 —— SSE 重连时反推成合成帧补历史(RunHub.attach)。
+   * 读的是**当前那个** builder:notice-injected 边界前的消息已经落库了。
+   */
+  snapshot(): EvaUIMessage {
+    return this.builder.snapshot({
+      runId: this.options.runId,
+      model: this.options.model
+    });
   }
 
   finish(): RecordedAssistantRun {

@@ -49,7 +49,7 @@ Eva 是一个**本地优先的 work agent 桌面应用**：Electron 壳 fork 一
 │  │  127.0.0.1:<dynamic port>                                                      │  │
 │  │   ├─ REST /api/v1/*（runs / threads / providers / models / settings / skills / │  │
 │  │   │   memories / approvals / search）                                          │  │
-│  │   ├─ SSE  POST /api/v1/runs/stream                                             │  │
+│  │   ├─ SSE  POST /api/v1/runs/stream  ·  GET /api/v1/runs/:runId/stream(重连)    │  │
 │  │   ├─ deps.ts（基础设施）→ services/（业务装配）→ app.ts（生命周期）三层           │  │
 │  │   └─ better-sqlite3 + drizzle（WAL）→ 用户数据目录                               │  │
 │  └─────────────────────────────────────────────────────────────────────────────────┘  │
@@ -107,7 +107,7 @@ packages/shared   契约层：跨 server/web/desktop 的类型与事件契约（
 【目标】
 
 - loop 收敛为 `streamText({ model, system, messages, tools, stopWhen: [stepCountIs(N)], abortSignal, onChunk, onFinish, onError })`；步骤边界由 SDK 的 step 语义给出。
-- **abort**：`AbortController` 按 run 注册，SSE 断连/用户 stop → abort。abort 只停主 loop，**不杀后台子代理**（对齐 WeaveLynx：后台任务必须活过 Stop；停单个后台任务走独立的 `stopTask`）。
+- **abort**：`AbortController` 按 run 注册，**只有用户 stop（`POST /runs/:runId/abort`）会 abort**；SSE 断连只是退订（R6：断连 = 少了一个观众，run 继续跑，刷新后 `GET /runs/:runId/stream` 重放历史再续跟流）。abort 只停主 loop，**不杀后台子代理**（对齐 WeaveLynx：后台任务必须活过 Stop；停单个后台任务走独立的 `stopTask`）。
 - **不撤销已进模型的用户输入**（WeaveLynx 的教训："以为撤了其实进模型"比"撤不掉"更糟）。UI 上用可见标记区分"已进模型"与"排队中"。
 
 ### 4.3 工具系统与两道上下文防线
@@ -135,6 +135,12 @@ packages/shared   契约层：跨 server/web/desktop 的类型与事件契约（
   → SDK 侧 await 该 promise 作为 execute 的前置闸门；reject = hard deny
   → abort / run 结束 / destroy 时 cancelAll 统一 reject（不会永远吊着）
 ```
+
+- **审批永远等人，不超时**（R6）。出口只有三个：用户决策 / `cancelByRun`（stop 或 run 收尾）/ 进程重启
+  （内存待决表随进程消失，DB 里的 pending 行由启动清扫 `ApprovalRepository.failStalePending` 收成 denied）。
+  改因：断连不再 abort run 之后，"刷新页面 → 卡片回来 → 慢慢看清楚再决定"是正常用法，倒计时会把这条路重新掐断。
+  代价是卡在审批上的 run 一直是 `running`，该会话被并发守卫的 409 挡住新消息 —— 侧栏的 `requires_action`
+  圆点与 Stop 按钮因此从"体验"升级成"功能"。
 
 - `settings.security.autoApproveToolRequests` + 工具级白名单（"始终允许"写 per-tool 记忆）。
 - broker 的变化通知 try/catch 包住：UI 回调挂了不能弄坏 broker 内部不变式（WeaveLynx `#safeChange` 教训）。
@@ -270,11 +276,15 @@ POST /api/v1/runs/stream  (SSE, fetch + ReadableStream)
 
 规则：AI SDK 域的事件名与 SDK 逐一对齐；Eva 自有域（审批/子代理/会话状态）才允许自定义，且与 SDK 命名空间隔离。
 
+**重连同形**（R6）：`GET /api/v1/runs/:runId/stream` 推的是同一套事件，没有"重连专用"帧 ——
+服务端把在飞快照反推成合成帧（`replayEventsFor`）先补历史，再继续扇出新帧，前端因此走同一条
+dispatch。`seq` 属于**每条连接**（重连流从 1 重新连号），run 已收尾则 404，前端退回只读 DB 消息。
+
 ### 6.2 增量合流纪律（WeaveLynx 双通路经验）
 
 - **coalesce 窗口**（~100ms）批量发 text-delta；首个 delta 走 microtask 立即发（首 token 尽快上屏）。
 - tool_use 的 `input_json_delta` 用 partial-json 解析半截 JSON，带**增长门槛**（小输入 64B、大输入 len/8，把 O(N²) 解析压成 O(N log N)）+ **stall 逃生门**（500ms 无进展强制发一帧）。
-- **settle 帧永远带全量 value 作为收敛点**——不靠序号/重同步通道。断线重连后 `GET /threads/:id/messages` 全量对齐。
+- **settle 帧永远带全量 value 作为收敛点**——不靠序号/重同步通道。断线重连先 `GET /runs/:runId/stream` 续跟流（R6，见 §6.1）；run 已收尾则由 `GET /threads/:id/messages` 全量对齐。
 - 增量 part 与完整帧合流：内容全等 + 同类 + 未认领 ⇒ 复用增量 part 不发事件（不重）；miss 走正常 upsert（不丢）。
 
 ### 6.3 前端三红线【目标，S1.1】
@@ -363,7 +373,7 @@ background_tasks (id, thread_id, parent_tool_call_id, status,
 
 ## 8. API 面【现状 + 目标增量】
 
-【现状】已通：`/v1/health`、`/api/v1/runs/stream|wait`、`/api/v1/threads`（CRUD + messages + compact）、`/api/v1/providers`、`/api/v1/models`、`/api/v1/settings`、`/api/v1/skills`、`/api/v1/memories`、`/api/v1/approvals`、`/api/v1/search/threads`。
+【现状】已通：`/v1/health`、`/api/v1/runs/stream|wait`、`/api/v1/runs/:runId/stream`（重连续跟流）、`/api/v1/runs/:runId/abort`、`/api/v1/threads`（CRUD + messages + compact）、`/api/v1/providers`、`/api/v1/models`、`/api/v1/settings`、`/api/v1/skills`、`/api/v1/memories`、`/api/v1/approvals`、`/api/v1/search/threads`。
 
 【目标】增量（按 Phase 排）：
 
@@ -428,6 +438,10 @@ POST /api/v1/chat/completions                 OpenAI 兼容端点（供外部工
 
 - **绑定 loopback 即裸奔边界**：`127.0.0.1` 无 token；`HOST=0.0.0.0` 直接拒绝启动（【现状】已有）。要远程暴露必须先加 token 中间件 + TLS，不在本期范围。
 - **审批只防 AI 乱来**：危险工具走 §4.4 审批闸门；本机其他进程的信任问题不在桌面单用户模型的范围内。
+- **run 活在服务进程里，不活过服务进程**（R6 范围声明）：刷新页面、关标签页、断网都不影响在飞的 run；
+  但关掉桌面 App / 杀掉 server 进程就是杀掉 run —— 进程内的 `RunRegistry` 与审批待决表随之消失，
+  遗留的 `running` run 行与 `pending` 审批行由下次启动清扫收尾（`failStale` / `failStalePending`）。
+  真正的跨进程续跑要 checkpoint 持久化（见 09-persistence-recovery），不在 R6 范围内。
 - **API key 加密存储**，任何 API 响应不回传明文。
 - **webview/扩展隔离**：扩展前端 `contextIsolation` 开、`nodeIntegration` 关；槽位上下文（URL query 注入）不可信，必须校验 extensionId+slot 在注册表；权限在 EH 后端强校验，前端只做灰显。
 - **输入不可信**：工具入参防路径穿越（readMemoryFile 式工具必须 resolve 后校验前缀）。

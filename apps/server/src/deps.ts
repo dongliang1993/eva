@@ -10,6 +10,7 @@ import {
 } from "./db/index.js";
 import { DrizzleRunRepository } from "./db/repositories/run-repository.js";
 import { failStaleTasks } from "./db/repositories/background-task-repository.js";
+import { ApprovalRepository } from "./db/repositories/approval-repository.js";
 import { createPinoObserver } from "./observability.js";
 import { findMonorepoRoot } from "./services/monorepo-root.js";
 import { syncMcpConfigFile } from "./services/mcp/mcp-config-file.js";
@@ -71,6 +72,13 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   const staleTasks = failStaleTasks(db);
   if (staleTasks > 0) {
     logger.warn({ staleTasks }, "marked in-flight subagent tasks as failed after restart");
+  }
+
+  // 审批不超时之后(只能人工决策 / Stop / 进程重启),重启是遗留 pending 行唯一的
+  // 收尾时机 —— 不扫就会永远挂着,并让那些会话一直显示"待决策"。
+  const stalePending = new ApprovalRepository(db).failStalePending();
+  if (stalePending > 0) {
+    logger.warn({ stalePending }, "denied pending approvals left over from previous process");
   }
 
   // apiKey 落库加密:key 文件读不出 → 明文降级(与 Alma 的 safeStorage 降级同款哲学,

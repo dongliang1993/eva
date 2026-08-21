@@ -4,7 +4,7 @@ import type { PendingApproval } from "../api";
 import { useWorkspaces } from "../../workspaces/hooks/use-workspaces";
 import { MessageList } from "./message-list";
 import { ApprovalCard } from "./approval-card";
-import { ChatInput } from "./chat-input";
+import { ChatInput, type ChatInputRejection } from "./chat-input";
 import { ContextUsage } from "./context-usage";
 import { WorkspaceNameProvider } from "./workspace-name-context";
 import { useStickToBottom } from "../hooks/use-stick-to-bottom";
@@ -24,6 +24,9 @@ interface ChatViewProps {
   readonly onApproveOnce?: (callId: string) => void;
   readonly onDeny?: (callId: string) => void;
   readonly onAllowAlways?: (callId: string) => void;
+  /** 上一句被 409 拒收:输入框回填 + 提示(见 ChatInput)。 */
+  readonly rejection?: ChatInputRejection | null;
+  readonly onRejectionSeen?: () => void;
 }
 
 export function ChatView({
@@ -40,7 +43,9 @@ export function ChatView({
   pendingApprovals,
   onApproveOnce,
   onDeny,
-  onAllowAlways
+  onAllowAlways,
+  rejection,
+  onRejectionSeen
 }: ChatViewProps) {
   const { containerRef, isAtBottom, scrollToBottom } = useStickToBottom(streamingMessage);
 
@@ -82,6 +87,8 @@ export function ChatView({
         onSelectModel={onSelectModel}
         workspaceId={workspaceId}
         onSelectWorkspace={onSelectWorkspace}
+        rejection={rejection ?? null}
+        {...(onRejectionSeen ? { onRejectionSeen } : {})}
       />
     </div>
     </WorkspaceNameProvider>

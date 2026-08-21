@@ -66,7 +66,8 @@
 1. harness 迁移收尾验证：`pnpm typecheck && pnpm test` 全绿，grep 确认无 `@langchain` 残留。
 2. SSE 事件切换到 AI SDK chunk 命名（14 §6.1）：`text-delta / reasoning-delta / tool-input-start|delta|end / tool-call / tool-result / step-start / finish / error`；自有域（`approval_request / approval_resolved / subagent_update / session_status`）与 SDK 命名空间隔离。
 3. 增量合流纪律（14 §6.2）：coalesce 窗口 ~100ms 批量发 + 首 delta microtask 立即发；tool input 用 partial-json 解析 + 增长门槛（64B / len/8）+ 500ms stall 逃生门；settle 帧永远带全量 value 作收敛点。
-4. abort 链路（13 坑11）：run 级 `AbortController` 注册表 + 用户 stop / SSE 断连触发 abort；abort 只停主 loop，不杀后台任务。
+4. abort 链路（13 坑11）：run 级 `AbortController` 注册表 + 用户 stop 触发 abort；abort 只停主 loop，不杀后台任务。
+   （R6 修正：SSE 断连**不再** abort —— 断连只退订，run 继续跑，刷新后重连续跟流。见 14 §4.2。）
 
 **怎么做**
 - 后端：`runs.ts` 里 `streamText(...).fullStream` 的 chunk 原样写 SSE，**不加中间表示**（04 §1.4"直接转发 SDK chunk"是 Alma 实证最优解）。

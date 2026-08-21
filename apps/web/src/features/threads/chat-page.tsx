@@ -9,6 +9,7 @@ import { setThreadWorkspace } from "../workspaces/api";
 import { useSettings } from "../settings/hooks/use-settings";
 import { Sidebar } from "./components/sidebar";
 import { ChatView } from "./components/chat-view";
+import type { ChatInputRejection } from "./components/chat-input";
 import { SubagentsProvider, useSubagentsStore } from "./components/subagents-context";
 import { VersionActionsProvider } from "./components/version-actions-context";
 import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
@@ -42,6 +43,23 @@ export function ChatPage() {
     [settings]
   );
 
+  /**
+   * 这一句被服务端 409 挡了(会话里还有一轮在飞)。
+   *
+   * SSE 断连不再 abort run 之后这是正常路径:刷新完立刻又发一句,上一轮还在跑。
+   * hook 已经替我们挂回了在跑的那个 run —— 页面这边只负责把话还给用户、说清原因。
+   */
+  const [rejection, setRejection] = useState<ChatInputRejection | null>(null);
+
+  const handleRejected = useCallback((text: string | undefined) => {
+    setRejection({
+      ...(text !== undefined ? { text } : {}),
+      message: "这个会话还有一轮在运行,已挂回那一轮 —— 等它跑完或点停止后再发。"
+    });
+  }, []);
+
+  const clearRejection = useCallback(() => setRejection(null), []);
+
   const approvals = useApprovals(enableAutoApprove);
   // S7:子代理视图 store(SSE 累积 + /subagent-messages 兜底)。
   const subagents = useSubagentsStore();
@@ -60,7 +78,8 @@ export function ChatPage() {
   } = useChat({
     onApproval: approvals.applyStreamEvent,
     onSubagent: subagents.applyStreamEvent,
-    onSubagentReport: subagents.applyReport
+    onSubagentReport: subagents.applyReport,
+    onRejected: handleRejected
   });
 
   // 会话切换 → store 归位,子代理卡片刷新兜底走对会话。
@@ -163,11 +182,14 @@ export function ChatPage() {
   const handleNewChat = useCallback(() => {
     newConversation();
     setPendingWorkspaceId(null);
+    setRejection(null);
     setSearchParams({}, { replace: true });
   }, [newConversation, setSearchParams]);
 
   const handleSelectThread = useCallback((threadId: string) => {
     setPendingWorkspaceId(null);
+    // 提示是"上一句没发出去"的说明,换会话就过期了。
+    setRejection(null);
     setSearchParams({ threadId }, { replace: true });
     loadSession(threadId);
   }, [setSearchParams, loadSession]);
@@ -218,6 +240,8 @@ export function ChatPage() {
               onApproveOnce={(callId) => approvals.decide(callId, true)}
               onDeny={(callId) => approvals.decide(callId, false)}
               onAllowAlways={(callId) => approvals.allowAlways(callId)}
+              rejection={rejection}
+              onRejectionSeen={clearRejection}
             />
           </SubagentsProvider>
         </VersionActionsProvider>

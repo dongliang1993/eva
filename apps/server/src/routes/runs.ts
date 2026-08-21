@@ -17,6 +17,7 @@ import { AssistantMessageRecorder } from "../services/runs/assistant-message-rec
 import {
   prepareRunInput,
   prepareRunContext,
+  SessionBusyError,
   type RunInput,
   type RunPreparationDependencies
 } from "../services/runs/run-preparation.js";
@@ -29,6 +30,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
   app.post("/api/v1/runs/stream", async (request, reply) => {
     const runId = randomUUID();
     const controller = app.services.runRegistry.register(runId);
+    // register 时就建好了枢纽 —— 这条连接只是它的第一个订阅者。
+    const hub = app.services.runRegistry.hubFor(runId)!;
     const stream = new RunEventStream(reply);
     let sessionId = "";
     // 供 catch 回滚 503 时新建的会话。
@@ -37,7 +40,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     // 注入本轮对话(S7 push)。声明在 try 外,finally 才能 dispose。
     let reportGateway: ReportGateway | undefined;
 
-    const emit = (event: RunStreamEvent): void => stream.emit(event);
+    // 扇出而不是直写:重连上来的订阅者也要收到后续的帧。
+    const emit = (event: RunStreamEvent): void => hub.publish(event);
     const preparationDependencies: RunPreparationDependencies = {
       config: app.infra.config,
       db: app.infra.db,
@@ -85,6 +89,9 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       // 阶段①:会话/工作区先落 —— agent 的工具集依赖工作区,工作区来自会话。
       runInput = await prepareRunInput(preparationDependencies, body, runId);
       sessionId = runInput.sessionId;
+      // 会话一确定就先绑上:runLedger.start 之后 DB 里已经有 running 行,前端
+      // 可能在 messageRecorder 建好之前就来 attach —— 那时 run_start 不能给空 sessionId。
+      hub.bind({ sessionId, snapshot: () => undefined });
 
       // MCP 连接在这里懒触发(首个 run 付一次成本,之后是空调用)。连不上的 server
       // 只在 registry 里记 error,工具缺席即可 —— MCP 不可用绝不让对话失败。
@@ -117,6 +124,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       });
 
       stream.open();
+      // 自己这条连接就是源头,不需要重放;run_start 仍旧显式发一次。
+      void hub.attach(stream, { replay: false });
       emit({ type: "run_start", runId, sessionId });
 
       // 阶段④:S7 子代理运行时 —— subagent 基元注入主 agent,回报走 push(无 join 工具)。
@@ -158,10 +167,11 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         runFork: subagentRunner.runFork
       });
 
+      // 断连只是少了一个观众:run 继续跑,pending 审批继续等人。
+      // 想真的停下来只有一条路:POST /runs/:runId/abort。
       stream.onDisconnect(() => {
-        app.services.runRegistry.abort(runId);
-        // 别让 pending 审批吊住 agent loop —— 归属键是 runId,不需要先知道会话
-        app.services.approvals.cancelByRun(runId);
+        hub.detach(stream);
+        request.log.info({ runId }, "sse subscriber left; run continues detached");
       });
 
       const messageRecorder = new AssistantMessageRecorder(app.services.session, {
@@ -170,6 +180,10 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         model: resolved.mainModel.qualifiedModelId,
         initialPosition: runInput.assistantPosition
       });
+
+      // 补上快照来源(sessionId 在阶段①就绑过了)。builder 在 notice-injected 边界会
+      // 被换掉,所以每次都读当前那个 —— 已落库的前几条由 GET /threads/:id/messages 带回。
+      hub.bind({ sessionId, snapshot: () => messageRecorder.snapshot() });
 
       for await (const event of resolved.agent.stream({
         messages: runContext.modelMessages,
@@ -194,9 +208,14 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       });
 
       emit({ type: "end", finishReason: recorded.finishReason });
-      stream.close();
+      hub.closeAll();
     } catch (error) {
-      request.log.error({ err: error, runId }, "failed to stream agent run");
+      // 409 是正常拒绝(会话忙),不该在日志里冒充故障。
+      if (error instanceof SessionBusyError) {
+        request.log.warn({ runId, activeRunId: error.activeRunId }, "session busy; run rejected");
+      } else {
+        request.log.error({ err: error, runId }, "failed to stream agent run");
+      }
 
       // 模型不可用(503)且这条会话是本次请求刚建的 → 撤掉,别让没配好 API key 的
       // 新装用户每点一次发送就攒一条空会话。已有会话不动:用户说的话得留下。
@@ -209,6 +228,13 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       }
 
       if (!reply.raw.headersSent) {
+        // 409 带上 activeRunId:前端据此直接挂到在跑的那个 run 上,不用再查一次 status。
+        if (error instanceof SessionBusyError) {
+          reply.code(409);
+
+          return { error: toErrorMessage(error), activeRunId: error.activeRunId };
+        }
+
         reply.code(error instanceof AgentUnavailableError ? 503 : 400);
 
         return { error: toErrorMessage(error) };
@@ -216,7 +242,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
       emit({ type: "error", message: toErrorMessage(error) });
       emit({ type: "end", finishReason: "error" });
-      stream.close();
+      hub.closeAll();
     } finally {
       // 唤醒可能还在等通知的 drain,别留悬挂 Promise。
       reportGateway?.dispose();
@@ -224,6 +250,32 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       // pending 审批要么已被决策、要么被上面 cancelByRun 清掉;这里兜底。
       app.services.approvals.cancelByRun(runId);
     }
+  });
+
+  /**
+   * 重新挂到一个在飞的 run 上 —— 刷新页面后续跟流。
+   *
+   * 与 POST 同形:handler 里 await 住(RunEventStream 不 hijack reply),
+   * 订阅者退场或 run 收尾时 attach 的 promise 兑现,handler 才返回。
+   */
+  app.get("/api/v1/runs/:runId/stream", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const hub = app.services.runRegistry.hubFor(runId);
+
+    // 404 是正常语义:run 在刷新与这次请求之间跑完了 —— 前端退回只读 DB 消息。
+    if (!hub) {
+      reply.code(404);
+      return { error: "run not found or already finished" };
+    }
+
+    const stream = new RunEventStream(reply);
+    stream.open();
+    const done = hub.attach(stream, { replay: true });
+    stream.onDisconnect(() => hub.detach(stream));
+
+    await done;
+
+    return undefined;
   });
 
   app.post("/api/v1/runs/:runId/abort", async (request, reply) => {

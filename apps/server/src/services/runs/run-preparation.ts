@@ -12,6 +12,7 @@ import { defined, type WorkspaceContext } from "../agent-factory.js";
 import type { AppConfig } from "../../config.js";
 import type { AppDatabase } from "../../db/index.js";
 import { DrizzleMessageRepository } from "../../db/repositories/message-repository.js";
+import { DrizzleRunRepository } from "../../db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../../db/repositories/session-repository.js";
 import type { Session } from "../../db/repositories/types.js";
 import type { RunRequest } from "../../types/runs.js";
@@ -98,6 +99,28 @@ const loadWorkspaceContext = async (
 };
 
 /**
+ * 该会话已有 run 在飞 —— 路由映射成 409。
+ *
+ * 从 SSE 断连不再 abort 那一刻起,这个守卫就是「一个会话同时只跑一个 run」的
+ * 唯一执行者:刷新页面再发一句,旧 run 还在跑,两个 run 会同时改 activeLeafId。
+ * 宁可让用户看见「这轮还在跑」,也不静默杀掉正在跑的东西(见 plan 决定②)。
+ */
+export class SessionBusyError extends Error {
+  constructor(readonly activeRunId: string) {
+    super("这个会话还有一轮在运行,先等它跑完或点停止");
+    this.name = "SessionBusyError";
+  }
+}
+
+const assertSessionIdle = (db: AppDatabase, sessionId: string): void => {
+  const running = new DrizzleRunRepository(db).findRunningBySessionId(sessionId);
+
+  if (running) {
+    throw new SessionBusyError(running.id);
+  }
+};
+
+/**
  * 阶段①:备齐这次 run 的输入材料 —— 建/取会话、落用户消息、定模型、定工作区。
  * 不解析模型(那是 AgentFactory 的活),只把"用哪个模型"这个决定落实成 modelId。
  */
@@ -106,6 +129,11 @@ export const prepareRunInput = async (
   body: RunRequest,
   runId: string
 ): Promise<RunInput> => {
+  // send 与 retry 都从这里过;新建会话(无 sessionId)天然不可能有在飞 run。
+  if (body.sessionId !== undefined) {
+    assertSessionIdle(dependencies.db, body.sessionId);
+  }
+
   if (body.retryMessageId !== undefined) {
     const messageRepo = new DrizzleMessageRepository(dependencies.db);
     const target = messageRepo.findById(body.retryMessageId);

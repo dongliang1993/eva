@@ -234,7 +234,7 @@ describe("ApprovalGateway.cancelByRun", () => {
 
   it("只取消目标 run 的 pending,其他 run 不动", () => {
     const gateway = new ApprovalGateway(new ApprovalRepository(db));
-    // other run 的审批故意不 resolve(靠超时兜底),这里不 await
+    // other run 的审批故意不 resolve(审批不超时,只能被 decide/cancelByRun 收),这里不 await
     gateway.ask("c-other", { runId: "run-2", sessionId: "session-2", tool: "x", args: {} });
     gateway.ask("c-target", { runId: "run-1", sessionId: "session-1", tool: "y", args: {} });
 
@@ -242,7 +242,83 @@ describe("ApprovalGateway.cancelByRun", () => {
     expect(gateway.listPending("session-1")).toHaveLength(0);
     expect(gateway.listPending("session-2")).toHaveLength(1);
 
-    // 收尾:清掉未 resolve 的 timer,别挂住 vitest
+    // 收尾:未决的 ask 只能靠 cancelByRun 收 —— 不收就是一个悬挂 Promise
     gateway.cancelByRun("run-2");
+  });
+});
+/**
+ * 审批不超时(plan 决定③)。刷新页面后卡片还能回来、用户能慢慢看清楚再决定 ——
+ * 倒计时会把这条路重新掐断,所以这里用假时钟把「不自动拒绝」钉死。
+ */
+describe("审批不超时", () => {
+  let db: AppDatabase;
+
+  beforeEach(() => {
+    db = initDb({ dbPath: ":memory:" });
+    migrateDb(db);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    closeDb(db);
+  });
+
+  it("挂 10 分钟也不自动拒绝,仍然 pending", async () => {
+    const gateway = new ApprovalGateway(new ApprovalRepository(db));
+    let settled = false;
+    const asked = gateway
+      .ask("c1", { runId: "run-1", sessionId: "session-1", tool: "bash", args: {} })
+      .then((allowed) => {
+        settled = true;
+        return allowed;
+      });
+
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+
+    expect(settled).toBe(false);
+    expect(gateway.listPending("session-1")).toHaveLength(1);
+    expect(new ApprovalRepository(db).getById("c1")?.status).toBe("pending");
+
+    // 只有人工决策能把它收掉。
+    expect(gateway.decide("c1", true)).toBe(true);
+    await expect(asked).resolves.toBe(true);
+  });
+});
+
+/**
+ * 审批不超时的连带:内存待决表随进程消失,DB 里的 pending 行没人收就永远挂着
+ * (那些会话会一直显示"待决策",并被并发守卫的 409 挡住新消息)。
+ * 进程重启是它们唯一的收尾时机 —— deps.buildInfrastructure 启动时扫这一刀。
+ */
+describe("启动清扫:遗留 pending 审批", () => {
+  let db: AppDatabase;
+
+  beforeEach(() => {
+    db = initDb({ dbPath: ":memory:" });
+    migrateDb(db);
+  });
+
+  afterEach(() => {
+    closeDb(db);
+  });
+
+  it("failStalePending 把上次遗留的 pending 收成 denied,已决策的不动", () => {
+    const repo = new ApprovalRepository(db);
+    repo.create({ id: "c1", sessionId: "s1", runId: "run-1", tool: "bash", args: {} });
+    repo.create({ id: "c2", sessionId: "s1", runId: "run-1", tool: "bash", args: {} });
+    repo.create({ id: "c3", sessionId: "s2", runId: "run-2", tool: "bash", args: {} });
+    repo.decide("c3", "granted");
+
+    expect(repo.failStalePending()).toBe(2);
+
+    expect(repo.getById("c1")?.status).toBe("denied");
+    expect(repo.getById("c1")?.decidedAt).toBeTruthy();
+    expect(repo.getById("c2")?.status).toBe("denied");
+    // 上一进程真的做过决策的那条保持原样。
+    expect(repo.getById("c3")?.status).toBe("granted");
+
+    // 幂等:再扫一次没有可收的了。
+    expect(repo.failStalePending()).toBe(0);
   });
 });

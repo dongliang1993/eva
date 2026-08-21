@@ -63,6 +63,24 @@ export class ApprovalRepository {
     };
   }
 
+  /**
+   * 进程启动时把上次遗留的 pending 审批收成 denied。
+   *
+   * 审批不再超时(出口只有人工决策 / cancelByRun / 进程重启)之后,这一步是
+   * 必需的:待决表在内存 Map 里,随进程消失;DB 里的 pending 行没人收就永远挂着,
+   * 和 runs 表当初的问题一模一样(见 DrizzleRunRepository.failStale)。
+   * @returns 被收尾的数量
+   */
+  failStalePending(): number {
+    const result = this.db
+      .update(approvalRequests)
+      .set({ status: "denied", decidedAt: new Date().toISOString() })
+      .where(eq(approvalRequests.status, "pending"))
+      .run();
+
+    return result.changes;
+  }
+
   decide(id: string, status: Extract<ApprovalStatus, "granted" | "denied">): void {
     this.db
       .update(approvalRequests)
