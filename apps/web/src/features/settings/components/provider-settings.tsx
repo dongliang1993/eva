@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   Check,
   Download,
@@ -65,8 +65,8 @@ function ProviderDetail({
   onSave,
   onTest,
   onFetchModels,
-  isSaving,
-  saveSuccess
+  onDirtyChange,
+  saveRef
 }: {
   readonly provider: Provider;
   readonly onSave: (id: string, body: Record<string, unknown>) => void;
@@ -78,8 +78,10 @@ function ProviderDetail({
     id: string,
     body?: Record<string, unknown>
   ) => Promise<{ models: readonly ProviderModel[] }>;
-  readonly isSaving: boolean;
-  readonly saveSuccess: boolean;
+  /** 脏态上报:footer 提到 ProviderSettings 后,启用/文案由父级按当前选中项渲染。 */
+  readonly onDirtyChange: (dirty: boolean) => void;
+  /** 保存动作注册:footer 的 Save 按钮在父级,通过 ref 触发这里的本地保存。 */
+  readonly saveRef: RefObject<(() => void) | null>;
 }) {
   const preset = getProviderPreset(provider.id, provider.name);
   const [showKey, setShowKey] = useState(false);
@@ -116,6 +118,10 @@ function ProviderDetail({
     localApiKey.trim().length > 0 ||
     JSON.stringify(localAvailableModels) !== JSON.stringify(provider.availableModels) ||
     JSON.stringify(enabledModelIds) !== JSON.stringify(originalEnabledModelIds);
+
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
 
   const filteredModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase();
@@ -229,14 +235,20 @@ function ProviderDetail({
     });
   };
 
+  useEffect(() => {
+    saveRef.current = handleSave;
+    return () => {
+      saveRef.current = null;
+    };
+  });
+
   const storedKeyMessage = provider.hasApiKey && !clearApiKey && localApiKey.trim().length === 0
     ? "A key is already stored. Enter a new key only if you want to replace it."
     : preset.apiKeyHint;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-        <div className="mb-1 flex items-center justify-between">
+    <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+      <div className="mb-1 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold text-foreground">{provider.name}</h2>
             {localEnabled ? (
@@ -411,34 +423,6 @@ function ProviderDetail({
             </p>
           )}
         </div>
-      </div>
-
-      {/* 通栏 footer:-mx-8 抵消内容区的 px-8,底边贴住父容器,与设置页底框齐平 */}
-      <div className="mt-4 -mx-8 -mb-6 flex shrink-0 items-center justify-between border-t border-border bg-background px-8 py-4">
-        <span className="text-xs text-muted-foreground">
-          {saveSuccess && !dirty ? "All changes saved" : dirty ? "Unsaved changes" : ""}
-        </span>
-        <button
-          type="button"
-          className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${dirty
-            ? "bg-primary text-primary-foreground hover:bg-primary/90"
-            : "bg-secondary text-muted-foreground cursor-default"
-            }`}
-          onClick={handleSave}
-          disabled={!dirty || isSaving}
-        >
-          {isSaving ? (
-            "Saving..."
-          ) : saveSuccess && !dirty ? (
-            <>
-              <Check size={14} />
-              Saved
-            </>
-          ) : (
-            "Save"
-          )}
-        </button>
-      </div>
     </div>
   );
 }
@@ -455,6 +439,8 @@ export function ProviderSettings() {
   } = useProviders();
   const providers = data ?? [];
   const [selectedId, setSelectedId] = useState<string>("");
+  const [dirtyByProvider, setDirtyByProvider] = useState<Record<string, boolean>>({});
+  const saveRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (providers.length === 0) {
@@ -468,13 +454,16 @@ export function ProviderSettings() {
   }, [providers, selectedId]);
 
   const selectedProvider = providers.find((provider) => provider.id === selectedId);
+  const selectedDirty = dirtyByProvider[selectedId] === true;
+  const selectedSaved = saveSuccess && !selectedDirty;
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading providers...</p>;
   }
 
   return (
-    <div className="flex flex-1 gap-6 h-full min-h-0">
+    <div className="flex flex-1 flex-col h-full min-h-0">
+      <div className="flex flex-1 gap-6 min-h-0">
       <div className="w-64 shrink-0 overflow-y-auto rounded-xl border border-border bg-card p-2">
         <div className="space-y-1.5">
           {providers.map((provider) => {
@@ -514,12 +503,47 @@ export function ProviderSettings() {
             onSave={(id, body) => updateProvider({ id, body })}
             onTest={(id, body) => testProviderAsync({ id, body })}
             onFetchModels={(id, body) => fetchProviderModelsAsync({ id, body })}
-            isSaving={isSaving}
-            saveSuccess={saveSuccess}
+            onDirtyChange={(dirty) =>
+              setDirtyByProvider((previous) =>
+                previous[selectedProvider.id] === dirty
+                  ? previous
+                  : { ...previous, [selectedProvider.id]: dirty }
+              )
+            }
+            saveRef={saveRef}
           />
         ) : (
           <p className="text-sm text-muted-foreground">Select a provider</p>
         )}
+      </div>
+      </div>
+
+      {/* 保存栏与上面的供应商列表/详情上下并排,同属 ProviderSettings 一列;
+          -mx-8/-mb-6 抵消设置页内容区的 padding,通栏贴底 */}
+      <div className="mt-4 -mx-8 -mb-6 flex shrink-0 items-center justify-between border-t border-border bg-background px-8 py-4">
+        <span className="text-xs text-muted-foreground">
+          {selectedSaved ? "All changes saved" : selectedDirty ? "Unsaved changes" : ""}
+        </span>
+        <button
+          type="button"
+          className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${selectedDirty
+            ? "bg-primary text-primary-foreground hover:bg-primary/90"
+            : "bg-secondary text-muted-foreground cursor-default"
+            }`}
+          onClick={() => saveRef.current?.()}
+          disabled={!selectedDirty || isSaving}
+        >
+          {isSaving ? (
+            "Saving..."
+          ) : selectedSaved ? (
+            <>
+              <Check size={14} />
+              Saved
+            </>
+          ) : (
+            "Save"
+          )}
+        </button>
       </div>
     </div>
   );
