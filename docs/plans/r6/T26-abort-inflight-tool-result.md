@@ -43,8 +43,8 @@ finish(aborted)。整条路径没有任何位置再碰那个 toolCallId。
 `yieldCanceledToolResults(clock, toolCalls)` 生成器:
 
 1. **遍历 clock 剩余 entry**(FIFO 序 = 发起序),每个 toolCallId:
-   - 构造 `output = "[Tool Error] Command canceled (run aborted)."`
-     (沿用 TOOL_ERROR_PREFIX,卡片现有 `[Tool Error]` 样式直接命中;
+   - 构造 `output = TOOL_CALL_ABORTED_OUTPUT`("Error: tool call aborted",
+     build-tool 导出,与 race 兜底/bash 组杀共用同一文案;
      不带命令摘要 —— 此处在循环层,拿不到也不该懂 bash 的入参)
    - yield `tool-result` 事件(status=error,durationMs=此刻-打点)
    - push `AgentToolCallResult` 进 `toolCalls`(进 finish 汇总)
@@ -66,13 +66,13 @@ tool-result 事件的 `toolName` 字段:clock 只有 id→时间,**在 mapStream
 
 | # | 用例 | 断言 |
 | --- | --- | --- |
-| 1 | 工具在飞时 abort → 消费到 finish | 在 finish(aborted) **之前**出现 tool-result:toolCallId=tc-1、status=error、output 以 `[Tool Error]` 开头;finish.toolCalls 含 tc-1 且 status=error |
+| 1 | 工具在飞时 abort → 消费到 finish | 在 finish(aborted) **之前**出现 tool-result:toolCallId=tc-1、status=error、output 以 `Error:` 开头;finish.toolCalls 含 tc-1 且 status=error |
 | 2 | 无在飞工具时 abort(纯文本流中途) | 不多发任何 tool-result;finish(aborted) 与现状一致(现有 abort 用例不回归) |
 | 3 | 移除实验:注释掉补发段 → 用例 1 红 | 证明断言真的在守这段逻辑 |
 | 4 | 两个并发在飞工具(模型一步发两个 tool-call)→ abort | 两条 tool-result 都补,顺序 = tool-call 发起序 |
 
 E2E(页面):`bash: sleep 300 && echo done` 跑到一半点停止 ——
-工具卡片翻 error、输出"[Tool Error] Command canceled (run aborted).";
+工具卡片翻 error、输出"Error: tool call aborted";
 刷新会话后卡片仍是 error(不是 running),因为补发事件进了
 UiMessageBuilder,落库 part 为 output-error。
 
@@ -95,9 +95,9 @@ UiMessageBuilder,落库 part 为 output-error。
    finish 后收尾,之后的事件客户端收不到。顺序必须是 补发 → finish。
 4. **子代理同在飞**:subagent 的 stream 也走同一个 agent.ts 循环,补发
    逻辑天然覆盖;子代理事件经 subagent_update 桥接,不在本任务额外验证。
-5. **文案不带命令**:bash 工具自己产生的取消文案带命令摘要
-   (`Command canceled (sleep 300…)`),那是工具层能看到的入参;循环层
-   补发是协议层兜底,统一固定文案,不逐工具定制。
+5. **文案统一不带命令**:bash 工具自己的取消输出与循环层补发同用
+   `TOOL_CALL_ABORTED_OUTPUT`(对齐 dsh 的 "Error: tool call aborted") ——
+   命令本来就在卡片标题/命令行里,错误行不重复。
 6. **durationMs 会偏长**:补发时刻 - tool-call 打点,包含了用户犹豫要不要
    点停止的时间。这是真实墙钟,不算 bug;观测上反而能看出"这个工具等了
    多久才被取消"。
