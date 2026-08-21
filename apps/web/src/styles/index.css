@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* ------------------------------------------------------------------ */
 /* Design tokens — DeepSeek Harness palette (light + dark)            */
@@ -41,6 +41,11 @@
   --stat-neutral-950: #151517;
   --stat-neutral-1000: #0f1115;
 
+  /* ---- code 字体栈 (与参考实现对齐: 等宽 + CJK 回退) ---- */
+  --ds-font-family-code:
+    'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono',
+    Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+
   /* ---- static: deepseek brand blues ---- */
   --stat-deepseek-50: #edf3fe;
   --stat-deepseek-100: #e4edfd;
@@ -68,12 +73,12 @@
   --stat-warning-100: #fef5e7;
 
   /* ---- semantic: 背景层级 ---- */
-  --bg-app: var(--stat-neutral-60);        /* 页面底 */
-  --bg-surface: #ffffff;                  /* card / layer-1 */
-  --bg-surface-2: #ffffff;                /* layer-2 */
-  --bg-surface-3: #ffffff;                /* menu / popover / layer-3 */
-  --bg-hover: var(--stat-neutral-75);     /* 可交互 hover 底 */
-  --bg-overlay: #e9ecf2;                  /* 浮层底 */
+  --bg-app: var(--stat-neutral-60); /* 页面底 */
+  --bg-surface: #ffffff; /* card / layer-1 */
+  --bg-surface-2: #ffffff; /* layer-2 */
+  --bg-surface-3: #ffffff; /* menu / popover / layer-3 */
+  --bg-hover: var(--stat-neutral-75); /* 可交互 hover 底 */
+  --bg-overlay: #e9ecf2; /* 浮层底 */
   --bg-sidebar: var(--stat-neutral-50);
   --bg-code: var(--stat-neutral-50);
   --bg-code-banner: var(--stat-neutral-50);
@@ -90,7 +95,7 @@
   /* ---- semantic: 品牌 ---- */
   --brand-primary: var(--stat-neutral-1000); /* 主按钮面 = 近黑 */
   --brand-on-primary: var(--stat-neutral-50);
-  --brand-focus: var(--stat-deepseek-500);   /* accent 蓝 */
+  --brand-focus: var(--stat-deepseek-500); /* accent 蓝 */
   --brand-focus-strong: var(--stat-deepseek-450);
 
   /* ---- borders (浅色用黑透明) ---- */
@@ -223,7 +228,12 @@ body,
 body {
   background-color: var(--bg-app);
   color: var(--fg-primary);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   font-size: 14px;
 }
@@ -238,7 +248,7 @@ body {
 .titlebar-drag button,
 .titlebar-drag a,
 .titlebar-drag input,
-.titlebar-drag [role="button"] {
+.titlebar-drag [role='button'] {
   -webkit-app-region: no-drag;
 }
 
@@ -296,10 +306,31 @@ body {
 /* data-separator="active", 该期间禁用过渡保证跟手手感。               */
 /* ------------------------------------------------------------------ */
 div[data-panel] {
-  transition: flex-grow 0.22s ease, flex-basis 0.22s ease;
+  transition:
+    flex-grow 0.22s ease,
+    flex-basis 0.22s ease;
 }
 
 /* 拖拽分隔条期间: 关闭过渡, 尺寸即时响应 (data-group 是库的 Group 元素) */
-div[data-group]:has(div[data-separator][data-separator="active"]) div[data-panel] {
+div[data-group]:has(div[data-separator][data-separator='active'])
+  div[data-panel] {
   transition: none !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Streamdown inline code — 对齐参考实现形态:                            */
+/* 冷调灰底 (stat-neutral-100/850 = rgb(235,238,242)/rgb(44,44,46))、   */
+/* 6px 圆角、0/5px 内边距、0.875em 字号、等宽字体栈带 CJK 回退。         */
+/* 去掉参考实现的 inline-flex —— inline code 在换行处会被折断,           */
+/* flex 盒不能跨行,长 code 会溢出而不折行。                             */
+/* ------------------------------------------------------------------ */
+[data-streamdown='inline-code'] {
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-family: var(--ds-font-family-code);
+  background-color: var(--stat-neutral-200);
+}
+
+.dark [data-streamdown='inline-code'] {
+  background-color: var(--stat-neutral-800);
 }

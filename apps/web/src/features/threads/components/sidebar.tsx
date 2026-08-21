@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PanelLeftClose, PanelLeft, SquarePen, Settings } from "lucide-react";
 
 import { apiFetch } from "../../../shared/api/fetch";
+import { isElectron } from "../../../shared/runtime";
 import type { ThreadSummary } from "../../../types/api";
 import { SessionStatusDot } from "./session-status-dot";
 import { ThemeToggle } from "../../../shared/ui/theme-toggle";
@@ -37,8 +38,11 @@ export function Sidebar({
 
   return (
     <div className="flex h-full flex-col overflow-hidden border-r border-border bg-sidebar">
-      {/* Drag region spacer — 小程序化, 让折叠按钮避开上方全局 titlebar-drag 拦截层 */}
-      <div className="titlebar-drag h-11 w-full shrink-0" />
+      {/* Drag region spacer — 小程序化, 让折叠按钮避开上方全局 titlebar-drag 拦截层;
+          只在 Electron 下渲染(浏览器没有自定义标题栏) */}
+      {isElectron() ? (
+        <div className="titlebar-drag h-11 w-full shrink-0" />
+      ) : null}
 
       {/* Header: brand + collapse toggle */}
       <div

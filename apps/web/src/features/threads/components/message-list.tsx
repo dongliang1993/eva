@@ -101,7 +101,9 @@ export function MessageList({
   }
 
   return (
-    <div ref={containerRef} className="message-list-scroll flex-1 overflow-y-auto px-4 py-6 space-y-4 mx-4">
+    // 滚动条贴视窗右缘:容器占满(去 mx-4),内容留白走 padding;
+    // 左侧宽一点(pl-6)顶住气泡,右侧滚动条盖在 pr-4 上不占内容宽
+    <div ref={containerRef} className="message-list-scroll flex-1 overflow-y-auto pl-6 pr-4 py-6 space-y-4">
       {messages.length > VIRTUALIZE_THRESHOLD ? (
         <VirtualizedMessages messages={messages} scrollRef={containerRef} />
       ) : (

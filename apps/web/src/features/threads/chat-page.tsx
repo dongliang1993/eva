@@ -12,6 +12,7 @@ import { ChatView } from "./components/chat-view";
 import { SubagentsProvider, useSubagentsStore } from "./components/subagents-context";
 import { VersionActionsProvider } from "./components/version-actions-context";
 import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
+import { isElectron } from "../../shared/runtime";
 import type { ThreadSummary } from "../../types/api";
 
 export function ChatPage() {
@@ -177,7 +178,11 @@ export function ChatPage() {
 
   return (
     <div className="h-screen bg-background text-foreground">
-      <div className="titlebar-drag h-11 w-full fixed top-0 left-0 z-50" />
+      {/* 自定义标题栏拖拽区 —— 只在 Electron(titleBarStyle: hidden*)下需要,
+          浏览器有自己的原生标题栏 */}
+      {isElectron() ? (
+        <div className="titlebar-drag h-11 w-full fixed top-0 left-0 z-50" />
+      ) : null}
       <ResizableSidebar
         collapsed={sidebarCollapsed}
         onCollapsedChange={setSidebarCollapsed}

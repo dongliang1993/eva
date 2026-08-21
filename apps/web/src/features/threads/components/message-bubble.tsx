@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { Brain, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileText, RotateCcw } from "lucide-react";
+import { Brain, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Copy, FileText, RotateCcw } from "lucide-react";
 import "streamdown/styles.css";
 
 import type { EvaUIMessage } from "@eva/shared";
@@ -8,6 +8,7 @@ import type { EvaDynamicToolPart, EvaTextPart, EvaUIMessagePart } from "@eva/sha
 
 import { StreamMarkdown } from "../../../shared/markdown/markdown.js";
 import { useSmoothStream } from "../../../shared/streaming/use-smooth-stream.js";
+import { Tooltip, TooltipProvider } from "../../../shared/ui/tooltip";
 import { toolPartToInfo } from "../../../shared/api/run-stream-client";
 import { useVersionActions } from "./version-actions-context";
 import { StreamingIndicator } from "./streaming-indicator";
@@ -61,21 +62,56 @@ function VersionSwitcher({ messageId }: { readonly messageId: string }) {
   );
 }
 
-/** 重新生成最后一条回复。 */
+/**
+ * 复制 assistant 正文(全部 text part 拼接,不含 Think/工具调用)。
+ * 自管 copied 态,1.2s 回显 ✓ 后回落 —— 照 CopyCommandButton 的既有形态。
+ */
+function CopyMessageButton({ text }: { readonly text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const onCopy = () => {
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+      })
+      .catch(() => {
+        // 剪贴板权限被拒(非安全上下文等)静默:按钮仍在,只是没复制成功。
+      });
+  };
+
+  return (
+    <Tooltip content="复制">
+      <button
+        type="button"
+        aria-label="复制"
+        className="p-1 cursor-pointer flex items-center text-muted-foreground transition-colors hover:text-foreground"
+        onClick={onCopy}
+      >
+        {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+      </button>
+    </Tooltip>
+  );
+}
+
+/** 重新生成最后一条回复。纯图标,文案收成 hover tooltip(气泡样式同全站)。 */
 function RegenerateButton({ messageId }: { readonly messageId: string }) {
   const { onRegenerate, isStreaming } = useVersionActions();
   if (isStreaming) {
     return null;
   }
   return (
-    <button
-      type="button"
-      className="mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      onClick={() => onRegenerate(messageId)}
-    >
-      <RotateCcw size={13} />
-      <span>重新生成</span>
-    </button>
+    <Tooltip content="重新生成">
+      <button
+        type="button"
+        aria-label="重新生成"
+        className="p-1 cursor-pointer flex items-center text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => onRegenerate(messageId)}
+      >
+        <RotateCcw size={13} />
+      </button>
+    </Tooltip>
   );
 }
 
@@ -188,7 +224,6 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
           <ThinkBlock
             key={`reasoning-${groupIndex}`}
             text={group.part.text}
-            isStreaming={group.part.state === "streaming"}
           />
         ) : (
           // 一串连续工具调用收拢成一组:组内紧凑(space-y-1),组与文字之间才宽松。
@@ -203,46 +238,54 @@ function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBub
       {message.parts.length === 0 ? <StreamingIndicator /> : null}
 
       {isLastAssistant === true && !isStreaming ? (
-        <>
-          <VersionSwitcher messageId={message.id} />
-          <RegenerateButton messageId={message.id} />
-        </>
+        <TooltipProvider delayDuration={300}>
+          <div className="flex items-center gap-3">
+            <VersionSwitcher messageId={message.id} />
+            <CopyMessageButton text={uiMessageText(message)} />
+            <RegenerateButton messageId={message.id} />
+          </div>
+        </TooltipProvider>
       ) : null}
     </div>
   );
 }
 
 /**
- * 取 reasoning 里最新的一句话(流式预览用)。
+ * 取 reasoning 的第一句话(标题行预览用)。
  *
- * 按句子/换行断:取最后一段非空内容(通常就是正在生成的那句)。reasoning
- * 是逐字追加进同一 part 的,所以"当前正在想的东西"≈ 尾部最后一句。
+ * 按句子/换行断:取第一段非空内容 —— 收口后标题留下的"这段在想什么"
+ * 由开头那句代表。流式期间也用它:逐字追加下第一屏很快定形,标题不跳动。
  */
-const lastReasoningPreview = (text: string): string => {
+const firstReasoningPreview = (text: string): string => {
   const trimmed = text.trim();
-  const trailing = trimmed
+  const leading = trimmed
     .split(/(?<=[。！？.!?\n])/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  return trailing.length > 0 ? trailing[trailing.length - 1]! : trimmed;
+  return leading.length > 0 ? leading[0]! : trimmed;
 };
 
 /**
  * Think 块 —— assistant 消息里的推理轨迹(对接 reasoning-delta)。DSH 形态:
  *
- * - 流式期间:标题行实时显示「Think · <最新一句>」,推理过程就滚动在这行上面;
- * - 收口后:标题收起成「Think」,展开/折叠才看全部内容。
+ * - 流式期间:标题行显示「Think · <第一句>」,推理过程就滚动在这行上面;
+ * - 收口后:标题行保留「Think · <第一句>」的一行预览(truncate 超出省略),
+ *   展开/折叠才看全部内容。
  */
-function ThinkBlock({ text, isStreaming }: { readonly text: string; readonly isStreaming: boolean }) {
-  const title = isStreaming ? (
+function ThinkBlock({ text }: { readonly text: string }) {
+  const preview = firstReasoningPreview(text);
+  const title = (
     <>
-      Think<span className="mx-1 text-muted-foreground">·</span>
-      <span className="max-w-[60%] truncate font-normal text-secondary-foreground">
-        {lastReasoningPreview(text)}
-      </span>
+      Think
+      {preview.length > 0 ? (
+        <>
+          <span className="mx-1 text-muted-foreground">·</span>
+          <span className="max-w-[60%] truncate font-normal text-secondary-text">
+            {preview}
+          </span>
+        </>
+      ) : null}
     </>
-  ) : (
-    "Think"
   );
 
   return (
