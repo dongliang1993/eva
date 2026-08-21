@@ -10,7 +10,10 @@ import {
   type AppDatabase
 } from "../apps/server/src/db/index.js";
 import { registerProviderRoutes } from "../apps/server/src/routes/providers.js";
-import { findProviderById } from "../apps/server/src/services/providers/provider-repository.js";
+import {
+  findProviderById,
+  updateProvider
+} from "../apps/server/src/services/providers/provider-repository.js";
 
 let app: FastifyInstance;
 let db: AppDatabase;
@@ -141,6 +144,55 @@ describe("Provider runtime routes", () => {
       availableModels: expect.arrayContaining([
         expect.objectContaining({ id: "gpt-5-mini", name: "GPT-5 Mini" })
       ])
+    });
+  });
+
+  describe("GET /api/v1/providers/:id/api-key(揭示端点)", () => {
+    it("已存 key → 返回解密后的明文", async () => {
+      updateProvider(db, "openai", { apiKey: "sk-reveal-me" });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/providers/openai/api-key"
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ apiKey: "sk-reveal-me" });
+    });
+
+    it("未存 key → 返回空串", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/providers/openai/api-key"
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ apiKey: "" });
+    });
+
+    it("provider 不存在 → 404", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/providers/no-such-provider/api-key"
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({ error: "Provider not found" });
+    });
+
+    it("列表响应仍不含明文 key(坑 2 不回流)", async () => {
+      updateProvider(db, "openai", { apiKey: "sk-should-not-leak" });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/providers"
+      });
+
+      expect(response.statusCode).toBe(200);
+      const providers = response.json() as readonly Record<string, unknown>[];
+      const openai = providers.find((provider) => provider.id === "openai");
+      expect(openai).toMatchObject({ hasApiKey: true });
+      expect(openai).not.toHaveProperty("apiKey");
     });
   });
 });

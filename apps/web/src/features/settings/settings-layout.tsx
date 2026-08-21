@@ -27,13 +27,13 @@ export function SettingsLayout() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            className="flex items-center gap-2 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
             onClick={() => navigate("/chat")}
-            title="Back to chat"
+            title="返回聊天"
           >
             <ArrowLeft size={18} />
+            <span className="text-sm font-medium text-foreground">设置</span>
           </button>
-          <span className="text-sm font-medium text-foreground">Settings</span>
         </div>
         <ThemeToggle />
       </div>

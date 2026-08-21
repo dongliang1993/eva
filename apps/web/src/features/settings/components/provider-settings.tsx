@@ -65,6 +65,7 @@ function ProviderDetail({
   onSave,
   onTest,
   onFetchModels,
+  onRevealApiKey,
   onDirtyChange,
   saveRef
 }: {
@@ -78,6 +79,8 @@ function ProviderDetail({
     id: string,
     body?: Record<string, unknown>
   ) => Promise<{ models: readonly ProviderModel[] }>;
+  /** 揭示已存 key 明文:按需调用,结果只进本地 state,不进缓存。 */
+  readonly onRevealApiKey: (id: string) => Promise<string>;
   /** 脏态上报:footer 提到 ProviderSettings 后,启用/文案由父级按当前选中项渲染。 */
   readonly onDirtyChange: (dirty: boolean) => void;
   /** 保存动作注册:footer 的 Save 按钮在父级,通过 ref 触发这里的本地保存。 */
@@ -93,6 +96,10 @@ function ProviderDetail({
 
   const [localApiKey, setLocalApiKey] = useState("");
   const [clearApiKey, setClearApiKey] = useState(false);
+  /** 揭示状态:revealState="revealed" 时输入框展示服务端取回的明文;掩码态只显示占位点。 */
+  const [revealedApiKey, setRevealedApiKey] = useState<string | null>(null);
+  const [revealPending, setRevealPending] = useState(false);
+  const [revealError, setRevealError] = useState<string | null>(null);
   const [localBaseURL, setLocalBaseURL] = useState(provider.baseURL ?? "");
   const [localEnabled, setLocalEnabled] = useState(provider.enabled);
   const [localAvailableModels, setLocalAvailableModels] = useState<ProviderModel[]>([
@@ -242,18 +249,51 @@ function ProviderDetail({
     };
   });
 
+  /**
+   * 眼睛图标:
+   * - 已揭示 → 收回(清空本地明文,回到掩码)
+   * - 未揭示且已存 key、用户没输入新值 → 调揭示端点取明文展示
+   * - 其余(无 key / 用户正在输入新 key)→ 仅切换本地输入的可见性
+   */
+  const handleToggleShowKey = async () => {
+    if (revealedApiKey !== null) {
+      setRevealedApiKey(null);
+      setRevealError(null);
+      setShowKey(false);
+      return;
+    }
+
+    if (provider.hasApiKey && !clearApiKey && localApiKey.trim().length === 0) {
+      setRevealPending(true);
+      setRevealError(null);
+      try {
+        const apiKey = await onRevealApiKey(provider.id);
+        setRevealedApiKey(apiKey);
+        setShowKey(true);
+      } catch (error) {
+        setRevealError(error instanceof Error ? error.message : "Failed to reveal API key");
+      } finally {
+        setRevealPending(false);
+      }
+      return;
+    }
+
+    setShowKey((previous) => !previous);
+  };
+
   const storedKeyMessage = provider.hasApiKey && !clearApiKey && localApiKey.trim().length === 0
     ? "A key is already stored. Enter a new key only if you want to replace it."
     : preset.apiKeyHint;
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-      <div className="mb-1 flex items-center justify-between">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto pr-1">
+      <div className="mb-1 flex shrink-0 flex-col">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold text-foreground">{provider.name}</h2>
             {localEnabled ? (
               <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
-                Active
+                已启用
               </span>
             ) : null}
           </div>
@@ -272,157 +312,157 @@ function ProviderDetail({
             <Toggle checked={localEnabled} onChange={setLocalEnabled} />
           </div>
         </div>
-
         <p className="mb-6 text-sm text-muted-foreground">{preset.description}</p>
+      </div>
 
-        <div className="mb-5">
-          <label className="mb-1.5 block text-sm font-medium text-foreground">API Key</label>
-          <div className="flex items-center gap-2">
-            <input
-              type={showKey ? "text" : "password"}
-              className="flex-1 h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-ring transition-colors"
-              placeholder={provider.hasApiKey && !clearApiKey ? "Stored key will be preserved" : "sk-..."}
-              value={localApiKey}
-              onChange={(event) => {
-                setLocalApiKey(event.target.value);
-                setClearApiKey(false);
-              }}
-            />
-            <button
-              type="button"
-              className="rounded-lg border border-input p-2.5 text-muted-foreground hover:bg-accent transition-colors"
-              onClick={() => setShowKey((previous) => !previous)}
-            >
-              {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-            {provider.hasApiKey ? (
-              <button
-                type="button"
-                className={`rounded-lg border px-3 py-2 text-sm transition-colors ${clearApiKey
-                  ? "border-destructive/30 text-destructive hover:bg-destructive/5"
-                  : "border-input text-muted-foreground hover:bg-accent"
-                  }`}
-                onClick={() => setClearApiKey((previous) => !previous)}
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <Trash2 size={14} />
-                  {clearApiKey ? "Will remove" : "Clear saved key"}
-                </span>
-              </button>
-            ) : null}
-          </div>
-          <p className="mt-1.5 text-xs text-primary">{storedKeyMessage}</p>
-          {testResult ? (
-            <p className={`mt-1.5 text-xs ${testResult.success ? "text-success" : "text-destructive"}`}>
-              {testResult.success
-                ? `Connection OK${testResult.latencyMs !== undefined ? ` · ${testResult.latencyMs}ms` : ""}`
-                : testResult.error ?? "Connection test failed"}
+      <div className="mb-5 shrink-0">
+        <label className="mb-1.5 block text-sm font-medium text-foreground">API Key</label>
+        <div className="flex items-center gap-2">
+          <input
+            type={showKey ? "text" : "password"}
+            className="flex-1 h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-ring transition-colors"
+            placeholder={provider.hasApiKey && !clearApiKey ? "" : "sk-..."}
+            value={
+              revealedApiKey !== null
+                ? revealedApiKey
+                : provider.hasApiKey && !clearApiKey && localApiKey.trim().length === 0
+                  ? "••••••••••••••••"
+                  : localApiKey
+            }
+            onChange={(event) => {
+              // 揭示态下用户开始编辑 → 退出揭示态,按"新 key"语义走
+              if (revealedApiKey !== null) {
+                setRevealedApiKey(null);
+                setShowKey(false);
+              }
+              setLocalApiKey(event.target.value);
+              setClearApiKey(false);
+            }}
+          />
+          <button
+            type="button"
+            className="rounded-lg border border-input p-2.5 text-muted-foreground hover:bg-accent transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => void handleToggleShowKey()}
+            disabled={revealPending}
+          >
+            {revealPending ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : showKey ? (
+              <EyeOff size={16} />
+            ) : (
+              <Eye size={16} />
+            )}
+          </button>
+        </div>
+        <p className="mt-1.5 text-xs text-primary">{storedKeyMessage}</p>
+        {revealError ? (
+          <p className="mt-1.5 text-xs text-destructive">{revealError}</p>
+        ) : null}
+        {testResult ? (
+          <p className={`mt-1.5 text-xs ${testResult.success ? "text-success" : "text-destructive"}`}>
+            {testResult.success
+              ? `Connection OK${testResult.latencyMs !== undefined ? ` · ${testResult.latencyMs}ms` : ""}`
+              : testResult.error ?? "Connection test failed"}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="mb-6 shrink-0">
+        <label className="mb-1.5 block text-sm font-medium text-foreground">
+          Base URL (可选)
+        </label>
+        <input
+          type="text"
+          className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-ring transition-colors"
+          placeholder={preset.defaultBaseURL}
+          value={localBaseURL}
+          onChange={(event) => setLocalBaseURL(event.target.value)}
+        />
+        <p className="mt-1.5 text-xs text-muted-foreground">{preset.baseURLHint}</p>
+      </div>
+
+      <div className="min-h-0 flex-1">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <label className="text-sm font-medium text-foreground">模型</label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {enabledModelIds.length} enabled of {localAvailableModels.length} available
             </p>
-          ) : null}
+          </div>
+          <button
+            type="button"
+            className="flex items-center gap-1.5 rounded-lg border border-input px-3 py-1.5 text-sm text-foreground hover:bg-accent transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={handleFetchModels}
+            disabled={fetchingModels || !canUseRuntimeActions}
+          >
+            {fetchingModels ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Download size={14} />
+            )}
+            <span>{fetchingModels ? "获取中..." : "获取"}</span>
+          </button>
         </div>
 
-        <div className="mb-6">
-          <label className="mb-1.5 block text-sm font-medium text-foreground">
-            Base URL (Optional)
-          </label>
+        {fetchError ? (
+          <p className="mb-3 text-xs text-destructive">{fetchError}</p>
+        ) : null}
+
+        <div className="relative mb-3">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
           <input
             type="text"
-            className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-ring transition-colors"
-            placeholder={preset.defaultBaseURL}
-            value={localBaseURL}
-            onChange={(event) => setLocalBaseURL(event.target.value)}
+            className="w-full h-9 rounded-lg border border-input bg-background pl-9 pr-3 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-ring transition-colors"
+            placeholder="搜索模型..."
+            value={modelSearch}
+            onChange={(event) => setModelSearch(event.target.value)}
           />
-          <p className="mt-1.5 text-xs text-muted-foreground">{preset.baseURLHint}</p>
         </div>
 
-        <div>
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <label className="text-sm font-medium text-foreground">Models</label>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {enabledModelIds.length} enabled of {localAvailableModels.length} available
-              </p>
-            </div>
-            <button
-              type="button"
-              className="flex items-center gap-1.5 rounded-lg border border-input px-3 py-1.5 text-sm text-foreground hover:bg-accent transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={handleFetchModels}
-              disabled={fetchingModels || !canUseRuntimeActions}
-            >
-              {fetchingModels ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Download size={14} />
-              )}
-              <span>{fetchingModels ? "Fetching..." : "Fetch"}</span>
-            </button>
-          </div>
+        {enabledFirst.length > 0 ? (
+          <div className="overflow-clip rounded-xl border border-border bg-card">
+            <div className="divide-y divide-border">
+              {enabledFirst.map((model) => {
+                const contextWindow = formatContextWindow(model.capabilities?.contextWindow);
 
-          {provider.hasApiKey && localApiKey.trim().length === 0 ? (
-            <p className="mb-3 text-xs text-muted-foreground">
-              Stored credentials will be used by the server. Enter a new key only to test or fetch with an override.
-            </p>
-          ) : null}
-
-          {fetchError ? (
-            <p className="mb-3 text-xs text-destructive">{fetchError}</p>
-          ) : null}
-
-          <div className="relative mb-3">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <input
-              type="text"
-              className="w-full h-9 rounded-lg border border-input bg-background pl-9 pr-3 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-ring transition-colors"
-              placeholder="Search models..."
-              value={modelSearch}
-              onChange={(event) => setModelSearch(event.target.value)}
-            />
-          </div>
-
-          {enabledFirst.length > 0 ? (
-            <div className="overflow-clip rounded-xl border border-border bg-card">
-              <div className="divide-y divide-border">
-                {enabledFirst.map((model) => {
-                  const contextWindow = formatContextWindow(model.capabilities?.contextWindow);
-
-                  return (
-                    <div
-                      key={model.id}
-                      className="flex items-center justify-between px-4 py-3"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-foreground">
-                          {model.name}
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-3">
-                          {contextWindow ? (
-                            <span className="text-xs text-muted-foreground">{contextWindow}</span>
-                          ) : null}
-                          <span className="truncate font-mono text-xs text-muted-foreground/60">
-                            {model.id}
-                          </span>
-                        </div>
+                return (
+                  <div
+                    key={model.id}
+                    className="flex items-center justify-between px-4 py-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-foreground">
+                        {model.name}
                       </div>
-                      <div className="ml-3 flex items-center gap-2">
-                        <Toggle
-                          checked={localEnabledModelIds.has(model.id)}
-                          onChange={() => handleToggleModel(model.id)}
-                        />
+                      <div className="mt-0.5 flex items-center gap-3">
+                        {contextWindow ? (
+                          <span className="text-xs text-muted-foreground">{contextWindow}</span>
+                        ) : null}
+                        <span className="truncate font-mono text-xs text-muted-foreground/60">
+                          {model.id}
+                        </span>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
+                    <div className="ml-3 flex items-center gap-2">
+                      <Toggle
+                        checked={localEnabledModelIds.has(model.id)}
+                        onChange={() => handleToggleModel(model.id)}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ) : (
-            <p className="py-4 text-center text-sm text-muted-foreground">
-              No models yet. Fetch models or add them through provider updates.
-            </p>
-          )}
-        </div>
+          </div>
+        ) : (
+          <p className="py-4 text-center text-sm text-muted-foreground">
+            暂无模型。请获取模型或通过提供商更新添加。
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -434,6 +474,7 @@ export function ProviderSettings() {
     updateProvider,
     testProviderAsync,
     fetchProviderModelsAsync,
+    revealApiKey,
     isSaving,
     saveSuccess
   } = useProviders();
@@ -464,65 +505,66 @@ export function ProviderSettings() {
   return (
     <div className="flex flex-1 flex-col h-full min-h-0">
       <div className="flex flex-1 gap-6 min-h-0">
-      <div className="w-64 shrink-0 overflow-y-auto rounded-xl border border-border bg-card p-2">
-        <div className="space-y-1.5">
-          {providers.map((provider) => {
-            const preset = getProviderPreset(provider.id, provider.name);
+        <div className="w-64 shrink-0 overflow-y-auto rounded-xl border border-border bg-card p-2">
+          <div className="space-y-1.5">
+            {providers.map((provider) => {
+              const preset = getProviderPreset(provider.id, provider.name);
 
-            return (
-              <button
-                key={provider.id}
-                type="button"
-                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${provider.id === selectedId
-                  ? "border-primary/30 bg-primary/5 text-primary font-medium"
-                  : "border-border bg-card text-foreground hover:bg-accent"
-                  }`}
-                onClick={() => setSelectedId(provider.id)}
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-md bg-secondary text-xs font-bold text-secondary-foreground">
-                    {preset.icon}
-                  </span>
-                  <span>{provider.name}</span>
-                </div>
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${provider.enabled ? "bg-primary" : "bg-border"
+              return (
+                <button
+                  key={provider.id}
+                  type="button"
+                  className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${provider.id === selectedId
+                    ? "border-primary/30 bg-primary/5 text-primary font-medium"
+                    : "border-border bg-card text-foreground hover:bg-accent"
                     }`}
-                />
-              </button>
-            );
-          })}
+                  onClick={() => setSelectedId(provider.id)}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-secondary text-xs font-bold text-secondary-foreground">
+                      {preset.icon}
+                    </span>
+                    <span>{provider.name}</span>
+                  </div>
+                  <span
+                    className={`h-2.5 w-2.5 rounded-full ${provider.enabled ? "bg-primary" : "bg-border"
+                      }`}
+                  />
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
 
-      <div className="min-w-0 min-h-0 flex-1 rounded-xl border border-border bg-card p-4">
-        {selectedProvider ? (
-          <ProviderDetail
-            key={selectedProvider.id}
-            provider={selectedProvider}
-            onSave={(id, body) => updateProvider({ id, body })}
-            onTest={(id, body) => testProviderAsync({ id, body })}
-            onFetchModels={(id, body) => fetchProviderModelsAsync({ id, body })}
-            onDirtyChange={(dirty) =>
-              setDirtyByProvider((previous) =>
-                previous[selectedProvider.id] === dirty
-                  ? previous
-                  : { ...previous, [selectedProvider.id]: dirty }
-              )
-            }
-            saveRef={saveRef}
-          />
-        ) : (
-          <p className="text-sm text-muted-foreground">Select a provider</p>
-        )}
-      </div>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card p-4">
+          {selectedProvider ? (
+            <ProviderDetail
+              key={selectedProvider.id}
+              provider={selectedProvider}
+              onSave={(id, body) => updateProvider({ id, body })}
+              onTest={(id, body) => testProviderAsync({ id, body })}
+              onFetchModels={(id, body) => fetchProviderModelsAsync({ id, body })}
+              onRevealApiKey={revealApiKey}
+              onDirtyChange={(dirty) =>
+                setDirtyByProvider((previous) =>
+                  previous[selectedProvider.id] === dirty
+                    ? previous
+                    : { ...previous, [selectedProvider.id]: dirty }
+                )
+              }
+              saveRef={saveRef}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">Select a provider</p>
+          )}
+        </div>
       </div>
 
       {/* 保存栏与上面的供应商列表/详情上下并排,同属 ProviderSettings 一列;
           -mx-8/-mb-6 抵消设置页内容区的 padding,通栏贴底 */}
-      <div className="mt-4 -mx-8 -mb-6 flex shrink-0 items-center justify-between border-t border-border bg-background px-8 py-4">
+      <div className="mt-4 -mx-8 -mb-6 flex shrink-0 items-center justify-between border-t border-border bg-background px-8 py-3">
         <span className="text-xs text-muted-foreground">
-          {selectedSaved ? "All changes saved" : selectedDirty ? "Unsaved changes" : ""}
+          {selectedSaved ? "所有更改已保存" : selectedDirty ? "未保存的更改" : ""}
         </span>
         <button
           type="button"
@@ -541,7 +583,7 @@ export function ProviderSettings() {
               Saved
             </>
           ) : (
-            "Save"
+            "保存"
           )}
         </button>
       </div>

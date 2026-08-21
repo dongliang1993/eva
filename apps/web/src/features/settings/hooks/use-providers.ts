@@ -68,6 +68,11 @@ export function useProviders() {
     updateProviderAsync: updateMutation.mutateAsync,
     testProviderAsync: testMutation.mutateAsync,
     fetchProviderModelsAsync: fetchModelsMutation.mutateAsync,
+    /** 揭示已存 key 明文:仅在用户点"眼睛"时按需调用,不进 react-query 缓存。 */
+    revealApiKey: (id: string) =>
+      apiFetch<{ apiKey: string }>(`/api/v1/providers/${id}/api-key`).then(
+        (payload) => payload.apiKey
+      ),
     isSaving: updateMutation.isPending,
     saveSuccess: updateMutation.isSuccess
   };

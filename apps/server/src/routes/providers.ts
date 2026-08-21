@@ -169,6 +169,24 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
     }
   );
 
+  /**
+   * 揭示已存 API key 明文。刻意做成独立端点、只在前端点"眼睛"时调用 ——
+   * 列表/详情响应仍只带 hasApiKey,明文不随常规数据流离开服务端(坑 2 的收窄版:
+   * 从"永不离开"收窄为"仅经这个显式端点单次返回")。
+   */
+  app.get(
+    "/api/v1/providers/:id/api-key",
+    async (request, reply): Promise<{ apiKey: string } | { error: string }> => {
+      const { id } = request.params as { id: string };
+      const provider = findStoredProviderById(app.infra.db, id, app.infra.encryptor);
+      if (!provider) {
+        reply.code(404);
+        return { error: "Provider not found" };
+      }
+      return { apiKey: provider.apiKey };
+    }
+  );
+
   app.get(
     "/api/v1/providers/:id/models",
     async (request, reply): Promise<ProviderModelsPayload | { error: string }> => {
