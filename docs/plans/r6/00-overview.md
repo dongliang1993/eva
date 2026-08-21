@@ -126,6 +126,10 @@ map。模型侧约束(Anthropic 最多 128 个并行 tool use、其他 provider 
 | **T24** | [`T24-concurrency-cap.md`](./T24-concurrency-cap.md)           | 只读工具并发帽(默认 10),装配层限流;web_fetch 补 `readOnly: true`                      | 0.5 天   | —    |
 | **T25** | [`T25-abort-signal-timeout.md`](./T25-abort-signal-timeout.md) | `ToolExecutionOptions` 透传 `abortSignal`;bash/web 类接信号;`streamText` 配 `timeout` | 0.5–1 天 | —    |
 
+> **落地记录**:T23 → commit 09c34d9;T25 → 7888d43(bash 组杀实测结论见
+> T25 坑 7:execFile 的 detached 不生效,必须 spawn);T24 → 85cc99e。
+> 439 测试全绿,三个摘除实验都变红过。
+
 **顺序建议**:T23 先(正确性问题,且 T24/T25 都可能踩到它暴露的既有测试)→
 T25 次之(透传是 T24 限流器想要的取消路径,但两者无文件交集,可并行)→
 T24 最后(半小时,依赖 readOnly 分类已存在的现状)。三者唯一共同改动点是
