@@ -129,7 +129,7 @@ map。模型侧约束(Anthropic 最多 128 个并行 tool use、其他 provider 
 
 > **落地记录**:T23 → commit 09c34d9;T25 → 7888d43(bash 组杀实测结论见
 > T25 坑 7:execFile 的 detached 不生效,必须 spawn);T24 → 85cc99e;
-> T26 → 本任务(E2E 实测发现:abort 后工具卡片停 running,根因是 SDK 外层
+> T26 → 29a4e62(E2E 实测发现:abort 后工具卡片停 running,根因是 SDK 外层
 > 拉流循环丢弃在飞 tool-result;ToolCallClock 升级为在飞台账,abort 收口处
 > 按台账补发)。
 > 442 测试全绿,四个摘除实验都变红过。
