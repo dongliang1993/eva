@@ -37,7 +37,7 @@ export class WebFetchClient {
     this.maxContentBytes = options.maxContentBytes ?? DEFAULT_MAX_CONTENT_BYTES;
   }
 
-  async fetch(url: string): Promise<FetchedPage> {
+  async fetch(url: string, externalSignal?: AbortSignal): Promise<FetchedPage> {
     const normalizedUrl = upgradeToHttps(url);
 
     const cached = this.cache.get(normalizedUrl);
@@ -45,21 +45,31 @@ export class WebFetchClient {
       return cached.page;
     }
 
+    // T25:自有超时与 run 取消/toolMs 超时合并 —— 任一触发都断流。
+    // 未传 externalSignal 时 AbortSignal.any 只剩 timeout,行为不变。
+    const signal =
+      externalSignal !== undefined
+        ? AbortSignal.any([AbortSignal.timeout(this.timeoutMs), externalSignal])
+        : AbortSignal.timeout(this.timeoutMs);
+
     let response: Response;
     try {
       response = await globalThis.fetch(normalizedUrl, {
         method: "GET",
         headers: { "User-Agent": DEFAULT_USER_AGENT },
-        signal: AbortSignal.timeout(this.timeoutMs),
-        redirect: "follow"
+        signal,
+        redirect: "follow",
       });
     } catch (error) {
       if (
         error instanceof Error &&
         (error.name === "AbortError" || error.name === "TimeoutError")
       ) {
+        if (externalSignal?.aborted === true) {
+          throw new Error(`Web fetch canceled for ${normalizedUrl}`);
+        }
         throw new Error(
-          `Web fetch timed out after ${this.timeoutMs}ms for ${normalizedUrl}`
+          `Web fetch timed out after ${this.timeoutMs}ms for ${normalizedUrl}`,
         );
       }
       throw error;
@@ -67,7 +77,7 @@ export class WebFetchClient {
 
     if (!response.ok) {
       throw new Error(
-        `Web fetch failed (${response.status}): ${response.statusText} for ${normalizedUrl}`
+        `Web fetch failed (${response.status}): ${response.statusText} for ${normalizedUrl}`,
       );
     }
 
@@ -76,7 +86,7 @@ export class WebFetchClient {
 
     if (buffer.byteLength > this.maxContentBytes) {
       throw new Error(
-        `Content too large (${buffer.byteLength} bytes, max ${this.maxContentBytes}) for ${normalizedUrl}`
+        `Content too large (${buffer.byteLength} bytes, max ${this.maxContentBytes}) for ${normalizedUrl}`,
       );
     }
 
@@ -87,7 +97,7 @@ export class WebFetchClient {
       contentType,
       statusCode: response.status,
       bytes: buffer.byteLength,
-      url: normalizedUrl
+      url: normalizedUrl,
     };
 
     this.evictExpired();
@@ -99,7 +109,7 @@ export class WebFetchClient {
     }
     this.cache.set(normalizedUrl, {
       page,
-      expiresAt: Date.now() + CACHE_TTL_MS
+      expiresAt: Date.now() + CACHE_TTL_MS,
     });
 
     return page;

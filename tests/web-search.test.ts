@@ -5,7 +5,7 @@ import {
   createWebSearchTool,
   DuckDuckGoWebSearchClient,
   type WebSearchClient,
-  type WebSearchResponse
+  type WebSearchResponse,
 } from "../packages/harness/src/index.js";
 
 afterEach(() => {
@@ -25,37 +25,41 @@ describe("createWebSearchTool", () => {
           title: "Release Notes",
           url: "https://docs.example.com/releases/latest",
           snippet: "Latest release notes",
-          sourceDomain: "docs.example.com"
-        }
-      ]
+          sourceDomain: "docs.example.com",
+        },
+      ],
     } satisfies WebSearchResponse);
     const tool = createWebSearchTool({ search });
 
     const raw = await tool.tool.execute!(
       {
         query: "latest work mi release",
-        maxResults: 3
+        maxResults: 3,
       },
       {
         messages: [],
         toolCallId: "test",
-        context: {}
-      }
+        context: {},
+      },
     );
 
-    expect(search).toHaveBeenCalledWith({
-      query: "latest work mi release",
-      maxResults: 3
-    });
+    expect(search).toHaveBeenCalledWith(
+      {
+        query: "latest work mi release",
+        maxResults: 3,
+      },
+      // T25:execute 第二参数未传 abortSignal → search 收到 undefined。
+      undefined,
+    );
     expect(JSON.parse(String(raw))).toMatchObject({
       provider: "stub",
       totalResults: 1,
       results: [
         {
           title: "Release Notes",
-          url: "https://docs.example.com/releases/latest"
-        }
-      ]
+          url: "https://docs.example.com/releases/latest",
+        },
+      ],
     });
   });
 });
@@ -76,14 +80,14 @@ describe("DuckDuckGoWebSearchClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      text: async () => DDG_HTML_RESPONSE
+      text: async () => DDG_HTML_RESPONSE,
     });
 
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new DuckDuckGoWebSearchClient({ timeoutMs: 5_000 });
     const result = await client.search({
-      query: "latest work mi release"
+      query: "latest work mi release",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -101,15 +105,15 @@ describe("DuckDuckGoWebSearchClient", () => {
           title: "Release Notes",
           url: "https://docs.example.com/releases/latest",
           snippet: "A long but useful snippet about the latest release.",
-          sourceDomain: "docs.example.com"
+          sourceDomain: "docs.example.com",
         },
         {
           title: "GitHub - eva",
           url: "https://github.com/example/eva",
           snippet: "The official eva repository on GitHub.",
-          sourceDomain: "github.com"
-        }
-      ]
+          sourceDomain: "github.com",
+        },
+      ],
     });
     expect(result.durationSeconds).toBeGreaterThanOrEqual(0);
   });
@@ -118,7 +122,7 @@ describe("DuckDuckGoWebSearchClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      text: async () => DDG_HTML_RESPONSE
+      text: async () => DDG_HTML_RESPONSE,
     });
 
     vi.stubGlobal("fetch", fetchMock);
@@ -126,7 +130,7 @@ describe("DuckDuckGoWebSearchClient", () => {
     const client = new DuckDuckGoWebSearchClient();
     const result = await client.search({
       query: "test",
-      maxResults: 1
+      maxResults: 1,
     });
 
     expect(result.totalResults).toBe(1);
@@ -137,39 +141,63 @@ describe("DuckDuckGoWebSearchClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 403,
-      statusText: "Forbidden"
+      statusText: "Forbidden",
     });
 
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new DuckDuckGoWebSearchClient();
 
-    await expect(
-      client.search({ query: "test query" })
-    ).rejects.toThrow("Web search request failed (403): Forbidden");
+    await expect(client.search({ query: "test query" })).rejects.toThrow(
+      "Web search request failed (403): Forbidden",
+    );
   });
 
   it("throws on timeout", async () => {
     const fetchMock = vi.fn().mockRejectedValue(
       Object.assign(new Error("The operation was aborted"), {
-        name: "TimeoutError"
-      })
+        name: "TimeoutError",
+      }),
     );
 
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new DuckDuckGoWebSearchClient({ timeoutMs: 100 });
 
-    await expect(
-      client.search({ query: "test query" })
-    ).rejects.toThrow("Web search request timed out after 100ms.");
+    await expect(client.search({ query: "test query" })).rejects.toThrow(
+      "Web search request timed out after 100ms.",
+    );
+  });
+
+  it("T25:外部 signal abort → 文案是 canceled 而非 timed out", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(
+        (_url: unknown, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(
+                Object.assign(new Error("The operation was aborted"), {
+                  name: "AbortError",
+                }),
+              ),
+            );
+          }),
+      ),
+    );
+
+    const client = new DuckDuckGoWebSearchClient({ timeoutMs: 60_000 });
+    const pending = client.search({ query: "test query" }, controller.signal);
+    setTimeout(() => controller.abort(), 20);
+    await expect(pending).rejects.toThrow("Web search request canceled.");
   });
 });
 
 describe("createWebSearchPromptSection", () => {
   it("adds citation and current-year guidance", () => {
     const section = createWebSearchPromptSection(
-      new Date("2026-04-03T00:00:00.000Z")
+      new Date("2026-04-03T00:00:00.000Z"),
     );
 
     expect(section.heading).toBe("Web Search");

@@ -2,7 +2,7 @@ import type {
   WebSearchClient,
   WebSearchRequest,
   WebSearchResponse,
-  WebSearchResult
+  WebSearchResult,
 } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -33,8 +33,7 @@ const resolveSourceDomain = (rawUrl: string): string | undefined => {
 const toDurationSeconds = (startedAt: number): number =>
   Number(((performance.now() - startedAt) / 1000).toFixed(3));
 
-const stripHtml = (html: string): string =>
-  html.replace(/<[^>]+>/g, "").trim();
+const stripHtml = (html: string): string => html.replace(/<[^>]+>/g, "").trim();
 
 const decodeHtmlEntities = (text: string): string =>
   text
@@ -43,9 +42,7 @@ const decodeHtmlEntities = (text: string): string =>
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
-    .replace(/&#(\d+);/g, (_, code) =>
-      String.fromCharCode(Number(code))
-    );
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
 
 const extractActualUrl = (ddgUrl: string): string => {
   const match = ddgUrl.match(/uddg=([^&]+)/);
@@ -82,7 +79,7 @@ const parseSearchResults = (html: string): WebSearchResult[] => {
       title,
       url,
       snippet: snippet ? truncate(snippet, MAX_SNIPPET_CHARS) : "",
-      ...(sourceDomain ? { sourceDomain } : {})
+      ...(sourceDomain ? { sourceDomain } : {}),
     });
   }
 
@@ -98,7 +95,10 @@ export class DuckDuckGoWebSearchClient implements WebSearchClient {
     this.defaultMaxResults = options.defaultMaxResults ?? DEFAULT_MAX_RESULTS;
   }
 
-  async search(input: WebSearchRequest): Promise<WebSearchResponse> {
+  async search(
+    input: WebSearchRequest,
+    externalSignal?: AbortSignal,
+  ): Promise<WebSearchResponse> {
     const query = input.query.trim();
 
     if (!query) {
@@ -108,24 +108,31 @@ export class DuckDuckGoWebSearchClient implements WebSearchClient {
     const startedAt = performance.now();
     const maxResults = input.maxResults ?? this.defaultMaxResults;
 
+    // T25:自有超时与 run 取消/toolMs 超时合并 —— 任一触发都断流。
+    // 未传 externalSignal 时 AbortSignal.any 只剩 timeout,行为不变。
+    const signal =
+      externalSignal !== undefined
+        ? AbortSignal.any([AbortSignal.timeout(this.timeoutMs), externalSignal])
+        : AbortSignal.timeout(this.timeoutMs);
+
     let response: Response;
 
     try {
-      response = await fetch(
-        `${DDG_HTML_URL}?q=${encodeURIComponent(query)}`,
-        {
-          method: "GET",
-          headers: { "User-Agent": DEFAULT_USER_AGENT },
-          signal: AbortSignal.timeout(this.timeoutMs)
-        }
-      );
+      response = await fetch(`${DDG_HTML_URL}?q=${encodeURIComponent(query)}`, {
+        method: "GET",
+        headers: { "User-Agent": DEFAULT_USER_AGENT },
+        signal,
+      });
     } catch (error) {
       if (
         error instanceof Error &&
         (error.name === "AbortError" || error.name === "TimeoutError")
       ) {
+        if (externalSignal?.aborted === true) {
+          throw new Error("Web search request canceled.");
+        }
         throw new Error(
-          `Web search request timed out after ${this.timeoutMs}ms.`
+          `Web search request timed out after ${this.timeoutMs}ms.`,
         );
       }
 
@@ -134,7 +141,7 @@ export class DuckDuckGoWebSearchClient implements WebSearchClient {
 
     if (!response.ok) {
       throw new Error(
-        `Web search request failed (${response.status}): ${response.statusText}`
+        `Web search request failed (${response.status}): ${response.statusText}`,
       );
     }
 
@@ -147,7 +154,7 @@ export class DuckDuckGoWebSearchClient implements WebSearchClient {
       provider: "duckduckgo",
       durationSeconds: toDurationSeconds(startedAt),
       totalResults: results.length,
-      results
+      results,
     };
   }
 }

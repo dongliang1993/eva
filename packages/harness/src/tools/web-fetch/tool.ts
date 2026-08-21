@@ -1,7 +1,11 @@
 import { generateText, type LanguageModel } from "ai";
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import {
+  buildTool,
+  type AgentTool,
+  type ToolExecutionOptions,
+} from "../build-tool.js";
 import { WebFetchClient, type WebFetchClientOptions } from "./client.js";
 import { convertToMarkdown } from "./markdown.js";
 
@@ -11,7 +15,7 @@ const webFetchSchema = z.object({
   url: z.string().url().describe("The URL to fetch content from."),
   prompt: z
     .string()
-    .describe("What information to extract or summarize from the page.")
+    .describe("What information to extract or summarize from the page."),
 });
 
 export interface CreateWebFetchToolOptions {
@@ -20,7 +24,7 @@ export interface CreateWebFetchToolOptions {
 }
 
 export const createWebFetchTool = (
-  options: CreateWebFetchToolOptions
+  options: CreateWebFetchToolOptions,
 ): AgentTool => {
   const client = new WebFetchClient(options.clientOptions);
 
@@ -30,10 +34,11 @@ export const createWebFetchTool = (
       "Fetch the content of a URL, convert it to Markdown, and summarize it based on the given prompt. " +
       "Use this after web_search to read specific pages in detail.",
     inputSchema: webFetchSchema,
-    async execute(input) {
+    async execute(input, execOptions?: ToolExecutionOptions) {
       const startedAt = performance.now();
 
-      const page = await client.fetch(input.url);
+      // T25:run 取消/toolMs 超时信号接进 fetch(与自有 30s 超时合并)。
+      const page = await client.fetch(input.url, execOptions?.abortSignal);
       const markdown = await convertToMarkdown(page.content, page.contentType);
 
       const summaryPrompt = [
@@ -48,12 +53,12 @@ export const createWebFetchTool = (
         "- Answer the user's request based on the page content above.",
         "- Be concise but thorough.",
         "- If the page doesn't contain the requested information, say so.",
-        "- Include relevant quotes or data points when useful."
+        "- Include relevant quotes or data points when useful.",
       ].join("\n");
 
       const result = await generateText({
         model: options.summaryModel,
-        prompt: summaryPrompt
+        prompt: summaryPrompt,
       });
 
       const summary = result.text;
@@ -65,9 +70,8 @@ export const createWebFetchTool = (
         summary,
         statusCode: page.statusCode,
         bytes: page.bytes,
-        durationMs
+        durationMs,
       });
-    }
+    },
   });
 };
-

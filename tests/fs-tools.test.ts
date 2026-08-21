@@ -405,3 +405,82 @@ describe("write guard(T23 mtime 快照校验)", () => {
     expect(finalContent).toBe("AAA bbb CCC");
   });
 });
+
+describe("bash 取消(T25 abortSignal 接线)", () => {
+  it("sleep 中 abort → 秒级返回取消标记,不等到 timeout", async () => {
+    const root = await makeWorkspace();
+    const bashTool = createBashTool({ workRoot: root });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 30);
+    const startedAt = Date.now();
+    const res = await bashTool.tool.execute!(
+      {
+        command: "sleep 10 && echo done",
+        description: "Sleep long enough to be canceled",
+      },
+      {
+        messages: [],
+        toolCallId: "c-bash-abort",
+        context: {},
+        abortSignal: controller.signal,
+      } as never,
+    );
+    const elapsed = Date.now() - startedAt;
+    expect(elapsed).toBeLessThan(3000);
+    expect(String(res)).toMatch(/cancel|abort|SIGTERM/i);
+  });
+
+  it("不 abort → 照常跑完并返回输出", async () => {
+    const root = await makeWorkspace();
+    const bashTool = createBashTool({ workRoot: root });
+    const res = await bashTool.tool.execute!(
+      {
+        command: "printf 'ran-to-completion'",
+        description: "Print completion marker",
+      },
+      { messages: [], toolCallId: "c-bash-ok", context: {} } as never,
+    );
+    expect(String(res)).toContain("ran-to-completion");
+  });
+
+  it("取消复合命令 → 子孙进程也被组杀,不留孤儿", async () => {
+    const root = await makeWorkspace();
+    const bashTool = createBashTool({ workRoot: root });
+    // 复合命令下 bash 无法对末尾命令做 exec 优化,必须等前台子进程 ——
+    // 这正是孤儿场景:只杀 bash 的话 sleep 会存活。用标记文件名保证
+    // ps 只可能匹配到本次测试起的进程。
+    const marker = `eva-orphan-${Date.now()}-${process.pid}`;
+    const controller = new AbortController();
+    const pending = bashTool.tool.execute!(
+      {
+        command: `sleep 30 && echo ${marker}`,
+        description: "Compound command that spawns children",
+      },
+      {
+        messages: [],
+        toolCallId: "c-bash-tree",
+        context: {},
+        abortSignal: controller.signal,
+      } as never,
+    );
+    await new Promise((r) => setTimeout(r, 200));
+    controller.abort();
+    const res = await pending;
+    expect(String(res)).toMatch(/cancel/i);
+
+    // 给进程表一点收敛时间,然后确认进程树无残留。
+    await new Promise((r) => setTimeout(r, 300));
+    const ps = await execPs();
+    expect(ps).not.toContain(marker);
+    expect(ps).not.toContain("sleep 30");
+  });
+});
+
+/** 进程表快照,供孤儿断言用。 */
+const execPs = async (): Promise<string> => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  return promisify(execFile)("ps", ["-eo", "pid,command"]).then(
+    ({ stdout }) => stdout,
+  );
+};

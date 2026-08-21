@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   StdioClientTransport,
-  getDefaultEnvironment
+  getDefaultEnvironment,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -62,7 +62,7 @@ const prepareTransport = (row: McpServerRow): PreparedTransport => {
       // `npx` 这类命令在打包后的窄 env 里根本找不到（T9 §6 坑 1）。
       env: { ...getDefaultEnvironment(), ...row.env },
       // pipe 而不是 inherit：把 stderr 抓在手里，失败时能把真实原因回给用户。
-      stderr: "pipe"
+      stderr: "pipe",
     });
 
     let tail = "";
@@ -80,7 +80,7 @@ const prepareTransport = (row: McpServerRow): PreparedTransport => {
   const httpTransport = new StreamableHTTPClientTransport(new URL(row.url), {
     ...(Object.keys(row.headers).length > 0
       ? { requestInit: { headers: { ...row.headers } } }
-      : {})
+      : {}),
   });
 
   // SDK 把 sessionId 声明成 `get sessionId(): string | undefined`，而 Transport 接口写的是
@@ -88,7 +88,7 @@ const prepareTransport = (row: McpServerRow): PreparedTransport => {
   // 不一致，不是我们的建模问题：在唯一构造点收一次窄转换，不为它放宽整仓 tsconfig。
   return {
     transport: httpTransport as unknown as Transport,
-    readStderrTail: () => ""
+    readStderrTail: () => "",
   };
 };
 
@@ -105,7 +105,9 @@ const isUsableInputSchema = (schema: unknown): boolean => {
 
   const record = schema as Record<string, unknown>;
 
-  return record["type"] === "object" || typeof record["properties"] === "object";
+  return (
+    record["type"] === "object" || typeof record["properties"] === "object"
+  );
 };
 
 const base64Bytes = (data: string): number => Math.floor((data.length * 3) / 4);
@@ -129,8 +131,8 @@ const flattenContent = (content: readonly unknown[]): string => {
       case "image":
       case "audio":
         chunks.push(
-          `[${String(block["type"])} ${String(block["mimeType"] ?? "unknown")}, `
-          + `${base64Bytes(String(block["data"] ?? ""))} bytes — not inlined]`
+          `[${String(block["type"])} ${String(block["mimeType"] ?? "unknown")}, ` +
+            `${base64Bytes(String(block["data"] ?? ""))} bytes — not inlined]`,
         );
         break;
       case "resource_link":
@@ -182,7 +184,7 @@ const withStderrDetail = (error: unknown, stderrTail: string): Error => {
 export class McpServerClient {
   private constructor(
     private readonly client: Client,
-    readonly tools: readonly McpToolDescriptor[]
+    readonly tools: readonly McpToolDescriptor[],
   ) {}
 
   /**
@@ -193,7 +195,7 @@ export class McpServerClient {
   static async connect(
     row: McpServerRow,
     logger: McpLogger,
-    transport?: Transport
+    transport?: Transport,
   ): Promise<McpServerClient> {
     const client = new Client({ name: "eva", version: "0.1.0" });
     const prepared = transport
@@ -208,7 +210,9 @@ export class McpServerClient {
     }
 
     try {
-      const listed = await client.listTools(undefined, { timeout: CONNECT_TIMEOUT_MS });
+      const listed = await client.listTools(undefined, {
+        timeout: CONNECT_TIMEOUT_MS,
+      });
       const usable: McpToolDescriptor[] = [];
       const skipped: string[] = [];
 
@@ -222,14 +226,14 @@ export class McpServerClient {
           name: tool.name,
           description: tool.description ?? `MCP tool ${tool.name}`,
           inputSchema: tool.inputSchema,
-          readOnly: tool.annotations?.readOnlyHint === true
+          readOnly: tool.annotations?.readOnlyHint === true,
         });
       }
 
       if (skipped.length > 0) {
         logger.warn(
           { server: row.name, skipped },
-          "MCP server 的部分工具 inputSchema 不是对象 schema，已跳过这些工具"
+          "MCP server 的部分工具 inputSchema 不是对象 schema，已跳过这些工具",
         );
       }
 
@@ -243,16 +247,25 @@ export class McpServerClient {
 
   /**
    * 调用一个工具，返回拍平后的文本。
+   * @param signal T25:run 取消 ∪ toolMs 超时信号 —— 触发时中断传输层请求
+   *   (协议 RequestOptions.signal)。可选,不传行为不变。
    * @throws server 报 isError 或调用超时/失败时抛出（由 buildJsonSchemaTool 包成 [Tool Error]）
    */
-  async callTool(toolName: string, input: unknown): Promise<string> {
+  async callTool(
+    toolName: string,
+    input: unknown,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const result = await this.client.callTool(
       {
         name: toolName,
-        arguments: (input ?? {}) as Record<string, unknown>
+        arguments: (input ?? {}) as Record<string, unknown>,
       },
       undefined,
-      { timeout: CALL_TIMEOUT_MS }
+      {
+        timeout: CALL_TIMEOUT_MS,
+        ...(signal !== undefined ? { signal } : {}),
+      },
     );
 
     const content = Array.isArray(result.content) ? result.content : [];

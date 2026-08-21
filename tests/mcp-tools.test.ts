@@ -6,7 +6,7 @@ import {
   mcpToolName,
   toAgentTools,
   toToolSummaries,
-  type McpToolInvoker
+  type McpToolInvoker,
 } from "../apps/server/src/services/mcp/mcp-tools.js";
 
 const TOOL_CALL_OPTIONS = { messages: [], toolCallId: "c1", context: {} };
@@ -25,20 +25,26 @@ const server = (over: Partial<McpServerRow> = {}): McpServerRow => ({
   enabled: true,
   createdAt: "now",
   updatedAt: "now",
-  ...over
+  ...over,
 });
 
-const descriptor = (over: Partial<McpToolDescriptor> = {}): McpToolDescriptor => ({
+const descriptor = (
+  over: Partial<McpToolDescriptor> = {},
+): McpToolDescriptor => ({
   name: "search",
   description: "Search the knowledge base",
-  inputSchema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+  inputSchema: {
+    type: "object",
+    properties: { q: { type: "string" } },
+    required: ["q"],
+  },
   readOnly: false,
-  ...over
+  ...over,
 });
 
 const invoker = (
   tools: readonly McpToolDescriptor[],
-  callTool: McpToolInvoker["callTool"] = async () => "ok"
+  callTool: McpToolInvoker["callTool"] = async () => "ok",
 ): McpToolInvoker => ({ tools, callTool });
 
 describe("mcpToolName", () => {
@@ -49,9 +55,15 @@ describe("mcpToolName", () => {
 
 describe("toAgentTools", () => {
   it("readOnlyHint 为真 → 免审批", () => {
-    const [tool] = toAgentTools(server(), invoker([descriptor({ readOnly: true })]), {
-      info: vi.fn(), warn: vi.fn(), error: vi.fn()
-    });
+    const [tool] = toAgentTools(
+      server(),
+      invoker([descriptor({ readOnly: true })]),
+      {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+    );
 
     expect(tool?.name).toBe("mcp__km__search");
     expect(tool?.readOnly).toBe(true);
@@ -62,7 +74,7 @@ describe("toAgentTools", () => {
     const [tool] = toAgentTools(
       server({ autoApproveTools: ["search"] }),
       invoker([descriptor()]),
-      { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+      { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     );
 
     expect(tool?.needsApproval).toBeUndefined();
@@ -70,7 +82,9 @@ describe("toAgentTools", () => {
 
   it("既非只读也不在白名单 → 需要审批", () => {
     const [tool] = toAgentTools(server(), invoker([descriptor()]), {
-      info: vi.fn(), warn: vi.fn(), error: vi.fn()
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
     });
 
     expect(tool?.needsApproval).toBe(true);
@@ -79,12 +93,15 @@ describe("toAgentTools", () => {
   it("JSON Schema 原样交给工具，execute 转调 client.callTool", async () => {
     const callTool = vi.fn(async () => "hit");
     const [tool] = toAgentTools(server(), invoker([descriptor()], callTool), {
-      info: vi.fn(), warn: vi.fn(), error: vi.fn()
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
     });
 
     const result = await tool!.tool.execute!({ q: "eva" }, TOOL_CALL_OPTIONS);
 
-    expect(callTool).toHaveBeenCalledWith("search", { q: "eva" });
+    // T25:execute 把 options.abortSignal 透传给 invoker(无信号时是 undefined)。
+    expect(callTool).toHaveBeenCalledWith("search", { q: "eva" }, undefined);
     expect(String(result)).toBe("hit");
   });
 
@@ -94,7 +111,7 @@ describe("toAgentTools", () => {
       invoker([descriptor()], async () => {
         throw new Error("Request timed out");
       }),
-      { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+      { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     );
 
     const result = await tool!.tool.execute!({ q: "x" }, TOOL_CALL_OPTIONS);
@@ -103,15 +120,41 @@ describe("toAgentTools", () => {
     expect(String(result)).toContain("timed out");
   });
 
+  it("T25:execute 收到 abortSignal → 原样传给 invoker.callTool 第三参", async () => {
+    const callTool = vi.fn(async () => "hit");
+    const [tool] = toAgentTools(server(), invoker([descriptor()], callTool), {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    });
+
+    const controller = new AbortController();
+    await tool!.tool.execute!(
+      { q: "eva" },
+      { ...TOOL_CALL_OPTIONS, abortSignal: controller.signal },
+    );
+
+    expect(callTool).toHaveBeenCalledWith(
+      "search",
+      { q: "eva" },
+      controller.signal,
+    );
+  });
+
   it("工具名超长 → 跳过并 warn（不静默截断，也不废掉整个 server）", () => {
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const tools = toAgentTools(
       server({ name: "a-very-long-server-name-that-eats-the-budget" }),
-      invoker([descriptor({ name: "an-extremely-long-tool-name-beyond-any-limit" }), descriptor()]),
-      logger
+      invoker([
+        descriptor({ name: "an-extremely-long-tool-name-beyond-any-limit" }),
+        descriptor(),
+      ]),
+      logger,
     );
 
-    expect(tools.map((t) => t.name)).toEqual(["mcp__a-very-long-server-name-that-eats-the-budget__search"]);
+    expect(tools.map((t) => t.name)).toEqual([
+      "mcp__a-very-long-server-name-that-eats-the-budget__search",
+    ]);
     expect(logger.warn).toHaveBeenCalled();
   });
 });
@@ -123,14 +166,26 @@ describe("toToolSummaries", () => {
       invoker([
         descriptor({ name: "a", readOnly: true }),
         descriptor({ name: "b" }),
-        descriptor({ name: "c" })
-      ])
+        descriptor({ name: "c" }),
+      ]),
     );
 
     expect(summaries).toEqual([
-      { name: "a", description: "Search the knowledge base", autoApproved: true },
-      { name: "b", description: "Search the knowledge base", autoApproved: true },
-      { name: "c", description: "Search the knowledge base", autoApproved: false }
+      {
+        name: "a",
+        description: "Search the knowledge base",
+        autoApproved: true,
+      },
+      {
+        name: "b",
+        description: "Search the knowledge base",
+        autoApproved: true,
+      },
+      {
+        name: "c",
+        description: "Search the knowledge base",
+        autoApproved: false,
+      },
     ]);
   });
 });

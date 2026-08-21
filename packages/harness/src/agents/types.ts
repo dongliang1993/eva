@@ -3,7 +3,7 @@ import type {
   RunAgentStreamEvent,
   RunInjectedNotice,
   StreamFinishReason,
-  StreamTokenUsage
+  StreamTokenUsage,
 } from "@eva/shared";
 
 import type { ContextWindowPolicyOptions } from "../context/policy.js";
@@ -23,7 +23,9 @@ export interface AgentRunInput {
    * 约定:无待处理通知且无存活后台任务 → 立刻返回 `[]`(不拖慢正常收尾);
    * 有存活任务但还没报 → 最多等 `graceMs`。返回非空则 loop 注入后再跑一圈。
    */
-  drainNotices?: (opts: { graceMs: number }) => Promise<readonly RunInjectedNotice[]>;
+  drainNotices?: (opts: {
+    graceMs: number;
+  }) => Promise<readonly RunInjectedNotice[]>;
 }
 
 export type { StreamFinishReason, StreamTokenUsage };
@@ -61,7 +63,9 @@ export interface ToolApprovalRequest {
 }
 
 /** 危险工具执行前的用户审批入口(由宿主注入;默认放行)。 */
-export type RequestApproval = (request: ToolApprovalRequest) => Promise<boolean>;
+export type RequestApproval = (
+  request: ToolApprovalRequest,
+) => Promise<boolean>;
 
 /** 每次模型调用的 call settings(AI SDK 语义:不属于 model 实例,属于调用)。 */
 export interface AgentCallSettings {
@@ -83,4 +87,14 @@ export interface CreateAgentOptions {
    * (schema 校验失败直接报错),最小场景/测试不该被强制塞一个模型。
    */
   repairModel?: AgentModel;
+  /**
+   * T25:SDK TimeoutConfiguration 的工具子集 —— streamText 的
+   * `timeout: { toolMs, tools: { <toolName>Ms } }`。SDK 把超时折成
+   * AbortSignal 塞进 `options.abortSignal` 传给工具 execute(它从不自己
+   * 杀工具),真正收口靠 build-tool 的 race 兜底。不传 = 不配超时(现状),
+   * 默认值由 server 的 agent-factory 注入 —— harness 的最小使用者不该被
+   * 强加隐形的 60s 行为。类型故意不复用 SDK 全集(totalMs/stepMs/chunkMs
+   * 明确不做,r6 00-overview §2.1 #4)。
+   */
+  toolTimeout?: { toolMs: number; tools?: Record<string, number> };
 }

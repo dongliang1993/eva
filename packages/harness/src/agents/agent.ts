@@ -4,7 +4,7 @@ import {
   type LanguageModel,
   type ModelMessage,
   type SystemModelMessage,
-  type ToolSet
+  type ToolSet,
 } from "ai";
 import type { StreamToolCallSummary, StreamTokenUsage } from "@eva/shared";
 
@@ -19,24 +19,24 @@ import {
   type AgentTelemetryEvent,
   type ContextCompactionReason,
   type LoopTransitionReason,
-  type TokenUsage
+  type TokenUsage,
 } from "./observer.js";
 import {
   resolveContextWindowPolicy,
   type ContextWindowPolicy,
-  type ContextWindowPolicyOptions
+  type ContextWindowPolicyOptions,
 } from "../context/policy.js";
 import { isReactiveCompactCandidateError } from "../models/errors.js";
 import {
   applyReactiveLoopCompactWithStats,
-  type RuntimeCompactResult
+  type RuntimeCompactResult,
 } from "../context/runtime-compact.js";
 import { coalesceTextDeltas } from "./coalesce-stream.js";
 import { createRepairToolCall } from "./repair-tool-call.js";
 import {
   createPrepareStep,
   MAX_OUTPUT_CONTINUATION_MESSAGE,
-  shouldContinueForMaxOutput
+  shouldContinueForMaxOutput,
 } from "./context-strategy.js";
 import { mapStreamPart, type ToolCallClock } from "./stream-part-mapper.js";
 import type {
@@ -46,7 +46,7 @@ import type {
   AgentStreamEvent,
   AgentToolCallResult,
   Agent as AgentInterface,
-  CreateAgentOptions
+  CreateAgentOptions,
 } from "./types.js";
 
 type FinishReason = "stop" | "aborted" | "error" | "max-steps";
@@ -69,40 +69,56 @@ const isAbortError = (error: unknown): boolean =>
 const toStreamTokenUsage = (u: TokenUsage): StreamTokenUsage => ({
   inputTokens: u.promptTokens,
   outputTokens: u.completionTokens,
-  totalTokens: u.totalTokens
+  totalTokens: u.totalTokens,
 });
 
-const toStreamToolCallSummary = (tc: AgentToolCallResult): StreamToolCallSummary => ({
+const toStreamToolCallSummary = (
+  tc: AgentToolCallResult,
+): StreamToolCallSummary => ({
   toolName: tc.toolName,
   toolCallId: tc.toolCallId ?? "",
   args: tc.args,
   output: tc.output,
   status: tc.status,
-  ...(tc.durationMs !== undefined ? { durationMs: tc.durationMs } : {})
+  ...(tc.durationMs !== undefined ? { durationMs: tc.durationMs } : {}),
 });
 
-const formatContext = (context: Record<string, unknown> | undefined): string | undefined =>
+const formatContext = (
+  context: Record<string, unknown> | undefined,
+): string | undefined =>
   !context || Object.keys(context).length === 0
     ? undefined
     : `Additional context:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``;
 
-const readTokenUsage = (u: {
-  inputTokens: number | undefined;
-  outputTokens: number | undefined;
-  totalTokens: number | undefined;
-} | undefined): TokenUsage | undefined => {
+const readTokenUsage = (
+  u:
+    | {
+        inputTokens: number | undefined;
+        outputTokens: number | undefined;
+        totalTokens: number | undefined;
+      }
+    | undefined,
+): TokenUsage | undefined => {
   if (!u) return undefined;
   const promptTokens = u.inputTokens ?? 0;
   const completionTokens = u.outputTokens ?? 0;
   const totalTokens = u.totalTokens ?? promptTokens + completionTokens;
-  if (promptTokens === 0 && completionTokens === 0 && totalTokens === 0) return undefined;
+  if (promptTokens === 0 && completionTokens === 0 && totalTokens === 0)
+    return undefined;
   return { promptTokens, completionTokens, totalTokens };
 };
 
-const resolveSystemMessage = (prompt: string | SystemModelMessage | undefined): SystemModelMessage =>
+const resolveSystemMessage = (
+  prompt: string | SystemModelMessage | undefined,
+): SystemModelMessage =>
   typeof prompt === "object" && prompt !== null && prompt.role === "system"
     ? prompt
-    : { role: "system", content: (typeof prompt === "string" ? prompt : undefined)?.trim() || buildAgentSystemPrompt() };
+    : {
+        role: "system",
+        content:
+          (typeof prompt === "string" ? prompt : undefined)?.trim() ||
+          buildAgentSystemPrompt(),
+      };
 
 /**
  * 终态文本兜底。max-steps 分支必须带**实际步数**(100 撞顶与 3 撞顶的诊断含义
@@ -110,11 +126,15 @@ const resolveSystemMessage = (prompt: string | SystemModelMessage | undefined): 
  * (主链消息都在,新一轮 run 能接着干 —— 但用户不知道,得告诉它)。
  * 空响应分支按"整个 run 累计文本为空"判。
  */
-const finalText = (accumulated: string, isMaxSteps: boolean, maxSteps: number): string =>
+const finalText = (
+  accumulated: string,
+  isMaxSteps: boolean,
+  maxSteps: number,
+): string =>
   isMaxSteps
     ? `The agent reached the maximum tool-calling steps (${maxSteps}) without producing a final answer. ` +
       "The work so far is preserved in this conversation — ask me to continue and I'll pick up where I left off."
-    : (accumulated.trim() || "The model returned an empty response.");
+    : accumulated.trim() || "The model returned an empty response.";
 
 interface AgentOptions {
   model: LanguageModel;
@@ -126,6 +146,8 @@ interface AgentOptions {
   repairModel?: LanguageModel;
   contextPolicy?: ContextWindowPolicyOptions;
   callSettings?: AgentCallSettings;
+  /** T25:工具超时配置,条件装配进 streamText 的 timeout。不传 = 现状(无超时)。 */
+  toolTimeout?: { toolMs: number; tools?: Record<string, number> };
 }
 
 /**
@@ -142,7 +164,9 @@ class Agent implements AgentInterface {
   private readonly contextPolicy: ContextWindowPolicy;
 
   constructor(private readonly options: AgentOptions) {
-    this.toolsByName = new Map((options.tools ?? []).map((tool) => [tool.name, tool]));
+    this.toolsByName = new Map(
+      (options.tools ?? []).map((tool) => [tool.name, tool]),
+    );
     this.systemMessage = resolveSystemMessage(options.systemPrompt);
     this.maxSteps = options.maxSteps ?? 5;
     this.observer = options.observer;
@@ -157,7 +181,11 @@ class Agent implements AgentInterface {
     }
   }
 
-  private emitCompaction(step: number, reason: ContextCompactionReason, result: RuntimeCompactResult): void {
+  private emitCompaction(
+    step: number,
+    reason: ContextCompactionReason,
+    result: RuntimeCompactResult,
+  ): void {
     this.emit({
       type: "context_compacted",
       step,
@@ -165,23 +193,36 @@ class Agent implements AgentInterface {
       messageCountBefore: result.messageCountBefore,
       messageCountAfter: result.messageCountAfter,
       estimatedTokensBefore: result.estimatedTokensBefore,
-      estimatedTokensAfter: result.estimatedTokensAfter
+      estimatedTokensAfter: result.estimatedTokensAfter,
     });
   }
 
-  private emitTransition(step: number, reason: LoopTransitionReason, attempt?: number): void {
-    this.emit({ type: "loop_transition", step, reason, ...(attempt !== undefined ? { attempt } : {}) });
+  private emitTransition(
+    step: number,
+    reason: LoopTransitionReason,
+    attempt?: number,
+  ): void {
+    this.emit({
+      type: "loop_transition",
+      step,
+      reason,
+      ...(attempt !== undefined ? { attempt } : {}),
+    });
   }
 
   // messages 不含 system prompt —— 它由 createPrepareStep 作为 instructions 第一条注入
   // (streamText 顶层 messages 不允许 system 角色)。prefixMessageCount 只算 context 消息条数。
   private buildMessages(input: AgentRunInput): ModelMessage[] {
     const context = formatContext(input.context);
-    return [...(context ? [{ role: "user", content: context } as ModelMessage] : []), ...input.messages];
+    return [
+      ...(context ? [{ role: "user", content: context } as ModelMessage] : []),
+      ...input.messages,
+    ];
   }
 
   private resolveTools(input: AgentRunInput): Map<string, AgentTool> {
-    if (!input.additionalTools || input.additionalTools.length === 0) return this.toolsByName;
+    if (!input.additionalTools || input.additionalTools.length === 0)
+      return this.toolsByName;
     const merged = new Map(this.toolsByName);
     for (const tool of input.additionalTools) merged.set(tool.name, tool);
     return merged;
@@ -191,7 +232,10 @@ class Agent implements AgentInterface {
     let result: AgentRunResult | undefined;
     for await (const event of this.run(input)) {
       if (event.type === "finish") {
-        result = { text: event.text, toolCalls: event.toolCalls as AgentToolCallResult[] };
+        result = {
+          text: event.text,
+          toolCalls: event.toolCalls as AgentToolCallResult[],
+        };
       }
     }
     if (!result) throw new Error("Agent finished without a result.");
@@ -204,7 +248,10 @@ class Agent implements AgentInterface {
     } catch (error) {
       // abort: run() 已 yield finish(aborted);SDK 在 yield 前抛 AbortError 时这里静默收尾。
       if (!isAbortError(error)) {
-        yield { type: "error", message: error instanceof Error ? error.message : "Unknown error" };
+        yield {
+          type: "error",
+          message: error instanceof Error ? error.message : "Unknown error",
+        };
       }
     }
   }
@@ -232,7 +279,14 @@ class Agent implements AgentInterface {
     for (;;) {
       // step 预算耗尽 → 直接 max-steps 终态,不再发起调用。
       if (maxSteps - stepsUsed <= 0) {
-        yield this.finish(continuedText, toolCalls, "max-steps", totalTokens, runStart, stepsUsed);
+        yield this.finish(
+          continuedText,
+          toolCalls,
+          "max-steps",
+          totalTokens,
+          runStart,
+          stepsUsed,
+        );
         return;
       }
 
@@ -243,7 +297,7 @@ class Agent implements AgentInterface {
         onCompacted: (result) => {
           this.emitCompaction(stepsUsed, "proactive_loop_compact", result);
           this.emitTransition(stepsUsed, "proactive_loop_compact");
-        }
+        },
       });
 
       const result = streamText({
@@ -256,15 +310,22 @@ class Agent implements AgentInterface {
           ? {
               repairToolCall: createRepairToolCall({
                 repairModel: this.options.repairModel,
-                emit: (event) => this.emit(event)
-              })
+                emit: (event) => this.emit(event),
+              }),
             }
           : {}),
-        ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
+        ...(input.abortSignal !== undefined
+          ? { abortSignal: input.abortSignal }
+          : {}),
+        ...(this.options.toolTimeout !== undefined
+          ? { timeout: this.options.toolTimeout }
+          : {}),
         ...(this.options.callSettings?.temperature !== undefined
-          ? { temperature: this.options.callSettings.temperature } : {}),
+          ? { temperature: this.options.callSettings.temperature }
+          : {}),
         ...(this.options.callSettings?.maxOutputTokens !== undefined
-          ? { maxOutputTokens: this.options.callSettings.maxOutputTokens } : {}),
+          ? { maxOutputTokens: this.options.callSettings.maxOutputTokens }
+          : {}),
         onStepStart: () => {
           stepStartTime = Date.now();
           this.emit({ type: "llm_call_start", step: stepsUsed });
@@ -279,12 +340,12 @@ class Agent implements AgentInterface {
             step: stepIndex,
             durationMs: Date.now() - stepStartTime,
             ...(stepUsage !== undefined ? { tokenUsage: stepUsage } : {}),
-            hasToolCalls: stepToolCalls.length > 0
+            hasToolCalls: stepToolCalls.length > 0,
           });
         },
         onError: () => {
           // 错误以 'error' part 出现在 stream 里,这里只防 unhandled rejection。
-        }
+        },
       });
 
       let text = "";
@@ -328,7 +389,7 @@ class Agent implements AgentInterface {
               toolName: mapped.toolCall.toolName,
               toolCallId: mapped.toolCall.toolCallId ?? "",
               status: mapped.toolCall.status,
-              durationMs: mapped.toolCall.durationMs ?? 0
+              durationMs: mapped.toolCall.durationMs ?? 0,
             });
           }
 
@@ -339,7 +400,7 @@ class Agent implements AgentInterface {
                 type: "tool_call_initiated",
                 step: stepsUsed,
                 toolName: mapped.event.toolName,
-                toolCallId: mapped.event.toolCallId
+                toolCallId: mapped.event.toolCallId,
               });
             }
             yield mapped.event;
@@ -355,12 +416,22 @@ class Agent implements AgentInterface {
 
       // ---- reactive compact:上下文溢出类错误,全程只重试一次 ----
       if (streamError !== undefined) {
-        if (!hasCompactedReactively && isReactiveCompactCandidateError(streamError)) {
-          const compaction = applyReactiveLoopCompactWithStats(messages, prefixMessageCount);
+        if (
+          !hasCompactedReactively &&
+          isReactiveCompactCandidateError(streamError)
+        ) {
+          const compaction = applyReactiveLoopCompactWithStats(
+            messages,
+            prefixMessageCount,
+          );
           if (compaction.changed) {
             messages = compaction.messages;
             hasCompactedReactively = true;
-            this.emitCompaction(stepsUsed, "reactive_compact_retry", compaction);
+            this.emitCompaction(
+              stepsUsed,
+              "reactive_compact_retry",
+              compaction,
+            );
             this.emitTransition(stepsUsed, "reactive_compact_retry");
             continue;
           }
@@ -370,21 +441,37 @@ class Agent implements AgentInterface {
       }
 
       if (aborted) {
-        yield this.finish(continuedText + text, toolCalls, "aborted", totalTokens, runStart, stepsUsed);
+        yield this.finish(
+          continuedText + text,
+          toolCalls,
+          "aborted",
+          totalTokens,
+          runStart,
+          stepsUsed,
+        );
         return;
       }
 
       const finishReason = await result.finishReason;
 
       // ---- max-output 续写 ----
-      if (shouldContinueForMaxOutput(finishReason, recoveries, this.contextPolicy)) {
+      if (
+        shouldContinueForMaxOutput(finishReason, recoveries, this.contextPolicy)
+      ) {
         continuedText += text;
         messages = [
           ...(await result.responseMessages),
-          { role: "user", content: MAX_OUTPUT_CONTINUATION_MESSAGE } as ModelMessage
+          {
+            role: "user",
+            content: MAX_OUTPUT_CONTINUATION_MESSAGE,
+          } as ModelMessage,
         ];
         recoveries += 1;
-        this.emitTransition(stepsUsed, "max_output_tokens_recovery", recoveries);
+        this.emitTransition(
+          stepsUsed,
+          "max_output_tokens_recovery",
+          recoveries,
+        );
         continue;
       }
 
@@ -410,8 +497,8 @@ class Agent implements AgentInterface {
             ...(await result.responseMessages),
             {
               role: "user",
-              content: notices.map((n) => n.text).join("\n\n")
-            } as ModelMessage
+              content: notices.map((n) => n.text).join("\n\n"),
+            } as ModelMessage,
           ];
           // 与 max-output 续写的关键差异:那里是"同一条消息继续写"所以累加 continuedText,
           // 这里是两条独立 assistant 消息 —— 本轮正文已随上一条 assistant 收口落库,
@@ -437,7 +524,7 @@ class Agent implements AgentInterface {
         isMaxSteps ? "max-steps" : "stop",
         totalTokens,
         runStart,
-        stepsUsed
+        stepsUsed,
       );
       return;
     }
@@ -449,14 +536,14 @@ class Agent implements AgentInterface {
     finishReason: FinishReason,
     usage: TokenUsage,
     runStart: number,
-    stepsUsed: number
+    stepsUsed: number,
   ): Extract<AgentStreamEvent, { type: "finish" }> {
     this.emit({
       type: "agent_run_end",
       totalDurationMs: Date.now() - runStart,
       stepCount: stepsUsed,
       totalTokenUsage: usage,
-      toolCallCount: toolCalls.length
+      toolCallCount: toolCalls.length,
     });
 
     return {
@@ -465,7 +552,7 @@ class Agent implements AgentInterface {
       toolCalls: toolCalls.map(toStreamToolCallSummary),
       finishReason,
       ...(usage.totalTokens > 0 ? { usage: toStreamTokenUsage(usage) } : {}),
-      durationMs: Date.now() - runStart
+      durationMs: Date.now() - runStart,
     };
   }
 }
@@ -495,7 +582,14 @@ export const createAgent = (options: CreateAgentOptions): AgentInterface => {
     ...(rest.contextPolicy !== undefined
       ? { contextPolicy: rest.contextPolicy }
       : {}),
-    ...(rest.callSettings !== undefined ? { callSettings: rest.callSettings } : {}),
-    ...(rest.repairModel !== undefined ? { repairModel: rest.repairModel } : {})
+    ...(rest.callSettings !== undefined
+      ? { callSettings: rest.callSettings }
+      : {}),
+    ...(rest.repairModel !== undefined
+      ? { repairModel: rest.repairModel }
+      : {}),
+    ...(rest.toolTimeout !== undefined
+      ? { toolTimeout: rest.toolTimeout }
+      : {}),
   });
 };

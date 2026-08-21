@@ -15,6 +15,13 @@ export interface AgentTool {
 export interface ToolExecutionOptions {
   /** SDK 派发的工具调用 id(卡片/历史 / fork 的 parent 挂点靠它归位)。 */
   readonly toolCallId: string;
+  /**
+   * 取消信号 = run 被取消 ∪ SDK 工具超时(streamText timeout 经 mergeAbortSignals
+   * 折进来)。工具应尽早检查并以业务返回值(而非 throw)收尾 —— race 兜底
+   * 已在包装层统一兜住"挂死不返回",工具自查的意义是把报错写得更具体。
+   * 可选:直接调用 execute(测试/无 SDK 上下文)时无信号。
+   */
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface ToolDefinition<S extends z.ZodObject<z.ZodRawShape>> {
@@ -42,6 +49,23 @@ export const TOOL_ERROR_PREFIX = "[Tool Error]";
 export const toToolErrorOutput = (error: unknown): string =>
   `${TOOL_ERROR_PREFIX} ${error instanceof Error ? error.message : "Unknown error"}`;
 
+/**
+ * T25 race 兜底:signal 触发时立即以错误文本 settle,不等业务 execute。
+ * race 是软取消 —— 原 promise 还在跑,只是结果被丢弃(fs 写已发出就会写完,
+ * 但 run 不再被挂住)。文案不说"已回滚":写操作可能已部分完成。
+ */
+const abortFallback = (signal: AbortSignal): Promise<string> =>
+  new Promise<string>((resolve) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(
+        `${TOOL_ERROR_PREFIX} Tool execution was canceled or timed out; ` +
+          "it may or may not have completed."
+      );
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+
 export const buildTool = <S extends z.ZodObject<z.ZodRawShape>>(
   definition: ToolDefinition<S>
 ): AgentTool => {
@@ -57,10 +81,20 @@ export const buildTool = <S extends z.ZodObject<z.ZodRawShape>>(
       try {
         // parse 应用 schema 的 .default() 等默认值,再交给业务 execute。
         const parsed = definition.inputSchema.parse(input);
-        // 只需把 SDK 的调用 id 挑出来传给工具;其余 options 不外泄(ToolExecutionOptions 只见 toolCallId)。
+        // 只把 SDK 的调用 id 和取消信号挑出来传给工具;其余 options 不外泄。
         // 直接调用 execute(input)(测试/无 SDK 上下文)时 options 缺省 → 给临时 id,不炸。
         const toolCallId = options?.toolCallId ?? `auto-${crypto.randomUUID()}`;
-        return await definition.execute(parsed, { toolCallId });
+        const signal = options?.abortSignal;
+        if (signal?.aborted) {
+          return `${TOOL_ERROR_PREFIX} Tool execution was canceled before it started.`;
+        }
+        const toolOptions: ToolExecutionOptions = {
+          toolCallId,
+          ...(signal !== undefined ? { abortSignal: signal } : {})
+        };
+        return await (signal !== undefined
+          ? Promise.race([definition.execute(parsed, toolOptions), abortFallback(signal)])
+          : definition.execute(parsed, toolOptions));
       } catch (error) {
         return toToolErrorOutput(error);
       }

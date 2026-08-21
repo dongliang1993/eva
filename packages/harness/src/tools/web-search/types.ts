@@ -23,5 +23,9 @@ export interface WebSearchResponse {
 }
 
 export interface WebSearchClient {
-  search(input: WebSearchRequest): Promise<WebSearchResponse>;
+  /** T25:externalSignal = run 取消 ∪ toolMs 超时,触发时断流。可选,不传行为不变。 */
+  search(
+    input: WebSearchRequest,
+    externalSignal?: AbortSignal,
+  ): Promise<WebSearchResponse>;
 }

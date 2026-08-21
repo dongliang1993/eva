@@ -29,14 +29,22 @@ export const mcpToolName = (server: string, tool: string): string =>
  */
 export interface McpToolInvoker {
   readonly tools: readonly McpToolDescriptor[];
-  callTool(toolName: string, input: unknown): Promise<string>;
+  /** T25:signal = run 取消 ∪ toolMs 超时,触发时中断传输层请求。可选。 */
+  callTool(
+    toolName: string,
+    input: unknown,
+    signal?: AbortSignal,
+  ): Promise<string>;
 }
 
 /**
  * 免审批的两种情形：协议自己声明了 readOnlyHint，或用户把它写进了白名单。
  * 其余一律需审批 —— MCP server 是第三方代码，能发 HTTP、能改文件、能花钱。
  */
-const isAutoApproved = (server: McpServerRow, descriptor: McpToolDescriptor): boolean =>
+const isAutoApproved = (
+  server: McpServerRow,
+  descriptor: McpToolDescriptor,
+): boolean =>
   descriptor.readOnly || server.autoApproveTools.includes(descriptor.name);
 
 /**
@@ -48,7 +56,7 @@ const isAutoApproved = (server: McpServerRow, descriptor: McpToolDescriptor): bo
 export const toAgentTools = (
   server: McpServerRow,
   invoker: McpToolInvoker,
-  logger: McpLogger
+  logger: McpLogger,
 ): readonly AgentTool[] => {
   const tools: AgentTool[] = [];
   const tooLong: string[] = [];
@@ -68,15 +76,17 @@ export const toAgentTools = (
         inputSchema: descriptor.inputSchema,
         readOnly: descriptor.readOnly,
         ...(isAutoApproved(server, descriptor) ? {} : { needsApproval: true }),
-        execute: (input) => invoker.callTool(descriptor.name, input)
-      })
+        // T25:abortSignal 透传给 invoker → 传输层请求可中断。
+        execute: (input, options) =>
+          invoker.callTool(descriptor.name, input, options?.abortSignal),
+      }),
     );
   }
 
   if (tooLong.length > 0) {
     logger.warn(
       { server: server.name, tools: tooLong, limit: MAX_TOOL_NAME_LENGTH },
-      "MCP 工具名超长已跳过（给 server 取个更短的名字可以救回来）"
+      "MCP 工具名超长已跳过（给 server 取个更短的名字可以救回来）",
     );
   }
 
@@ -86,10 +96,10 @@ export const toAgentTools = (
 /** 给 UI 看的工具摘要（含免审批标记）。 */
 export const toToolSummaries = (
   server: McpServerRow,
-  invoker: McpToolInvoker
+  invoker: McpToolInvoker,
 ): readonly McpToolSummary[] =>
   invoker.tools.map((descriptor) => ({
     name: descriptor.name,
     description: descriptor.description,
-    autoApproved: isAutoApproved(server, descriptor)
+    autoApproved: isAutoApproved(server, descriptor),
   }));

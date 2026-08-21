@@ -24,14 +24,14 @@ import {
   type AgentTool,
   type PromptSection,
   type RequestApproval,
-  type Skill
+  type Skill,
 } from "@eva/harness";
 
 import { toolOverflowDir } from "../paths.js";
 import type { AppInfrastructure } from "../types/common.js";
 import {
   resolveModelSlot,
-  type ModelBinding
+  type ModelBinding,
 } from "./providers/model-resolver.js";
 import { loadAppSettings } from "./settings/app-settings.js";
 
@@ -42,9 +42,20 @@ import { loadAppSettings } from "./settings/app-settings.js";
  */
 export const MAIN_AGENT_MAX_STEPS = 100;
 
+/**
+ * T25:工具超时默认值 —— harness 不设默认(最小使用者不该被强加隐形行为),
+ * 由 server 注入。bash 自带 120s 兜底,给到 150s;其余工具 60s 足够把
+ * 挂死的 fs/NFS 调用收口(SDK 把超时折成 AbortSignal 传给 execute,
+ * build-tool 的 race 兜底负责真正中断等待)。
+ */
+const TOOL_TIMEOUT = {
+  toolMs: 60_000,
+  tools: { bashMs: 150_000 },
+} as const;
+
 export class AgentUnavailableError extends Error {
   constructor(
-    message = "Agent is not configured. Configure an enabled provider and default model in Settings."
+    message = "Agent is not configured. Configure an enabled provider and default model in Settings.",
   ) {
     super(message);
   }
@@ -91,12 +102,12 @@ const MEMORY_PROMPT_SECTION: PromptSection = {
     "",
     "Five tools, three places — pick by scale and access pattern:",
     "- Ask yourself: *is this fact worth spending tokens on every single turn?* Yes -> `update_long_term_memory` (MEMORY.md). No -> `save_memory` (database).",
-    "- `update_long_term_memory`: stable identity, preferences, durable constraints. Read the WHOLE file first with `read_memory_file(\"MEMORY.md\")`, then write back the full content — it REPLACES the file.",
+    '- `update_long_term_memory`: stable identity, preferences, durable constraints. Read the WHOLE file first with `read_memory_file("MEMORY.md")`, then write back the full content — it REPLACES the file.',
     "- `append_memory`: day-stamped decisions and ephemeral events, into today's daily note.",
     "- `save_memory` / `search_memory`: searchable facts and project knowledge in the database. ALWAYS `search_memory` before saving to avoid duplicates; pass updateId to update.",
     "- `read_memory_file` with no argument lists your memory files — use it to discover days beyond the injected window.",
-    "- Never claim you will remember something unless you actually called one of these tools this turn."
-  ].join("\n")
+    "- Never claim you will remember something unless you actually called one of these tools this turn.",
+  ].join("\n"),
 };
 
 /**
@@ -111,7 +122,10 @@ const modelCacheKey = (b: ModelBinding): string =>
  * 只能条件展开 —— 连续多个字段时 `...(x !== undefined ? {x} : {})` 太吵。
  * 这个 helper 就是那个展开的具名版:{...defined("workspace", w)}。
  */
-export const defined = <K extends string, T>(key: K, value: T | undefined): { [P in K]: T } | Record<never, never> =>
+export const defined = <K extends string, T>(
+  key: K,
+  value: T | undefined,
+): { [P in K]: T } | Record<never, never> =>
   value !== undefined ? ({ [key]: value } as { [P in K]: T }) : {};
 
 /** 按 binding.kind 分派到对应的 AI SDK 工厂。 */
@@ -119,7 +133,7 @@ export const toAgentModel = (binding: ModelBinding): LanguageModel => {
   const options = {
     apiKey: binding.apiKey,
     ...(binding.baseURL ? { baseURL: binding.baseURL } : {}),
-    model: binding.modelId
+    model: binding.modelId,
   };
 
   return binding.kind === "anthropic"
@@ -139,7 +153,7 @@ export const buildBaseTools = (
     readonly extraTools?: readonly AgentTool[] | undefined;
   },
   getToolModel: (binding: ModelBinding) => LanguageModel,
-  toolBinding: ModelBinding
+  toolBinding: ModelBinding,
 ): AgentTool[] => {
   const { skills, workspace, extraTools } = options;
 
@@ -147,7 +161,7 @@ export const buildBaseTools = (
     ...(skills.length > 0 ? [createReadSkillTool([...skills] as Skill[])] : []),
     createDuckDuckGoWebSearchTool(),
     createWebFetchTool({ summaryModel: getToolModel(toolBinding) }),
-    ...(extraTools ?? [])
+    ...(extraTools ?? []),
   ];
 
   // 绑定了工作区 → 注入文件系统工具。overflow 落在 ~/.eva/tool-overflow/<id>/,
@@ -155,12 +169,16 @@ export const buildBaseTools = (
   if (workspace) {
     const overflowDir = toolOverflowDir(workspace.id);
     tools.push(
-      createReadFileTool({ workRoot: workspace.root, overflowDir, readableRoots: [overflowDir] }),
+      createReadFileTool({
+        workRoot: workspace.root,
+        overflowDir,
+        readableRoots: [overflowDir],
+      }),
       createListDirTool({ workRoot: workspace.root, overflowDir }),
       createGrepTool({ workRoot: workspace.root, overflowDir }),
       createWriteTool({ workRoot: workspace.root, overflowDir }),
       createEditTool({ workRoot: workspace.root, overflowDir }),
-      createBashTool({ workRoot: workspace.root, overflowDir })
+      createBashTool({ workRoot: workspace.root, overflowDir }),
     );
   }
 
@@ -177,7 +195,7 @@ export const buildBaseTools = (
 export class AgentFactory {
   private readonly models = new Map<string, LanguageModel>();
 
-  constructor(private readonly infra: AppInfrastructure) { }
+  constructor(private readonly infra: AppInfrastructure) {}
 
   /** provider / settings 变更后失效缓存(apiKey、baseURL 可能已改)。 */
   invalidate(): void {
@@ -195,14 +213,22 @@ export class AgentFactory {
     modelId: string;
   }): ResolvedModels {
     const chat = resolveModelSlot(
-      this.infra.db, this.infra.config, "chat", options.modelId, this.infra.encryptor
+      this.infra.db,
+      this.infra.config,
+      "chat",
+      options.modelId,
+      this.infra.encryptor,
     );
     if (!chat.ok) {
       throw new AgentUnavailableError(chat.reason);
     }
 
     const tool = resolveModelSlot(
-      this.infra.db, this.infra.config, "tool", undefined, this.infra.encryptor
+      this.infra.db,
+      this.infra.config,
+      "tool",
+      undefined,
+      this.infra.encryptor,
     );
 
     return {
@@ -210,7 +236,8 @@ export class AgentFactory {
       // tool 槽位没配或不可用 → 回落 chat(不是错误:杂务用主模型只是贵一点)
       tool: tool.ok ? tool.binding : chat.binding,
       // temperature 是 call setting,不是绑定属性 —— 从 settings 读一次。
-      temperature: loadAppSettings(this.infra.db, this.infra.config).chat.temperature
+      temperature: loadAppSettings(this.infra.db, this.infra.config).chat
+        .temperature,
     };
   }
 
@@ -230,21 +257,25 @@ export class AgentFactory {
       {
         skills: this.infra.skills,
         ...defined("workspace", options.workspace),
-        ...defined("extraTools", options.extraTools)
+        ...defined("extraTools", options.extraTools),
       },
       (binding) => this.getModel(binding),
-      models.tool
+      models.tool,
     );
 
     // defined() 摊的是 {key: value} 对象,这里要的是数组元素 —— 条件展开回原样。
     const sections: PromptSection[] = [
       ...(this.infra.soulSection ? [this.infra.soulSection] : []),
-      ...(options.workspace?.docsSection ? [options.workspace.docsSection] : []),
+      ...(options.workspace?.docsSection
+        ? [options.workspace.docsSection]
+        : []),
       ...(options.memoryFilesSection ? [options.memoryFilesSection] : []),
       MEMORY_PROMPT_SECTION,
-      ...(this.infra.skills.length > 0 ? [skillsToPromptSection([...this.infra.skills])] : []),
+      ...(this.infra.skills.length > 0
+        ? [skillsToPromptSection([...this.infra.skills])]
+        : []),
       createWebSearchPromptSection(),
-      createWebFetchPromptSection()
+      createWebFetchPromptSection(),
     ];
 
     const agent = createAgent({
@@ -252,24 +283,25 @@ export class AgentFactory {
       tools,
       systemPrompt: buildAgentSystemPrompt({ sections }),
       maxSteps: MAIN_AGENT_MAX_STEPS,
+      toolTimeout: TOOL_TIMEOUT,
       callSettings: {
         temperature: models.temperature,
-        ...defined("maxOutputTokens", models.chat.maxOutputTokens)
+        ...defined("maxOutputTokens", models.chat.maxOutputTokens),
       },
       ...defined("requestApproval", options.requestApproval),
       // T18:schema 不匹配时用 tool 槽位模型修一次 —— 结构化小生成正是该槽位的用途。
       repairModel: this.getModel(models.tool),
       contextPolicy: {
         ...defined("contextWindow", models.chat.contextWindow),
-        ...defined("reservedOutputTokens", models.chat.maxOutputTokens)
+        ...defined("reservedOutputTokens", models.chat.maxOutputTokens),
       },
-      ...defined("observer", this.infra.observer)
+      ...defined("observer", this.infra.observer),
     });
 
     return {
       agent,
       mainModel: models.chat,
-      toolModel: models.tool
+      toolModel: models.tool,
     };
   }
 
@@ -316,10 +348,10 @@ export class AgentFactory {
       {
         skills: this.infra.skills,
         ...defined("workspace", options.workspace),
-        ...defined("extraTools", options.extraTools)
+        ...defined("extraTools", options.extraTools),
       },
       (binding) => this.getModel(binding),
-      models.tool
+      models.tool,
     );
 
     // 角色要的工具在这个会话里压根不存在 → 早爆,不给残废工具集。
@@ -329,7 +361,7 @@ export class AgentFactory {
     if (missing.length > 0) {
       throw new AgentUnavailableError(
         `子代理 ${options.role.type} 缺少必需工具:${missing.join("、")}。` +
-        "这些是工作区工具 —— 请先给该会话绑定一个工作区,再派子代理。"
+          "这些是工作区工具 —— 请先给该会话绑定一个工作区,再派子代理。",
       );
     }
 
@@ -340,13 +372,14 @@ export class AgentFactory {
       tools,
       systemPrompt: options.role.systemPrompt,
       maxSteps: options.role.maxSteps ?? SUBAGENT_MAX_STEPS,
+      toolTimeout: TOOL_TIMEOUT,
       callSettings: {
-        ...defined("temperature", options.temperature)
+        ...defined("temperature", options.temperature),
       },
       ...defined("requestApproval", options.requestApproval),
       // 子代理用的本来就是 tool 槽位(往往更弱),弱模型更需要修复器。
       repairModel: this.getModel(models.tool),
-      ...defined("observer", this.infra.observer)
+      ...defined("observer", this.infra.observer),
     });
   }
 }

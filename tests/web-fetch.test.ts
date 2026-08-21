@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   convertToMarkdown,
-  WebFetchClient
+  WebFetchClient,
 } from "../packages/harness/src/index.js";
 import { createWebFetchPromptSection } from "../packages/harness/src/prompts/sections/web-fetch.js";
 
@@ -20,8 +20,8 @@ describe("WebFetchClient", () => {
     const fetchSpy = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
       new Response("<html><body>Hello</body></html>", {
         status: 200,
-        headers: { "content-type": "text/html" }
-      })
+        headers: { "content-type": "text/html" },
+      }),
     );
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -30,7 +30,7 @@ describe("WebFetchClient", () => {
 
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://example.com",
-      expect.objectContaining({ method: "GET" })
+      expect.objectContaining({ method: "GET" }),
     );
     expect(page.url).toBe("https://example.com");
     expect(page.statusCode).toBe(200);
@@ -39,14 +39,16 @@ describe("WebFetchClient", () => {
   it("throws on HTTP error responses", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-        new Response("Not Found", { status: 404, statusText: "Not Found" })
-      )
+      vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValue(
+          new Response("Not Found", { status: 404, statusText: "Not Found" }),
+        ),
     );
 
     const client = new WebFetchClient();
     await expect(client.fetch("https://example.com/404")).rejects.toThrow(
-      "Web fetch failed (404)"
+      "Web fetch failed (404)",
     );
   });
 
@@ -54,8 +56,8 @@ describe("WebFetchClient", () => {
     const fetchSpy = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
       new Response("body", {
         status: 200,
-        headers: { "content-type": "text/plain" }
-      })
+        headers: { "content-type": "text/plain" },
+      }),
     );
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -65,6 +67,53 @@ describe("WebFetchClient", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(first).toEqual(second);
+  });
+
+  it("T25:外部 signal abort → fetch 断流,文案是 canceled 而非 timed out", async () => {
+    // 挂起的 fetch:永不 resolve,只有 signal 断流才能结束它。
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(
+        (_url: string | URL | Request, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+          }),
+      ),
+    );
+
+    const client = new WebFetchClient();
+    const pending = client.fetch("https://example.com", controller.signal);
+    setTimeout(() => controller.abort(), 20);
+    await expect(pending).rejects.toThrow("Web fetch canceled");
+  });
+
+  it("T25:不传 signal → 行为不变,自有超时文案照旧", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(
+        (_url: string | URL | Request, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(
+                new DOMException(
+                  "Aborted",
+                  init.signal?.reason?.name === "TimeoutError"
+                    ? "TimeoutError"
+                    : "AbortError",
+                ),
+              ),
+            );
+          }),
+      ),
+    );
+
+    const client = new WebFetchClient({ timeoutMs: 30 });
+    await expect(client.fetch("https://example.com")).rejects.toThrow(
+      /timed out after 30ms/,
+    );
   });
 });
 

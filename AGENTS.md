@@ -26,10 +26,12 @@ Three-layer dependency structure (modeled after DeerFlow):
 - **`app.ts`** — Fastify lifecycle: creates the app, decorates with `infra` and `services`, registers routes.
 
 Fastify decorators:
+
 - `app.infra` — `AppInfrastructure` (config, db, logger, skills, observer?)
 - `app.services` — `AppServices` (agents, session, approvals, runRegistry, workspaces, mcp)
 
 **`AgentFactory`** (`services/agent-factory.ts`) resolves the agent **per run**:
+
 1. `resolveModels({ requestedModelId? })` — resolves the three model slots (chat / tool / embedding) via `resolveModelSlot`; tool 缺省回落 chat; temperature is a call setting read once from settings.
 2. `resolve(options)` — builds the agent with `createConfiguredAgent`, injecting per-run `workspace` context.
 
@@ -132,7 +134,7 @@ Memory is split across two stores by scale and access pattern (the "file as data
 - **DB (L4)**: `memories` table + `memory_embeddings` (vec0) + FTS. Tools: `save_memory` / `search_memory`. Hundreds-to-thousands of searchable facts; gated by Settings → Memory (`settings.memory.enabled`).
 - **Human-readable files (L1/L2)**: `~/.eva/MEMORY.md` (long-term, injected every turn, 8 KB cap) and `~/.eva/memory/YYYY-MM-DD.md` (recent 2 days injected). Tools: `read_memory_file` / `append_memory` / `update_long_term_memory`. These are **user-editable** — `MEMORY.md` is what "you can open it in an editor and fix it" means. Always mounted (not gated by `settings.memory.enabled`); the routing rule lives in `agent.ts`'s `MEMORY_PROMPT_SECTION`.
 
-The prompt tells the model the one decisive question — *"is this fact worth spending tokens on every single turn?"* — Yes → `update_long_term_memory`, No → `save_memory`; day-stamped ephemera → `append_memory`.
+The prompt tells the model the one decisive question — _"is this fact worth spending tokens on every single turn?"_ — Yes → `update_long_term_memory`, No → `save_memory`; day-stamped ephemera → `append_memory`.
 
 ## Commands
 
@@ -148,6 +150,10 @@ pnpm desktop:build# Build the desktop app
 pnpm desktop:pack # Pack the desktop app for distribution
 ```
 
+> Node ≥ 20.3 required (harness uses `AbortSignal.any` in the tool abort/timeout
+> wiring, r6 T25). Desktop builds ship the server on Electron's bundled Node —
+> verify there before a release.
+
 打包链路（T11 起）：`pack` = web build → server build → `pnpm deploy .server-deploy`
 （server 的 prod node_modules，供 external 依赖）→ `electron-rebuild`（better-sqlite3 按
 Electron ABI）→ electron-vite。产物：`Eva.app/Contents/Resources/{app.asar, server/dist,
@@ -162,11 +168,11 @@ server/node_modules, web/dist}`。用户数据与技能在 `~/.eva/`（`~/.eva/s
 
 Environment variables loaded from `.env.local` at workspace root (`apps/server/src/config.ts`):
 
-| Variable | Purpose |
-|----------|---------|
-| `PORT` | Server port (default 8082) |
-| `HOST` | Server host (default 127.0.0.1) |
-| `LOG_LEVEL` | pino log level (default info) |
-| `DB_PATH` | SQLite DB path (default `~/.eva/eva.db`) |
+| Variable    | Purpose                                  |
+| ----------- | ---------------------------------------- |
+| `PORT`      | Server port (default 8082)               |
+| `HOST`      | Server host (default 127.0.0.1)          |
+| `LOG_LEVEL` | pino log level (default info)            |
+| `DB_PATH`   | SQLite DB path (default `~/.eva/eva.db`) |
 
 > Workspaces are managed in-app (not env vars). MCP config file: `~/.eva/mcp.json`.

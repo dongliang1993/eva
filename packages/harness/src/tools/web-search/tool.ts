@@ -1,9 +1,13 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import {
+  buildTool,
+  type AgentTool,
+  type ToolExecutionOptions,
+} from "../build-tool.js";
 import {
   DuckDuckGoWebSearchClient,
-  type DuckDuckGoWebSearchClientOptions
+  type DuckDuckGoWebSearchClientOptions,
 } from "./duckduckgo-client.js";
 import type { WebSearchClient } from "./types.js";
 
@@ -16,7 +20,7 @@ const webSearchToolSchema = z.object({
     .string()
     .min(2)
     .describe(
-      "The search query to execute. Use specific terms such as product names, error messages, or the current year when searching for recent information."
+      "The search query to execute. Use specific terms such as product names, error messages, or the current year when searching for recent information.",
     ),
   maxResults: z
     .number()
@@ -24,7 +28,7 @@ const webSearchToolSchema = z.object({
     .positive()
     .max(10)
     .optional()
-    .describe("Optional maximum number of search results to return.")
+    .describe("Optional maximum number of search results to return."),
 });
 
 export const getWebSearchToolDescription = (): string =>
@@ -42,7 +46,7 @@ export const getWebSearchToolDescription = (): string =>
     "",
     "Critical requirement:",
     '- After using this tool, include a "Sources:" section in the final answer and list the relevant result URLs',
-    `- For recent information, prefer search queries that include the current year (${currentYear()}) when relevant`
+    `- For recent information, prefer search queries that include the current year (${currentYear()}) when relevant`,
   ].join("\n");
 
 export const createWebSearchTool = (client: WebSearchClient): AgentTool =>
@@ -51,17 +55,24 @@ export const createWebSearchTool = (client: WebSearchClient): AgentTool =>
     description: getWebSearchToolDescription,
     inputSchema: webSearchToolSchema,
     readOnly: true,
-    execute: async ({ query, maxResults }) =>
+    execute: async (
+      { query, maxResults },
+      execOptions?: ToolExecutionOptions,
+    ) =>
       JSON.stringify(
-        await client.search({
-          query,
-          ...(maxResults !== undefined ? { maxResults } : {})
-        }),
+        await client.search(
+          {
+            query,
+            ...(maxResults !== undefined ? { maxResults } : {}),
+          },
+          // T25:run 取消/toolMs 超时信号接进搜索请求(与自有超时合并)。
+          execOptions?.abortSignal,
+        ),
         null,
-        2
-      )
+        2,
+      ),
   });
 
 export const createDuckDuckGoWebSearchTool = (
-  options?: DuckDuckGoWebSearchClientOptions
+  options?: DuckDuckGoWebSearchClientOptions,
 ): AgentTool => createWebSearchTool(new DuckDuckGoWebSearchClient(options));
