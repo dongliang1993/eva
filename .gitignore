@@ -8,6 +8,7 @@ coverage
 .refrences/
 dist-electron/
 release/
+apps/desktop/preload.js
 .server-deploy/
 .eva/
 *.dmg

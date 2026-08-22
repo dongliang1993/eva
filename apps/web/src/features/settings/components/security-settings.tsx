@@ -35,7 +35,14 @@ export function SecuritySettings() {
   useEffect(() => {
     if (!isElectron()) return;
     window.electronAPI!.getAutoLaunch().then(setAutoLaunch).catch(() => setAutoLaunch(null));
-    return window.electronAPI!.onUpdaterStatus(setUpdate);
+    const unbind = window.electronAPI!.onUpdaterStatus(setUpdate);
+    // 启动时那次 updater 检查/下载的广播可能早于本页订阅(时序)——先拉 main 缓存的
+    // 最近态兜底,再触发一次检查(已是最新会回 not-available,有新版会继续下)。
+    window.electronAPI!.getUpdaterStatus().then((s) => {
+      if (s) setUpdate(s);
+    }).catch(() => {});
+    window.electronAPI!.updaterCheck().catch(() => {});
+    return unbind;
   }, []);
 
   const toggleAutoLaunch = (enabled: boolean) => {

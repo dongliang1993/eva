@@ -18,7 +18,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import { checkForUpdates, initUpdater, installUpdate } from "./updater";
+import { checkForUpdates, getUpdaterStatus, initUpdater, installUpdate } from "./updater";
 
 // ---------------------------------------------------------------------------
 // State
@@ -505,9 +505,10 @@ ipcMain.handle("auto-launch:set", (_event, enabled: boolean) => {
   return app.getLoginItemSettings().openAtLogin;
 });
 
-// T34 updater:renderer 手动检查 / 确认安装。状态经 "updater-status" 推送。
+// T34 updater:renderer 手动检查 / 确认安装 / 拉当前状态(补启动时错过的广播)。
 ipcMain.handle("updater:check", () => checkForUpdates());
 ipcMain.handle("updater:install", () => installUpdate());
+ipcMain.handle("updater:status", () => getUpdaterStatus());
 
 // ---------------------------------------------------------------------------
 // App Lifecycle

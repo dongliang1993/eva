@@ -9,6 +9,7 @@ interface ElectronAPI {
   setAutoLaunch: (enabled: boolean) => Promise<boolean>;
   updaterCheck: () => Promise<void>;
   updaterInstall: () => Promise<void>;
+  getUpdaterStatus: () => Promise<Record<string, unknown> | null>;
   onUpdaterStatus: (
     callback: (status: Record<string, unknown>) => void
   ) => () => void;

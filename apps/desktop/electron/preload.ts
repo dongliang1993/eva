@@ -24,9 +24,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getAutoLaunch: (): Promise<boolean> => ipcRenderer.invoke("auto-launch:get"),
   setAutoLaunch: (enabled: boolean): Promise<boolean> =>
     ipcRenderer.invoke("auto-launch:set", enabled),
-  // T34 updater:状态推送 + 手动检查/安装。
+  // T34 updater:状态推送 + 手动检查/安装/拉当前状态。
   updaterCheck: (): Promise<void> => ipcRenderer.invoke("updater:check"),
   updaterInstall: (): Promise<void> => ipcRenderer.invoke("updater:install"),
+  getUpdaterStatus: (): Promise<Record<string, unknown> | null> =>
+    ipcRenderer.invoke("updater:status"),
   onUpdaterStatus: (
     callback: (status: Record<string, unknown>) => void
   ): (() => void) => {

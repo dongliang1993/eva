@@ -51,6 +51,11 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   notarize: true
   target:
+    # dmg 是安装器;zip 才是 electron-updater 自更新(quitAndInstall 自动替换)用的格式。
+    # 只发 dmg 会报 "ZIP file not provided"(T34 实测)。
     - target: dmg
+      arch:
+        - arm64
+    - target: zip
       arch:
         - arm64
