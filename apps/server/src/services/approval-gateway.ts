@@ -1,7 +1,7 @@
 import { classifyToolRisk } from "@eva/harness";
 import type { ToolRisk } from "@eva/shared";
 
-import { ApprovalRepository } from "../db/repositories/approval-repository.js";
+import { ApprovalRepository, type ApprovalRequestRow } from "../db/repositories/approval-repository.js";
 
 interface PendingRequest {
   readonly runId: string;
@@ -62,9 +62,9 @@ export class ApprovalGateway {
    * 仍然落库:审批表是"危险工具做过什么"的唯一台账,自动通过也必须可追溯。
    * 不进 pending Map:没有待决态,cancelByRun 自然碰不到它。
    */
-  autoApprove(callId: string, input: ApprovalAskInput): boolean {
+  autoApprove(callId: string, input: ApprovalAskInput, reason?: string): boolean {
     this.repo.create({ id: callId, ...input });
-    this.repo.decide(callId, "granted");
+    this.repo.decide(callId, "granted", reason);
     return true;
   }
 
@@ -79,6 +79,11 @@ export class ApprovalGateway {
         resolve
       });
     });
+  }
+
+  /** 按 callId 查台账行(T30:决策回写/approval_resolved 帧的数据源)。 */
+  getRequest(callId: string): ApprovalRequestRow | undefined {
+    return this.repo.getById(callId);
   }
 
   /** 前端提交决策:允许或拒绝。该请求不存在(已决策/已取消/跨进程)时返回 false。 */

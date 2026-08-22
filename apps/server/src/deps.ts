@@ -16,7 +16,8 @@ import { findMonorepoRoot } from "./services/monorepo-root.js";
 import { syncMcpConfigFile } from "./services/mcp/mcp-config-file.js";
 import {
   migrateLegacySettings,
-  migrateSecurityToAlwaysAllowTools
+  migrateSecurityToAlwaysAllowTools,
+  migrateAlwaysAllowToolsToPolicies
 } from "./services/settings/migrate-legacy.js";
 import { secretKeyPath, userSkillsDir } from "./paths.js";
 import { AesGcmEncryptor, IdentityEncryptor, type Encryptor } from "./services/crypto/encryptor.js";
@@ -56,6 +57,9 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
 
   // T14:旧「始终允许」全局开关 → per-tool 白名单(存在 alwaysAllowTools 即幂等跳过)。
   migrateSecurityToAlwaysAllowTools(db, logger);
+
+  // T27:per-tool 白名单 → thread 作用域 policy key(存在 allowAlwaysPolicies 即幂等跳过)。
+  migrateAlwaysAllowToolsToPolicies(db, logger);
 
   // ~/.eva/mcp.json → mcp_servers 表（file-origin）。运行时只读表，不读文件。
   // 这里只同步配置，不建连接 —— 连接留给第一个 run 触发（没配 MCP 的用户零开销）。

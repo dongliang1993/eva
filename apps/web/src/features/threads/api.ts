@@ -67,3 +67,20 @@ export const decideApproval = async (
     body: JSON.stringify({ allowed })
   });
 };
+
+/**
+ * T31:「始终允许」→ 后端选精确 policy key 落 allowAlwaysPolicies。
+ * key 生成在后端(buildPolicyKeys 单一事实来源),前端只传 {tool, sessionId, args}。
+ * 返回 null = 不可记忆(destructive / 未知工具),前端别弹「已加入」。
+ */
+export const grantApprovalPolicy = async (
+  tool: string,
+  sessionId: string,
+  args: Record<string, unknown>
+): Promise<string | null> => {
+  const data = await apiFetch<{ key: string | null }>(
+    "/api/v1/approval-policies/grant",
+    { method: "POST", body: JSON.stringify({ tool, sessionId, args }) }
+  );
+  return data.key;
+};

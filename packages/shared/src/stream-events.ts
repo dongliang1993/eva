@@ -158,11 +158,22 @@ export interface RunApprovalRequestEvent {
   risk: ToolRisk;
 }
 
+/**
+ * T30:一次审批的决策(落进消息 part 的 toolMetadata,随历史持久)。
+ * decidedAt 与 approval_requests.decidedAt 同源(ISO)。
+ */
+export interface ApprovalDecision {
+  readonly action: "granted" | "denied";
+  readonly decidedAt: string;
+}
+
 /** 审批已决（用户决策 / 自动放行 / abort 取消）。 */
 export interface RunApprovalResolvedEvent {
   type: "approval_resolved";
   callId: string;
   approved: boolean;
+  /** T30:决策定格态 —— 前端卡片据此定格成「已允许/已拒绝 · 时间」。 */
+  decision: ApprovalDecision;
 }
 
 export type RunApprovalEvent = RunApprovalRequestEvent | RunApprovalResolvedEvent;

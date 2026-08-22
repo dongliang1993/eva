@@ -6,7 +6,7 @@ import { useChat } from "./hooks/use-chat";
 import { useApprovals } from "./hooks/use-approvals";
 import { apiFetch } from "../../shared/api/fetch";
 import { setThreadWorkspace } from "../workspaces/api";
-import { useSettings } from "../settings/hooks/use-settings";
+import { grantApprovalPolicy } from "./api";
 import { Sidebar } from "./components/sidebar";
 import { ChatView } from "./components/chat-view";
 import type { ChatInputRejection } from "./components/chat-input";
@@ -23,24 +23,16 @@ export function ChatPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
 
-  // 「始终允许」→ 只放开这一个工具的审批(T14:per-tool 白名单,不再是全局开关)。
-  const settings = useSettings();
-  const enableAutoApprove = useCallback(
-    (toolName: string): Promise<void> | void => {
-      const current = settings.data;
-      if (!current) return;
-      if (current.security.alwaysAllowTools.includes(toolName)) {
-        return;
-      }
-      settings.saveSettings({
-        ...current,
-        security: {
-          ...current.security,
-          alwaysAllowTools: [...current.security.alwaysAllowTools, toolName]
-        }
-      });
+  // 「始终允许」→ 后端选精确 policy key 落 thread 作用域 policy(T31,不再是全局白名单)。
+  // sessionId 在 useChat 之后才拿到,所以这里用 ref 读最新值(不挂进依赖)。
+  const sessionIdRefForGrant = useRef<string | null>(null);
+  const grantPolicy = useCallback(
+    async (tool: string, args: Record<string, unknown>): Promise<void> => {
+      const sessionId = sessionIdRefForGrant.current;
+      if (!sessionId) return; // 新建会话还没 sessionId —— 等 run_start 带回,这次先不记
+      await grantApprovalPolicy(tool, sessionId, args);
     },
-    [settings]
+    []
   );
 
   /**
@@ -60,7 +52,7 @@ export function ChatPage() {
 
   const clearRejection = useCallback(() => setRejection(null), []);
 
-  const approvals = useApprovals(enableAutoApprove);
+  const approvals = useApprovals(grantPolicy);
   // S7:子代理视图 store(SSE 累积 + /subagent-messages 兜底)。
   const subagents = useSubagentsStore();
   const {
@@ -89,6 +81,11 @@ export function ChatPage() {
 
   // 会话切换/新会话时,从服务端对齐一次该会话下的待审批(不轮询)。事实源仍是 SSE。
   useEffect(() => approvals.refresh(sessionId), [sessionId, approvals.refresh]);
+
+  // T31:grant 路由要当前 sessionId,同步进 ref(不触发 grantPolicy 重建)。
+  useEffect(() => {
+    sessionIdRefForGrant.current = sessionId;
+  }, [sessionId]);
 
   // 已存在会话的 workspaceId 事实源是服务端 ThreadSummary(与侧栏共用同一 query 缓存,
   // React Query 去重,不会多发请求)。这里不另存一份。
@@ -237,6 +234,7 @@ export function ChatPage() {
               onSelectWorkspace={handleSelectWorkspace}
               sessionId={sessionId}
               pendingApprovals={approvals.pending}
+              resolvedApprovals={approvals.resolved}
               onApproveOnce={(callId) => approvals.decide(callId, true)}
               onDeny={(callId) => approvals.decide(callId, false)}
               onAllowAlways={(callId) => approvals.allowAlways(callId)}

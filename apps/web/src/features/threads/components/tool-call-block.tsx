@@ -73,6 +73,21 @@ function ToolCallBlockImpl({ toolCall }: ToolCallBlockProps) {
   const isError = toolCall.status === "error";
   const isRunning = !toolCall.status;
 
+  // T30 刷新恢复:已决策审批在 tool part 上定格成「已允许/已拒绝 · 时间」徽标。
+  const approvalBadge = toolCall.approvalDecision ? (
+    <span
+      className={`flex items-center gap-1 text-xs ${
+        toolCall.approvalDecision.action === "granted" ? "text-primary" : "text-destructive"
+      }`}
+    >
+      {toolCall.approvalDecision.action === "granted" ? "已允许" : "已拒绝"} ·{" "}
+      {new Date(toolCall.approvalDecision.decidedAt).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit"
+      })}
+    </span>
+  ) : null;
+
   return (
     <DisclosureRow
       {...(isError ? { leadingDot: <ErrorDot /> } : {})}
@@ -82,14 +97,15 @@ function ToolCallBlockImpl({ toolCall }: ToolCallBlockProps) {
           : `${toolCall.toolName}${title ? ` · ${title}` : ""}`
       }
       trailing={
-        toolCall.durationMs !== undefined && !isError ? (
+        approvalBadge ??
+        (toolCall.durationMs !== undefined && !isError ? (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock size={12} />
             {formatDuration(toolCall.durationMs)}
           </span>
         ) : isRunning ? (
           <span className="text-xs text-warning animate-pulse">running</span>
-        ) : null
+        ) : null)
       }
     >
       <div className="space-y-4">

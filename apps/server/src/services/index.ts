@@ -7,6 +7,7 @@ import { DrizzleWorkspaceRepository } from "../db/repositories/workspace-reposit
 import type { AppInfrastructure, AppServices } from "../types/common.js";
 import { AgentFactory } from "./agent-factory.js";
 import { ApprovalGateway } from "./approval-gateway.js";
+import { ApprovalPolicyStore } from "./approval-policy-store.js";
 import { McpRegistry } from "./mcp/mcp-registry.js";
 import { RunLedger } from "./runs/run-ledger.js";
 import { RunRegistry } from "./run-registry.js";
@@ -20,6 +21,7 @@ export const buildAppServices = (infra: AppInfrastructure): AppServices => ({
     new DrizzleMessageRepository(infra.db)
   ),
   approvals: new ApprovalGateway(new ApprovalRepository(infra.db)),
+  approvalPolicies: new ApprovalPolicyStore(infra.db, infra.config),
   runLedger: new RunLedger(new DrizzleRunRepository(infra.db)),
   runRegistry: new RunRegistry(),
   workspaces: new WorkspaceStore(new DrizzleWorkspaceRepository(infra.db)),

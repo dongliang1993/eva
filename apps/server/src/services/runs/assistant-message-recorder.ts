@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  ApprovalDecision,
+  EvaDynamicToolPart,
   EvaUIMessage,
   RunAgentStreamEvent,
   StreamFinishReason,
   StreamTokenUsage
 } from "@eva/shared";
-import { UiMessageBuilder, createUserUIMessage } from "@eva/shared";
+import { UiMessageBuilder, createUserUIMessage, isDynamicToolPart } from "@eva/shared";
 
 import type { MessagePosition, SessionService } from "../session.js";
 
@@ -15,6 +17,11 @@ export interface AssistantMessageRecorderOptions {
   readonly runId: string;
   readonly model: string;
   readonly initialPosition: MessagePosition;
+  /**
+   * T30:finish 落库前查每个 tool part 的审批决策,有则回写进 part.toolMetadata。
+   * 决策数据源是 approval_requests 行(finish 时已 decided),不是 SSE 事件。
+   */
+  readonly lookupDecision?: (callId: string) => ApprovalDecision | undefined;
 }
 
 export interface RecordedAssistantRun {
@@ -83,7 +90,7 @@ export class AssistantMessageRecorder {
     });
     const stored = this.session.recordAssistantMessage(
       this.options.sessionId,
-      assistantMessage,
+      this.withApprovalDecisions(assistantMessage),
       this.position,
       this.options.runId
     );
@@ -94,6 +101,32 @@ export class AssistantMessageRecorder {
       ...(this.usage !== undefined ? { usage: this.usage } : {}),
       ...(this.streamError !== undefined ? { streamError: this.streamError } : {})
     };
+  }
+
+  /**
+   * T30:finish 落库前把已决策审批回写进 tool part 的 toolMetadata。
+   * 只动 toolMetadata,不动 part.state(坑 5:denied 的 output 本来就是
+   * output-available,改 state 会污染 convertToModelMessages 回灌语义)。
+   * 查不到决策行 / 仍 pending 的 part 原样保留。
+   */
+  private withApprovalDecisions(message: EvaUIMessage): EvaUIMessage {
+    const lookup = this.options.lookupDecision;
+    if (!lookup) return message;
+
+    let touched = false;
+    const parts = message.parts.map((part) => {
+      if (!isDynamicToolPart(part)) return part;
+      const decision = lookup(part.toolCallId);
+      if (!decision) return part;
+      touched = true;
+      // toolMetadata 是宽松 JSONValue 记录,spread 后 SDK 判别联合收窄不了 —— 经 unknown 转回。
+      return {
+        ...part,
+        toolMetadata: { ...part.toolMetadata, approvalDecision: decision }
+      } as unknown as EvaDynamicToolPart;
+    });
+
+    return touched ? { ...message, parts } : message;
   }
 
   private recordNoticeBoundary(

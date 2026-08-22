@@ -3,14 +3,14 @@ import { randomUUID } from "node:crypto";
 import {
   classifyToolRisk,
   createSubagentTool,
+  isSafeReadOnlyCommand,
   type RequestApproval
 } from "@eva/harness";
 import type { FastifyInstance } from "fastify";
-import type { RunStreamEvent } from "@eva/shared";
+import type { ApprovalDecision, RunStreamEvent } from "@eva/shared";
 import { toErrorMessage } from "@eva/shared";
 
 import { AgentUnavailableError, defined } from "../services/agent-factory.js";
-import { loadAppSettings } from "../services/settings/app-settings.js";
 import { evaDataDir } from "../paths.js";
 import { loadMemoryFilesSection, todayString } from "../services/memory/index.js";
 import { AssistantMessageRecorder } from "../services/runs/assistant-message-recorder.js";
@@ -50,16 +50,44 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       workspaces: app.services.workspaces
     };
 
-    const requestApproval: RequestApproval = async ({ toolCallId, toolName, args }) => {
-      const settings = loadAppSettings(app.infra.db, app.infra.config);
+    // T30:审批决策的唯一查询口 —— finish 落库回写与 approval_resolved 帧共用。
+    // 事实源是 approval_requests 行,不是 SSE 事件(§坑 3:回放路径不带 decision)。
+    const lookupApprovalDecision = (callId: string): ApprovalDecision | undefined => {
+      const row = app.services.approvals.getRequest(callId);
+      if (!row || row.status === "pending" || !row.decidedAt) return undefined;
+      return { action: row.status, decidedAt: row.decidedAt };
+    };
 
-      // T14:per-tool 白名单取代全局开关。命中才直接放行,否则走审批卡片。
-      // (MCP 侧 per-server 白名单先于这里判,见 services/mcp/mcp-tools.ts)
-      if (settings.security.alwaysAllowTools.includes(toolName)) {
+    const requestApproval: RequestApproval = async ({ toolCallId, toolName, args }) => {
+      // T29:bash 只读命令直放落台账。harness 的 withApproval 已短路(requestApproval
+      // 根本不被调),所以「没弹窗但执行了」要在这里补一笔 —— 与 harness 共用同一个
+      // isSafeReadOnlyCommand,判定不漂移(r7 §3 契约 2)。
+      if (
+        toolName === "bash" &&
+        isSafeReadOnlyCommand(String((args as Record<string, unknown>)?.command ?? ""))
+      ) {
+        app.services.approvals.autoApprove(
+          toolCallId,
+          { runId, sessionId, tool: toolName, args },
+          "readonly-safe"
+        );
         return true;
       }
 
       const risk = classifyToolRisk(toolName, args);
+
+      // T28:policy 记忆短路(Alma 放行链第 2 级)。必须在 emit approval_request 之前 ——
+      // 放进 ask 内部会让「没问过人」的卡片在前端闪一帧。命中 = 台账 granted + 直放。
+      const policyHit = app.services.approvalPolicies.match(toolName, sessionId, args);
+      if (policyHit) {
+        app.services.approvals.autoApprove(
+          toolCallId,
+          { runId, sessionId, tool: toolName, args },
+          `policy:${policyHit}`
+        );
+        return true;
+      }
+
       emit({ type: "approval_request", callId: toolCallId, toolName, args, risk });
       const approved = await app.services.approvals.ask(toolCallId, {
         runId,
@@ -67,7 +95,16 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         tool: toolName,
         args
       });
-      emit({ type: "approval_resolved", callId: toolCallId, approved });
+      // T30:ask 返回时行已 decided —— 从台账查回 decision 附进帧,前端定格态用。
+      emit({
+        type: "approval_resolved",
+        callId: toolCallId,
+        approved,
+        decision: lookupApprovalDecision(toolCallId) ?? {
+          action: approved ? "granted" : "denied",
+          decidedAt: new Date().toISOString()
+        }
+      });
 
       return approved;
     };
@@ -178,7 +215,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         sessionId,
         runId,
         model: resolved.mainModel.qualifiedModelId,
-        initialPosition: runInput.assistantPosition
+        initialPosition: runInput.assistantPosition,
+        lookupDecision: lookupApprovalDecision
       });
 
       // 补上快照来源(sessionId 在阶段①就绑过了)。builder 在 notice-injected 边界会

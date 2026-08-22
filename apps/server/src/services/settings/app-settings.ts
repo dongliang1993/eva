@@ -46,7 +46,7 @@ const createDefaultSettings = (): AppSettings => ({
   },
   security: {
     logLevel: "info",
-    alwaysAllowTools: []
+    allowAlwaysPolicies: []
   }
 });
 

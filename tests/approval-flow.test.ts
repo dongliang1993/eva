@@ -322,3 +322,87 @@ describe("启动清扫:遗留 pending 审批", () => {
     expect(repo.failStalePending()).toBe(0);
   });
 });
+
+/**
+ * T29:bash 只读命令直放(docs/plans/r7/T29)。
+ * 短路由 harness 的 withApproval 做(requestApproval 不被调),台账由 server 的
+ * requestApproval 回调做(autoApprove 落 granted)—— 两处用同一个 isSafeReadOnlyCommand。
+ */
+describe("bash 只读直放(T29)", () => {
+  let db: AppDatabase;
+
+  beforeEach(() => {
+    db = initDb({ dbPath: ":memory:" });
+    migrateDb(db);
+  });
+
+  afterEach(() => {
+    closeDb(db);
+  });
+
+  const bashTool = () =>
+    buildTool({
+      name: "bash",
+      description: "run a shell command",
+      inputSchema: z.object({ command: z.string(), description: z.string() }),
+      needsApproval: true,
+      execute: async () => "ran"
+    });
+
+  const runOnce = async (command: string) => {
+    const spy = vi.fn(async () => true);
+    const agent = createAgent({
+      model: toolCallThenTextModel("bash", { command, description: "d" }),
+      tools: [bashTool()],
+      requestApproval: spy
+    });
+
+    const events: AgentStreamEvent[] = [];
+    for await (const event of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
+      events.push(event);
+    }
+    const toolResults = events.filter((e) => e.type === "tool-result");
+    return { spy, toolResults };
+  };
+
+  it("ls -la 直放:requestApproval 未被调,工具真执行", async () => {
+    const { spy, toolResults } = await runOnce("ls -la");
+    expect(spy).not.toHaveBeenCalled();
+    expect((toolResults[0] as { output: string }).output).toBe("ran");
+  });
+
+  it("git status 直放;cat a.ts 直放", async () => {
+    for (const command of ["git status", "cat a.ts"]) {
+      const { spy, toolResults } = await runOnce(command);
+      expect(spy).not.toHaveBeenCalled();
+      expect((toolResults[0] as { output: string }).output).toBe("ran");
+    }
+  });
+
+  it("ls > out.txt 仍弹审批(重定向不直放)", async () => {
+    const { spy } = await runOnce("ls > out.txt");
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ls && rm x 仍弹审批(拼接不直放)", async () => {
+    const { spy } = await runOnce("ls && rm x");
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("台账:server 回调对只读命令 autoApprove 落 granted + reason=readonly-safe,无 pending", () => {
+    // 模拟 runs.ts requestApproval 回调的开头分支(§2.3)。
+    const repo = new ApprovalRepository(db);
+    const gateway = new ApprovalGateway(repo);
+
+    gateway.autoApprove(
+      "call-ro",
+      { runId: "run-1", sessionId: "s-1", tool: "bash", args: { command: "ls -la" } },
+      "readonly-safe"
+    );
+
+    const row = repo.getById("call-ro");
+    expect(row?.status).toBe("granted");
+    expect(row?.reason).toBe("readonly-safe");
+    expect(gateway.listPending("s-1")).toHaveLength(0);
+  });
+});

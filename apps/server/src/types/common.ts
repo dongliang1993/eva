@@ -12,6 +12,7 @@ import type { AgentFactory } from "../services/agent-factory.js";
 import type { Encryptor } from "../services/crypto/encryptor.js";
 import type { McpRegistry } from "../services/mcp/mcp-registry.js";
 import type { ApprovalGateway } from "../services/approval-gateway.js";
+import type { ApprovalPolicyStore } from "../services/approval-policy-store.js";
 import type { RunRegistry } from "../services/run-registry.js";
 import type { RunLedger } from "../services/runs/run-ledger.js";
 import type { SessionService } from "../services/session.js";
@@ -33,6 +34,7 @@ export interface AppServices {
   agents: AgentFactory;
   session: SessionService;
   approvals: ApprovalGateway;
+  approvalPolicies: ApprovalPolicyStore;
   runLedger: RunLedger;
   runRegistry: RunRegistry;
   workspaces: WorkspaceStore;

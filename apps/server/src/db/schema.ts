@@ -274,7 +274,9 @@ export const approvalRequests = sqliteTable(
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),
-    decidedAt: text("decided_at")
+    decidedAt: text("decided_at"),
+    /** T28:这次决策是谁做的 —— policy:<key> / stale-restart / 未来 readonly-safe;NULL = 用户手批。 */
+    reason: text("reason")
   },
   (table) => [
     index("idx_approval_requests_session").on(table.sessionId),

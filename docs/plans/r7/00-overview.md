@@ -59,10 +59,19 @@
 | **T28** | [`T28-gateway-policy-shortcircuit.md`](./T28-gateway-policy-shortcircuit.md) | 放行链接入 `runs.ts` 的 `requestApproval`（`emit approval_request` 之前短路）+ `approvalPolicies` service（policyStore）+ `approval_requests` 加 `reason` 列 + 台账标 `policy:<key>` | 0.5 天 | T27 |
 | **T29** | [`T29-bash-readonly-direct.md`](./T29-bash-readonly-direct.md) | bash 只读命令直放：`isSafeReadOnlyCommand` + with-approval 短路 + 重定向/管道排除 | 0.5 天 | — |
 | **T30** | [`T30-approval-decision-writeback.md`](./T30-approval-decision-writeback.md) | 决策回写：SSE 事件扩 payload + decide 写消息 part + 前端卡片定格已决策态 | 0.5–1 天 | T28 |
+| **T31** | [`T31-retire-always-allow-tools.md`](./T31-retire-always-allow-tools.md) | 退役 `alwaysAllowTools`：「始终允许」改接 grant 路由（后端选精确 key）+ 设置页渲染 policies + 删字段 + 迁移「迁完即净」 | 0.5 天 | T27/T28 |
 
-> **落地记录**：（施工时回填 commit hash 与实测结论，对齐 R6 格式）
+> **落地记录**：T27 → 未 commit（policy-key.ts 纯函数 11 测试绿 + settings 三处增 `allowAlwaysPolicies` + 迁移函数 `migrateAlwaysAllowToolsToPolicies` 接 deps.ts；两个移除实验均按卡变红；487 测试全绿，唯一错误是基线就有的 `run-detach.test.ts` `ERR_HTTP_HEADERS_SENT` flake，与本任务无关）。
+>
+> **落地记录**：T28 → 未 commit（migration `0024_approval_reason.sql` + `approval_requests.reason` 列 + repository `decide` 可选 reason/`failStalePending` 标 `stale-restart` + 新增 `ApprovalPolicyStore`（settings 缓存 + `grant` 整块写回）+ `runs.ts` requestApproval 在 `emit approval_request` **之前**短路（autoApprove 标 `policy:<key>`）+ `AppServices.approvalPolicies` 装配；`tests/approval-policy.test.ts` 10 绿；移除实验：摘短路段 → 转红（补了「短路在 emit 之前」源码钉线用例）、摘 reason 透传 → 3 红，均已恢复）。
+>
+> **落地记录**：T29 → 未 commit（`packages/harness/src/tools/safe-readonly.ts` `isSafeReadOnlyCommand` 纯函数：先否决形态（`>`/`| tee`/`| sh`/`&&`/`;`/反引号/`$(`/`sudo`）再白名单准入（单词命令 + `git status|log|diff` 双词 + `find` 排 `-delete`/`-exec`）；`withApproval` execute 对 bash 短路直放；`runs.ts` requestApproval 开头只读直放落台账 reason=`readonly-safe`；`tests/safe-readonly.test.ts` 37 绿 + approval-flow T29 describe 5 绿；移除实验：摘 withApproval 短路 → 2 红、白名单恒 true → 2 红，均已恢复）。
+>
+> **落地记录**：T30 → 未 commit（shared 增 `ApprovalDecision` + `approval_resolved` 帧带 `decision`；`AssistantMessageRecorder` 构造加 `lookupDecision`、finish 落库前回写 `toolMetadata.approvalDecision`（不动 part.state）；`ApprovalGateway.getRequest`；`runs.ts` 装配 + 帧补 decision（与台账同源）；前端 `useApprovals` 增 `resolved` 定格态（决策不再即删）、`approval-card` 定格渲染、`toolPartToInfo` 带形状守卫透传 + `tool-call-block` 恢复行徽标 + chat-view/chat-page 接线；`tests/approval-decision-writeback.test.ts` 4 绿；移除实验：finish 回写恒 undefined → 2 红、帧摘 decision → 1 红，均已恢复）。**未做**：gateway `onResolved` 回调（卡片 §2.3 说「二选一」，落地取了 runs.ts 帧补 payload 这一支，abort 路径的即时定格靠 cancelByRun 落 denied + finish 回写覆盖）。
+>
+> **落地记录**：T31 → 未 commit（退役 `alwaysAllowTools` 第二个事实源。新增 `POST /api/v1/approval-policies/grant`（`routes/approval-policies.ts`，后端 `buildPolicyKeys` 选精确 key `keys[0]` 再 `approvalPolicies.grant`，destructive/未知返 `{key:null}`）注册进 `routes/index.ts`；`chat-page` 的 `enableAutoApprove` 换成 `grantApprovalPolicy`（从 `sessionIdRef` 读当前 sessionId），`useApprovals.allowAlways` 签名改 `(tool, args)`；`security-settings` 改渲染/删除 `allowAlwaysPolicies`（移除 = settings 整块写回，无独立 revoke 端点）；`shared/index.ts`/`app-settings.ts`/`settings.ts` zod/`runs.ts` 放行链第一道全删字段；`migrateAlwaysAllowToolsToPolicies` 「迁完即净」（不再写 `alwaysAllowTools: []`，键直接剔除）；`tests/always-allow-retire.test.ts` 10 绿 + `settings-migration.test.ts` 5 处断言改读原始 security 行）。E2E 实测坑的修复：**此前**「始终允许 bash」把整个 bash 工具全域放行（所有 thread 所有命令），现在只记 `bash:thread:<id>:command:<cmd>`，换 thread/换命令照弹。
 
-**顺序建议**：T27 先（策略模型是地基，T28 依赖它的 key 生成与存储）→ T28 次之（放行链接入）→ T29 / T30 可并行（T29 在 harness 工具层、T30 在 server+web，无文件交集；T30 依赖 T28 的 gateway 接口形态）。串行最稳：T27 → T28 → T29 → T30。
+**顺序建议**：T27 先（策略模型是地基，T28 依赖它的 key 生成与存储）→ T28 次之（放行链接入）→ T29 / T30 可并行（T29 在 harness 工具层、T30 在 server+web，无文件交集；T30 依赖 T28 的 gateway 接口形态）→ T31 殿后（依赖 T27/T28 的 grant 与 key）。串行最稳：T27 → T28 → T29 → T30 → T31。
 
 ### 2.1 明确不做（对齐 22 §6）
 

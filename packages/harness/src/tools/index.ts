@@ -11,6 +11,7 @@ export * from "./build-json-schema-tool.js";
 export * from "./concurrency-cap.js";
 export * from "./with-approval.js";
 export * from "./risk.js";
+export * from "./safe-readonly.js";
 export * from "./fs/index.js";
 export * from "./memory/index.js";
 export * from "./web-fetch/index.js";

@@ -118,8 +118,8 @@ export interface AppSettings {
   };
   security: {
     logLevel: "error" | "warn" | "info" | "debug";
-    /** 免审批的工具名。空数组 = 每个危险工具都要问。 */
-    alwaysAllowTools: readonly string[];
+    /** thread 作用域 policy key 列表(T27)。命中即免审批,形态见 harness buildPolicyKeys。 */
+    allowAlwaysPolicies: readonly string[];
   };
 }
 

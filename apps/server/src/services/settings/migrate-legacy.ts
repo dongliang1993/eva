@@ -166,3 +166,56 @@ export const migrateSecurityToAlwaysAllowTools = (
     );
   }
 };
+
+/**
+ * T27 一次性迁移:全局 per-tool 白名单 → thread 作用域 policy key。
+ *
+ * 旧 `alwaysAllowTools` 是「整工具 × 全局」——点一次「始终允许 bash」就把所有会话的
+ * 所有 bash 命令永久放开。新形态是 Alma 的 thread 作用域 policy key(22 §3.1)。
+ * 旧白名单不知道用户想在哪个会话放哪条命令,只能折成显式全局兜底 `thread:global`。
+ * 迁移标志:`security` 行里已含 `allowAlwaysPolicies` 字段(幂等,无论空数组还是列表)。
+ */
+export const migrateAlwaysAllowToolsToPolicies = (
+  db: AppDatabase,
+  logger: InfoLogger
+): void => {
+  const security = readBlock(db, "security");
+  if (!security) return;
+
+  // 幂等:已经迁过(存在 allowAlwaysPolicies)就不再动,也不清空 alwaysAllowTools。
+  if ("allowAlwaysPolicies" in security) return;
+
+  const oldList = Array.isArray(security.alwaysAllowTools)
+    ? security.alwaysAllowTools.filter((t): t is string => typeof t === "string")
+    : [];
+
+  const toPolicyKey = (tool: string): string | undefined => {
+    if (tool === "bash" || tool === "write" || tool === "edit") {
+      return `${tool}:thread:global:all`;
+    }
+    if (tool.startsWith("mcp__")) {
+      // 旧白名单只到整工具,不知道用户想放哪个具体工具 → 折成整域。
+      return "mcp:thread:global:all";
+    }
+    return undefined; // 无法识别的条目跳过,不臆造
+  };
+
+  const policies = [...new Set(oldList.map(toPolicyKey).filter((k): k is string => !!k))];
+
+  // 先删旧行再插入;T31 迁完即净 —— security 只留 logLevel + policies,
+  // 不再残留 alwaysAllowTools 这个键(退役第二个事实源)。
+  const { alwaysAllowTools: _retired, ...rest } = security;
+  void _retired;
+  db.delete(settings).where(eq(settings.key, "security")).run();
+  db.insert(settings).values({
+    key: "security",
+    value: JSON.stringify({ ...rest, allowAlwaysPolicies: policies })
+  }).run();
+
+  if (policies.length > 0) {
+    logger.warn(
+      { allowAlwaysPolicies: policies },
+      "安全设置迁移:全局白名单已折成 thread 作用域 policy key(thread:global 兜底),原白名单已清空"
+    );
+  }
+};

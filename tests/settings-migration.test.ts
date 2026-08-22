@@ -8,6 +8,7 @@ import {
 } from "../apps/server/src/db/index.js";
 import { loadAppSettings } from "../apps/server/src/services/settings/app-settings.js";
 import {
+  migrateAlwaysAllowToolsToPolicies,
   migrateLegacySettings,
   migrateSecurityToAlwaysAllowTools
 } from "../apps/server/src/services/settings/migrate-legacy.js";
@@ -37,6 +38,14 @@ afterEach(() => {
 });
 
 const config = { LOG_LEVEL: "info", PORT: 8082, HOST: "127.0.0.1", DB_PATH: "" } as never;
+
+/** 读 settings 里 security 块的原始 JSON(T31 后 loadAppSettings 已不再带 alwaysAllowTools)。 */
+const rawSecurity = (): Record<string, unknown> => {
+  const row = rawClient().prepare("SELECT value FROM settings WHERE key = 'security'").get() as
+    | { value: string }
+    | undefined;
+  return row ? (JSON.parse(row.value) as Record<string, unknown>) : {};
+};
 
 describe("migrateLegacySettings", () => {
   it("旧字段 → tool/embedding 槽位对得上,chat.defaultModel 不再进 models", () => {
@@ -113,8 +122,8 @@ describe("migrateSecurityToAlwaysAllowTools (T14)", () => {
 
     migrateSecurityToAlwaysAllowTools(db, silentLogger);
 
-    const migrated = loadAppSettings(db, config);
-    expect(migrated.security.alwaysAllowTools).toEqual(["bash", "write", "edit"]);
+    // T31:alwaysAllowTools 已从 AppSettings 退役,读原始行断言(T14 迁移仍写它,供 T27 接力)。
+    expect(rawSecurity().alwaysAllowTools).toEqual(["bash", "write", "edit"]);
     // 旧开关不再出现在持久化结构里
     const securityRow = rawClient()
       .prepare("SELECT * FROM settings WHERE key = 'security'")
@@ -127,8 +136,7 @@ describe("migrateSecurityToAlwaysAllowTools (T14)", () => {
 
     migrateSecurityToAlwaysAllowTools(db, silentLogger);
 
-    const migrated = loadAppSettings(db, config);
-    expect(migrated.security.alwaysAllowTools).toEqual([]);
+    expect(rawSecurity().alwaysAllowTools).toEqual([]);
   });
 
   it("幂等:已含 alwaysAllowTools 则不动(即使旧开关还在)", () => {
@@ -141,14 +149,72 @@ describe("migrateSecurityToAlwaysAllowTools (T14)", () => {
 
     migrateSecurityToAlwaysAllowTools(db, silentLogger);
 
-    const migrated = loadAppSettings(db, config);
     // 幂等:保持原来白名单,不被旧 true 覆盖成三个工具
-    expect(migrated.security.alwaysAllowTools).toEqual(["write"]);
+    expect(rawSecurity().alwaysAllowTools).toEqual(["write"]);
   });
 
   it("无 security 块 → 不崩", () => {
     migrateSecurityToAlwaysAllowTools(db, silentLogger);
+    expect(rawSecurity().alwaysAllowTools).toBeUndefined();
+  });
+});
+
+describe("migrateAlwaysAllowToolsToPolicies (T27)", () => {
+  it("旧白名单 bash/write → thread:global 条目,且旧字段清空", () => {
+    writeLegacyBlock("security", { logLevel: "info", alwaysAllowTools: ["bash", "write"] });
+
+    migrateAlwaysAllowToolsToPolicies(db, silentLogger);
+
     const migrated = loadAppSettings(db, config);
-    expect(migrated.security.alwaysAllowTools).toEqual([]);
+    expect(migrated.security.allowAlwaysPolicies).toEqual(
+      expect.arrayContaining(["bash:thread:global:all", "write:thread:global:all"])
+    );
+    // T31 迁完即净:旧字段不再残留(不是清空,是连键都不留)。
+    expect("alwaysAllowTools" in rawSecurity()).toBe(false);
+  });
+
+  it("mcp 旧条目折成整域 mcp:thread:global:all(不逐工具展开)", () => {
+    writeLegacyBlock("security", { logLevel: "info", alwaysAllowTools: ["mcp__github__x"] });
+
+    migrateAlwaysAllowToolsToPolicies(db, silentLogger);
+
+    const migrated = loadAppSettings(db, config);
+    expect(migrated.security.allowAlwaysPolicies).toEqual(["mcp:thread:global:all"]);
+  });
+
+  it("幂等:已含 allowAlwaysPolicies 字段则不动(哪怕空数组)", () => {
+    writeLegacyBlock("security", {
+      logLevel: "info",
+      alwaysAllowTools: ["bash"],
+      allowAlwaysPolicies: ["bash:thread:t1:command:npm test"]
+    });
+
+    migrateAlwaysAllowToolsToPolicies(db, silentLogger);
+
+    const migrated = loadAppSettings(db, config);
+    // 不动既有 policies,也不清空 alwaysAllowTools(幂等 = 整体跳过)
+    expect(migrated.security.allowAlwaysPolicies).toEqual(["bash:thread:t1:command:npm test"]);
+  });
+
+  it("含无法识别条目 → 跳过该条、其余照迁", () => {
+    writeLegacyBlock("security", {
+      logLevel: "info",
+      alwaysAllowTools: ["bash", "unknown_thing", "edit"]
+    });
+
+    migrateAlwaysAllowToolsToPolicies(db, silentLogger);
+
+    const migrated = loadAppSettings(db, config);
+    expect(migrated.security.allowAlwaysPolicies).toEqual(
+      expect.arrayContaining(["bash:thread:global:all", "edit:thread:global:all"])
+    );
+    // 无法识别的不臆造
+    expect(migrated.security.allowAlwaysPolicies.some((k) => k.includes("unknown_thing"))).toBe(false);
+  });
+
+  it("无 security 块 → 不崩,默认空", () => {
+    migrateAlwaysAllowToolsToPolicies(db, silentLogger);
+    const migrated = loadAppSettings(db, config);
+    expect(migrated.security.allowAlwaysPolicies).toEqual([]);
   });
 });

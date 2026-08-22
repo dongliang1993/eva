@@ -5,6 +5,7 @@ export * from "./agents/observer.js";
 export * from "./agents/repair-tool-call.js";
 export * from "./agents/stream-part-mapper.js";
 export * from "./agents/types.js";
+export * from "./approval/policy-key.js";
 export * from "./constants.js";
 export * from "./context/policy.js";
 export * from "./models/agent-model.js";

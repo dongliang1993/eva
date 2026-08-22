@@ -1,12 +1,14 @@
 import { ShieldAlert, ShieldCheck, Check, X, Sparkles } from "lucide-react";
 
-import type { ToolRiskLevel } from "@eva/shared";
+import type { ApprovalDecision, ToolRiskLevel } from "@eva/shared";
 import type { PendingApproval } from "../api";
 
 interface ApprovalCardProps {
   readonly approval: PendingApproval;
   readonly onDecide: (callId: string, allowed: boolean) => void;
   readonly onAllowAlways: (callId: string) => void;
+  /** T30:已决策的定格态 —— 有值时渲染「已允许/已拒绝 · 时间」,隐藏按钮。 */
+  readonly resolved?: ApprovalDecision;
 }
 
 const summarizeArgs = (args: Record<string, unknown>, tool: string): string => {
@@ -46,12 +48,20 @@ const levelStylize = (
 export function ApprovalCard({
   approval,
   onDecide,
-  onAllowAlways
+  onAllowAlways,
+  resolved
 }: ApprovalCardProps) {
   const { level, reasons } = approval.risk;
   const style = levelStylize(level);
   const RiskIcon = style.icon;
   const destructive = level === "destructive";
+
+  // T30 定格态:决策时间 HH:MM(decidedAt 与 approval_requests.decidedAt 同源)。
+  const decidedLabel = resolved
+    ? `${resolved.action === "granted" ? "已允许" : "已拒绝"} · ${
+      new Date(resolved.decidedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    }`
+    : null;
 
   return (
     <div className={`my-3 max-w-[60%] rounded-md border p-3 ${style.border} ${style.bg}`}>
@@ -93,33 +103,49 @@ export function ApprovalCard({
           </pre>
 
           <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded bg-destructive/90 px-2.5 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive"
-              onClick={() => onDecide(approval.callId, false)}
-            >
-              <X size={12} />
-              拒绝
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
-              onClick={() => onDecide(approval.callId, true)}
-            >
-              <Check size={12} />
-              允许一次
-            </button>
-            {/* destructive 不给「始终允许」:能 rm -rf 的工具不该有"以后别问了"。 */}
-            {!destructive ? (
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
-                onClick={() => onAllowAlways(approval.callId)}
+            {decidedLabel ? (
+              // T30:决策后定格 —— 隐藏三个按钮,只留结论 + 时间。
+              <span
+                className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ${
+                  resolved?.action === "granted"
+                    ? "bg-primary/10 text-primary"
+                    : "bg-destructive/10 text-destructive"
+                }`}
               >
-                <Sparkles size={12} />
-                始终允许 {approval.tool}
-              </button>
-            ) : null}
+                {resolved?.action === "granted" ? <Check size={12} /> : <X size={12} />}
+                {decidedLabel}
+              </span>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded bg-destructive/90 px-2.5 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive"
+                  onClick={() => onDecide(approval.callId, false)}
+                >
+                  <X size={12} />
+                  拒绝
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
+                  onClick={() => onDecide(approval.callId, true)}
+                >
+                  <Check size={12} />
+                  允许一次
+                </button>
+                {/* destructive 不给「始终允许」:能 rm -rf 的工具不该有"以后别问了"。 */}
+                {!destructive ? (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
+                    onClick={() => onAllowAlways(approval.callId)}
+                  >
+                    <Sparkles size={12} />
+                    始终允许 {approval.tool}
+                  </button>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
       </div>

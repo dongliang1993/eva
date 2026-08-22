@@ -1,4 +1,5 @@
 import type {
+  ApprovalDecision,
   EvaDynamicToolPart,
   RunAgentStreamEvent,
   RunApprovalRequestEvent,
@@ -20,6 +21,8 @@ export interface ToolCallInfo {
   readonly output?: string;
   readonly status?: "success" | "error";
   readonly durationMs?: number;
+  /** T30:审批决策(刷新恢复路径的事实源,来自 part.toolMetadata)。 */
+  readonly approvalDecision?: ApprovalDecision;
 }
 
 export interface StreamCallbacks {
@@ -54,20 +57,34 @@ export interface StreamRequest {
  * 把 dynamic-tool part 派生成 ToolCallInfo —— 这样 tool-call-block.tsx 不用动。
  * T3 会把 tool-call-block 改成直接消费 part,届时本适配器移除。
  */
-export const toolPartToInfo = (part: EvaDynamicToolPart): ToolCallInfo => ({
-  toolName: part.toolName,
-  toolCallId: part.toolCallId,
-  args: (part.input as Record<string, unknown>) ?? {},
-  ...(part.state === "output-available" || part.state === "output-error"
-    ? {
-      output: toolPartOutput(part),
-      status: part.state === "output-error" ? ("error" as const) : ("success" as const)
-    }
-    : {}),
-  ...(typeof part.toolMetadata?.durationMs === "number"
-    ? { durationMs: part.toolMetadata.durationMs }
-    : {})
-});
+export const toolPartToInfo = (part: EvaDynamicToolPart): ToolCallInfo => {
+  // T30:toolMetadata 是宽松 JSONValue,读端必须做形状守卫(坑 2)—— 历史脏数据/旧
+  // 消息里 approvalDecision 可能是任意形状,不能盲信它是 {action, decidedAt}。
+  const rawDecision: unknown = part.toolMetadata?.approvalDecision;
+  const approvalDecision =
+    typeof rawDecision === "object" && rawDecision !== null
+    && ((rawDecision as ApprovalDecision).action === "granted"
+      || (rawDecision as ApprovalDecision).action === "denied")
+    && typeof (rawDecision as ApprovalDecision).decidedAt === "string"
+      ? (rawDecision as ApprovalDecision)
+      : undefined;
+
+  return {
+    toolName: part.toolName,
+    toolCallId: part.toolCallId,
+    args: (part.input as Record<string, unknown>) ?? {},
+    ...(part.state === "output-available" || part.state === "output-error"
+      ? {
+        output: toolPartOutput(part),
+        status: part.state === "output-error" ? ("error" as const) : ("success" as const)
+      }
+      : {}),
+    ...(typeof part.toolMetadata?.durationMs === "number"
+      ? { durationMs: part.toolMetadata.durationMs }
+      : {}),
+    ...(approvalDecision ? { approvalDecision } : {})
+  };
+};
 
 /**
  * Parse SSE lines from a text buffer.

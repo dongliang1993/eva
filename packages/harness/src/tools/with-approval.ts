@@ -1,4 +1,5 @@
 import type { AgentTool } from "./build-tool.js";
+import { isSafeReadOnlyCommand } from "./safe-readonly.js";
 import type { RequestApproval } from "../agents/types.js";
 
 export const APPROVAL_DENIED_PREFIX = "[Approval Denied]";
@@ -35,6 +36,15 @@ export const withApproval = (
     tool: {
       ...inner,
       execute: async (input: unknown, options) => {
+        // T29:bash 只读命令直放,不进审批(docs/plans/r7/T29 §2.2)。
+        // 判定与 server 台账(runs.ts)共用同一个 isSafeReadOnlyCommand,不会漂移。
+        if (agentTool.name === "bash") {
+          const cmd = (input as Record<string, unknown>)?.command;
+          if (typeof cmd === "string" && isSafeReadOnlyCommand(cmd)) {
+            return innerExecute(input as never, options);
+          }
+        }
+
         const approved = await requestApproval({
           toolName: agentTool.name,
           toolCallId: options.toolCallId,

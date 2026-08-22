@@ -14,6 +14,8 @@ export interface ApprovalRequestRow {
   readonly status: ApprovalStatus;
   readonly createdAt: string;
   readonly decidedAt: string | null;
+  /** T28:决策来源(policy:<key>/stale-restart/...),NULL = 用户手批。 */
+  readonly reason: string | null;
 }
 
 export interface CreateApprovalInput {
@@ -59,7 +61,8 @@ export class ApprovalRepository {
       args: row.args,
       status: row.status as ApprovalStatus,
       createdAt: row.createdAt,
-      decidedAt: row.decidedAt
+      decidedAt: row.decidedAt,
+      reason: row.reason
     };
   }
 
@@ -74,19 +77,25 @@ export class ApprovalRepository {
   failStalePending(): number {
     const result = this.db
       .update(approvalRequests)
-      .set({ status: "denied", decidedAt: new Date().toISOString() })
+      .set({ status: "denied", decidedAt: new Date().toISOString(), reason: "stale-restart" })
       .where(eq(approvalRequests.status, "pending"))
       .run();
 
     return result.changes;
   }
 
-  decide(id: string, status: Extract<ApprovalStatus, "granted" | "denied">): void {
+  decide(
+    id: string,
+    status: Extract<ApprovalStatus, "granted" | "denied">,
+    reason?: string
+  ): void {
     this.db
       .update(approvalRequests)
       .set({
         status,
-        decidedAt: new Date().toISOString()
+        decidedAt: new Date().toISOString(),
+        // T28:reason 是决策时的产物(policy:/stale-restart/readonly-safe),不传不动该列。
+        ...(reason !== undefined ? { reason } : {})
       })
       .where(eq(approvalRequests.id, id))
       .run();

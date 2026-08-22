@@ -169,6 +169,13 @@
       "when": 1787400000000,
       "tag": "0023_usage_records",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1787500000000,
+      "tag": "0024_approval_reason",
+      "breakpoints": true
     }
   ]
 }

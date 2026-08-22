@@ -1,4 +1,4 @@
-import type { EvaUIMessage } from "@eva/shared";
+import type { ApprovalDecision, EvaUIMessage } from "@eva/shared";
 
 import type { PendingApproval } from "../api";
 import { useWorkspaces } from "../../workspaces/hooks/use-workspaces";
@@ -21,6 +21,8 @@ interface ChatViewProps {
   readonly onSelectWorkspace: (workspaceId: string | null) => void;
   readonly sessionId: string | null;
   readonly pendingApprovals?: readonly PendingApproval[];
+  /** T30:本次会话内刚决策的定格态(callId → 决策)。 */
+  readonly resolvedApprovals?: Readonly<Record<string, ApprovalDecision>>;
   readonly onApproveOnce?: (callId: string) => void;
   readonly onDeny?: (callId: string) => void;
   readonly onAllowAlways?: (callId: string) => void;
@@ -41,6 +43,7 @@ export function ChatView({
   onSelectWorkspace,
   sessionId,
   pendingApprovals,
+  resolvedApprovals,
   onApproveOnce,
   onDeny,
   onAllowAlways,
@@ -74,6 +77,9 @@ export function ChatView({
             approval={approval}
             onDecide={(callId, allowed) => (allowed ? onApproveOnce?.(callId) : onDeny?.(callId))}
             onAllowAlways={(callId) => onAllowAlways?.(callId)}
+            {...(resolvedApprovals?.[approval.callId]
+              ? { resolved: resolvedApprovals[approval.callId] }
+              : {})}
           />
         </div>
       ))}
