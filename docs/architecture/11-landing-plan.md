@@ -243,14 +243,15 @@
 ## 5. Phase D · 成品（1 周 + 持续）
 
 ### S11 · 桌面化补完（持续）
-**做**：electron-updater（GitHub Releases 起）+ 托盘 + 全局快捷键 + 深链 `myagent://` + 单实例锁 + WS 全双工改造（SSE→WS 主动推送）。
+> **v2 修订（2026-08-21）**：深链协议名 `myagent://` → `eva://`（对齐 15 篇）；删去「WS 全双工改造」（SSE 已够用）；单实例锁已在 r3 T11 Step 6 完成（移出待办）。**最新任务定义以 15 篇 §S11 为准**，施工拆分到 `docs/plans/r8/`（T32–T35）。
+**做**：electron-updater（GitHub Releases 起）+ 托盘 + 全局快捷键 + 深链 `eva://` + 窗口状态记忆 + 自启动 + 安全收口（CSP + loopback token）。（单实例锁 ✅ T11 已做）
 **验收**：
 - [ ] 打 dmg 能装；启动后检查更新能拉到新版本
 - [ ] 托盘 + Alt+Space 唤起主窗
-- [ ] 深链 `myagent://thread/xxx` 能跳转
-- [ ] 单实例：第二次启动聚焦已有窗口
-- **文档**：02 §4 / §6 / §9.6 / §9.8
-- **坑**：mac 未签名包 checkForUpdates 静默失败（02 §9.6）；open-url 可能早于 ready（02 §9.8）；will-quit 注销快捷键
+- [ ] 深链 `eva://thread/xxx` 能跳转
+- [x] 单实例：第二次启动聚焦已有窗口（T11 已完成）
+- **文档**：02 §4 / §6 / §9.6 / §9.8 + 21 §5/§6 + **施工卡：`docs/plans/r8/`（T32–T35）**
+- **坑**：mac 未签名包 checkForUpdates 静默失败（02 §9.6）；open-url 可能早于 ready（02 §9.8）；will-quit 注销快捷键；CSP 走 server 响应头不走 meta（Eva renderer 是 HTTP 托管，r8 §0.2 #2）
 
 ---
 
