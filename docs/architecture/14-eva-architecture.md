@@ -418,6 +418,8 @@ POST /api/v1/chat/completions                 OpenAI 兼容端点（供外部工
 
 【目标】对齐 Alma 四层 + WeaveLynx 纪律：
 
+> **v0.0.990 注**：下表「混合检索（向量 KNN + FTS5 两路召回，RRF 融合）」是 Eva 的目标设计，**不是抄 Alma**——Alma 的记忆检索是纯 vec0 KNN，从未做混合检索（13 篇修订框已证伪旧参照系）。Eva 这条设计**领先于 Alma**，保留。另外 Alma 的 embedding 维度在 v0.0.990 默认翻到 1536（云端 text-embedding-3-small），本地 384 维降级为可选项；Eva 坚持「embedding 本地化、不做云端默认路径」（§15 第 5 条）**不跟 Alma 走**，维持 384d 本地。
+
 | 层 | 载体 | 注入/检索 |
 |---|---|---|
 | L1 长时记忆 | `MEMORY.md`（+ `SOUL.md` 人格） | 会话开始全文注入 |

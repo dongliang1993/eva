@@ -4,6 +4,15 @@
 > 证据基础：对 Alma 主进程 bundle（asar 解包后 grep）、SQLite schema、`/api/*` 实测路由、`~/Library/Application Support/alma/` 文件布局的 134 步分析。
 > 标注规则：【实证】= bundle/schema/路由直接命中；【推测】= 基于实证 + AI SDK 通行做法的合理还原。
 
+> **v0.0.990 修订（2026-08-21）**：本篇 §8 的 loop 主干（AI SDK `streamText` + `stopWhen` 驱动、WS `generate_response` 入口、UIMessage 整包落库）在 v0.0.990 **仍成立**，但围绕它新增了四块硬机制，本篇对应小节未覆盖，详见 **16/19/20 篇**：
+>
+> - **`prepareStep` 三路干预**（`main.readable.js:90674-90824`，本篇 §6.2 只记录到事后 compact）：① ToolSearch 动态激活——上一步 ToolSearch 结果的 `output.tools[].id` 并入后续步骤 `activeTools`（日志 `[ToolSearch:prepareStep] Dynamically activated tools:`，`:90698`）；② Gemini AttemptCompletion 提醒——已调非收尾工具但未收尾时注入 system-reminder，上限 3 次（`:90714`）；③ AutoCompact 主动压缩——步中检测 `usage` 溢出当场压缩（`aA()` 判定：有效输入 + output > contextWindow − min(maxOutput, 32000)，目标压到 60% 窗口，日志 `[AutoCompact:prepareStep]`，`:90740`）。`streamText` 选项另增 `allowSystemInMessages: !0` 与 `repairToolCall: Pg`（`:90608-90612` 同一 options 对象内）。
+> - **统一审批中心**（本篇 §5 的「危险工具审批 + 子代理自动批准」已重构）：所有审批走单个 `Sy()` 函数（约 `:27880-28200`），IPC 通道 `tool-approval-dialog-show`（`:28144`）/ `tool-approval-dialog-respond`（`:27924`），决策枚举 `allow_once | allow_always | deny | deny_with_reason`；**超时自动拒绝**（上限 120s）；自动放行链七级成文（headless 环境变量 → 全局 autoApprove → `isSubagent` 子代理直放 → 渠道/群组 → 渠道 thread 映射 → cron 线程 → allow_always 记忆）。**bash 审批前置 AI 风险分析器**：本地规则快判 + 小模型二级判定（指令原文 `:33131`，枚举 safe/需批命令清单，返回 `{needsPermission, description, riskLevel: safe|low|medium|high, mightModifyFiles}`，弹窗 `source: "bash"` 在 `:33536`）。`allow_always` 是 **thread 作用域 policy key**：`bash:thread:<id>:command:<完整命令>` / `...:all`、`acp:thread:<id>:tool:<kind|toolName>`、`ptc:thread:<id>:all`（`:28080-28100`）。
+> - **`run_script` 沙箱化 PTC（Programmatic Tool Calling）**：由 `injectPtcExecutor` 动态注入（`:82023`，settings `advanced.programmaticToolCalling` 默认开），沙箱 preamble 提供 `almaTool/listTools/sh/alma` 四原语，工具回调走 `POST /api/tools/invoke` + 每会话 token；中间结果留在沙箱不进上下文，返回注记原文含 `N tool result(s) (~X tokens) stayed in the sandbox`（`:82156` 附近）。详见 19/20 篇。
+> - **子代理 TaskManager 持久化可 resume**：任务从纯内存改为落盘 `~/.config/alma/tasks/tasks.json` + `logs/<taskId>.jsonl`（`:25868`），进程重启时僵尸任务标 `completed` 并可 `autoResumeInterruptedSubagents` 自动续跑（`:94777`）；REST 侧 `POST /api/agents/tasks/:taskId/resume` → `resumeSubagentTaskById`（`:94522`，取末尾 ≤40 条/≤20000 字符历史重建 prompt）。DB 侧另有 `agent_runs` 表（`:908` drizzle 定义，`:2757` SQL 原文）支撑 harness/sprint 结构化交接。详见 20 篇。
+>
+> 另：本篇 §6.1 的 prompt 组装顺序在 v0.0.990 扩展出 SECURITY.md 覆盖层、emotions/fatigue/travel/selfie/people 五个拟人化段、`<available_skills>`/notification_protocol/deep_links/managed_agent_catalog 四个协议段，anthropic 系还在 `SYSTEM INFO` 行处把 system 切成两条做 prompt cache（`:90462-90488`）——新顺序见 20 篇。
+
 ---
 
 ## 1. 模型适配层（Provider 抽象 / 配置结构 / 流式管线）

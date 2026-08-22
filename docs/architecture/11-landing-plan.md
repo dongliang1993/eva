@@ -1,5 +1,7 @@
 # 11 · 落地计划：one-by-one 任务拆分
 
+> **v2 修订（2026-08-21）**：本篇已被按 Alma v0.0.990 调研（16–21 篇）重排并补充 v2 增量任务（§3.5 S18–S24）。当前真实进度见 15 篇 §1 进度总览——S0/S1/S1.1/S2/S3/S5/S8 ✅、S4 主体 ⚙️、记忆/compact 超预期。**剩余关键路径：`S4收尾(S18) → S19 → S7 → S6 → S9 → S11`**（S8 已完成移出；S7 提前因为它欠债最少 + v2 规格最新鲜；S6 最重放后面）。§2–§5 是 v1 原始切片定义（仍有效，作每个 S 的「做什么/验收/文档」基准），进度状态以 15 篇 §1 为准。
+
 > 本篇是整个系列的「施工总表」。把 06 篇的 M1–M6 体系和 09/10 篇末尾的 S0–S13 体系**统一到 S 体系**（06 的 M 体系以 Alma 记忆/人格为重心，与本地编码平台目标错位，不再使用，仅在 §0 保留对照）。
 > 三个已定决策（影响全篇，先固化）：
 > - **本地优先**：SQLite + Markdown 文件，服务端/Gateway 预留接口缝，不上服务端 DB。
@@ -102,6 +104,7 @@
 
 ### S4 · 工具 + Agent loop + 审批（3–4 天）
 **做**：Read/Write/Edit/Bash + `stopWhen: stepCountIs(N)` + tool-overflow + 危险工具审批闸门。
+> **v2 收尾见 §3.5 S18/S19**：审批中心升级（thread 作用域 policy key + bash 本地规则分级）归 S18，步中 AutoCompact + 工具数安全网归 S19。
 **验收**：
 - [ ] 说「在我工作区建 hello.txt 写首诗」→ 真建了
 - [ ] Bash/Write/Edit 执行前弹审批，用户点允许才执行
@@ -127,6 +130,7 @@
 
 ### S6 · 扩展宿主 + 槽位（1–2 周）
 **做**：manifest/exposes.json + zod 校验 + EH（loader/registry/context）+ 4 槽位容器 + webview SDK bridge + agentPlugin 注入。新建 `slots/` + `features/extension-host/`（10 §5）。
+> **v2 暖场见 §3.5 S24**：可先花 1 天做文件型 hooks（Alma hooks.json，约 200 行）当 S6 的能力槽低配前奏，降低 S6 空手启动的难度。
 **验收**（09 §11 拆三子切片）：
 - [ ] S6.1：hello-ext 的 appSidebar 槽位在侧栏渲染出组件；enable/disable 后出现/消失
 - [ ] S6.2：hello-ext 的 greet skill 在 `<available_skills>`；问 hello → agent 调 `hello_greet` 工具
@@ -137,6 +141,7 @@
 
 ### S7 · 子代理 + fork-join（1 周）
 **做**：Task/TaskOutput + run_in_background + resume + crew 注册表 + depth 限制 + 子代理关 parallelToolCalls。
+> **v2 增强见 §3.5**：Alma 的子代理持久化三件套（任务落 DB + 重启自动 resume + resume prompt 模板原文）直接抄，规格在 20 §3；崩溃补跑机制（09 修订框）也在这片一并做。
 **验收**：
 - [ ] 主 agent 并行 fork 3 个后台调研子代理，立即拿到 taskId
 - [ ] 逐个 TaskOutput(block:true) join，综合 3 份结论
@@ -157,10 +162,66 @@
 
 ---
 
+## 3.5 Phase B′ · v2 增量任务（S18–S24，承接 16 篇取舍）
+
+> 这批任务来自 Alma v0.0.990 调研（16–21 篇）的「值得抄」清单（16 §3.1）。它们不是新阶段，而是穿插进关键路径的增量补丁。**每个任务的「参考文档」都标到 v2 篇目的具体小节**——动手前先读那一节，规格都在那里。
+> 排序即建议施工顺序：`S18 → S19 → S7 → S24 → S6 → S9`。S20–S23 是低耦合小件，可穿插。
+
+### S18 · 审批中心升级（S4 收尾，0.5–1 天）⬅ 下一个就做
+**做**：把现有 approval-gateway 补齐到 Alma `Sy()` 形态的三个可抄点（不抄 120s 超时——14 §4.4 已定「永远等人」）：
+1. `allow_always` 改 **thread 作用域 policy key**：`bash:thread:<id>:command:<完整命令>` / `:all`、`mcp:thread:<id>:tool:<name>`。
+2. Bash 命令**本地规则快速分级**：安全命令枚举（ls/cat/grep…直放）vs 需批命令枚举（rm/curl|sh…必批），只抄 Alma 指令的本地规则前半段，小模型二审推迟。
+3. `approvalDecision={action, reason, decidedAt}` 回写消息 part 随流同步到前端。
+**验收**：
+- [ ] 同 thread 内「始终允许」某 bash 命令后，再次触发同命令不再弹审批；换 thread 仍弹
+- [ ] `ls -la` 类安全命令直放不弹；`rm -rf` / `curl x | sh` 必弹
+- [ ] 审批决策（含 reason）出现在消息 part 上，刷新后仍在
+**文档**：**22 篇（S18 技术方案，含现状盘点 + r7 施工拆分 T27–T30）** / 16 §3.1-3（取舍与边界）/ 04 修订框（Alma `Sy()` 七级放行链 + policy key 模板）/ 14 §4.4（不抄超时的理由）/ **施工卡：`docs/plans/r7/`（T27–T30）**
+
+### S19 · AutoCompact 步中压缩 + 工具数安全网（1–2 天）
+**做**：给 Eva 已有的 proactive/reactive compact 补两层 Alma 有的：
+1. **prepareStep 步中压缩**：多步工具循环中途 context 溢出当场压缩，不等 turn 结束。
+2. **上下文钳制学习**：模型报 token 超限就把它登记的 contextWindow 永久钳小（写 settings/model_capabilities）。
+3. 压缩产出格式借用 Alma 的 `<context_summary>` user 消息 + 「不要从头再来」system-reminder；摘要指令六段结构照抄。
+4. **工具数 >40 安全网**：activeTools 未显式设置时退化为最小集 + 记 warning（防 MCP 接入后工具爆炸）。
+**验收**：
+- [ ] 构造一个超 context 的多步工具任务，跑到中途能见到 context_compaction 事件且任务不中断
+- [ ] 某模型触发超限后，其 contextWindow 被钳小并持久化
+- [ ] 注册 >40 工具且未设 activeTools 时，日志出现退化 warning，实际生效工具为最小集
+**文档**：04 修订框（prepareStep 三路干预）/ 20 §compact / 16 §3.1-4,5 / 15 §2 compact 现状
+
+### S20 · usage_records 补全（0.5 天，可穿插）
+**做**：对齐 Alma 的 token 五元组——`cached_input / cache_write_input / reasoning` 分列（现有表补列）+ `GET /api/usage/stats` 聚合路由。
+**验收**：
+- [ ] 一次带 cache 的对话后，usage_records 行含 cached_input/cache_write_input/reasoning 非零值
+- [ ] `curl /api/usage/stats?days=7` 返回按模型/日期聚合的用量
+**文档**：18 §3 usage_records 表 SQL / 20 §15 / 14 §7.2
+
+### S21 · refs 引用图谱（推迟，S7+S9 后评估）
+**做**：`eva://` 全局对象寻址层——reference_links/reference_snippets 两表 + backlinks/graph 路由。**触发条件**：等 S9（git 对象）+ S7（task 对象）落地，kinds 能凑出 thread/message/file/task/mcp/skill ≥6 个再做，否则空转。
+**文档**：20 §7 / 18 §3 reference_links/snippets / 16 §3.3-1
+
+### S22 · auto-worktree 决策链（S9 后迭代）
+**做**：抄 Alma 的五步决策链——探测 remote 默认分支 → 建 worktree → 切线程 → LLM 改分支名 → 失败回退主工作区。依赖 S9 的 git 地基，故排其后。
+**文档**：20 §1（workspaces+git）/ 16 §3.1-1,§3.3-2
+
+### S23 · preview server（S9 后迭代）
+**做**：workspace 有「跑起来的东西」后，抄 Alma 五条路由（start/stop/status/detect/html-files）+ preview_servers 表 + 三档探测（bun-vite/bun-dev/static）。
+**文档**：20 §1 preview 段 / 18 §3 preview_servers 表 / 16 §3.3-3
+
+### S24 · hooks 文件型生命周期钩子（S6 前奏，~1 天）
+**做**：Alma hooks.json 形态——matcher 正则 + `sh -c` + exit 2 阻断，挂在工具事件上。作为 S6 扩展宿主的低配前奏（或就是 S6 的一个内置扩展），先覆盖「用户想在工具事件挂自定义逻辑」的 80% 场景。
+**验收**：
+- [ ] 写一个 hooks.json 在 PreToolUse 上对 Bash 做拦截，exit 2 能阻断工具执行并回传 stderr 给模型
+**文档**：16 §3.1-7 / 20 §16 hooks 小节 / 09（S6 全量设计，hooks 是其子集）
+
+---
+
 ## 4. Phase C · 编码工作流（2 周）
 
 ### S9 · Git review 面板（1 周）
 **做**：diff/commit/push/branch/worktree/MR。做成**一个扩展**挂 appSidebar + chatComposer，注册 git 命令。
+> **v2 规格见 §3.5 与 20 §1**：Alma workspaces 的 30 条 git 路由里只抄子集（status/stage/diff/commit/log/branches/generate-commit-message），不抄 rebase/stash/AI 解冲突/GitHub PR（Eva 对内 GitLab MR）。auto-worktree 决策链推迟到 S9 后迭代（16 §3.3-2）。
 **验收**：
 - [ ] 面板里看未提交 diff
 - [ ] 提交 + 推送 + 开 MR
@@ -225,22 +286,25 @@
 ## 8. 任务依赖图
 
 ```
-S0 ─┬─> S1 ─┬─> S2 ──> S3 ──> S4
-    │        │                   │
-    │        └───────────────────┴─> S5(Skill) ─┐
-    │                                          │
-    │                            S4 ──> S6(扩展宿主) ─┬─> S9(Git面板=S6验收扩展)
-    │                                          │     │
-    │                                          ├─> S7(子代理, 复用 shared/streaming)
-    │                                          │
-    │                                          └─> S8(MCP, 接 S6 mcp 槽)
-    │
-    └─> S11(桌面化，可与 A/B 并行后期做)
-                                         S10(Gateway) ← Phase C，独立
-                                         S12–S17(Phase E) ← 全独立，按需
+已完成：S0 S1 S1.1 S2(地基) S3 S5 S8 ── 记忆/compact 超预期
+
+剩余关键路径（v2 重排）：
+  S18(审批收尾) ──> S19(AutoCompact+安全网) ──> S7(子代理+崩溃补跑)
+                                                      │
+  S24(hooks 前奏) ──> S6(扩展宿主) ──> S9(Git面板=S6验收扩展)
+                                                      │
+                                              S22(auto-worktree)/S23(preview)  ← S9 后迭代
+  S21(refs)  ← 等 S7+S9 的对象凑齐 ≥6 kinds 再评估
+  S20(usage 补全)  ← 低耦合，任意穿插
+  S11(桌面化)  ← 可与 B/C 后期并行
+  S12–S17(Phase E)  ← 全独立，按需
 ```
 
-**关键路径**：S0 → S1 → S2 → S3 → S4 → S6 → S9。这是「能用 + 像平台」的最短路径。S5/S7/S8 可在 S6 后并行或穿插。
+**关键路径**：`S18 → S19 → S7 → S24 → S6 → S9 → S11`（v2 重排）。
+- **S18/S19 最先**：S4 遗留收尾 + 规格最新鲜，半天到两天，先清掉。
+- **S7 提前**：欠债最少（R1 摘掉的半成品）+ v2 子代理持久化规格最完整（20 §3 有 resume prompt 原文），比 S6 小，先拿下。
+- **S6 放后面**：最重（1–2 周），用 S24 hooks 暖场降低空手启动难度；S9 是它的验收扩展，紧随其后。
+- 旧 v1 关键路径 `S0→…→S4→S6→S9` 的前半段已完成，S8 提前完成移出，故重排。
 
 ---
 

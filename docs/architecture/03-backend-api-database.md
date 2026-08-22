@@ -5,6 +5,14 @@
 > 性质：**纯考古调研，未修改任何 Alma 系统文件或数据库**（所有 sqlite3 均用 `-readonly`，所有 curl 均为 GET）。
 > 每条结论后标注【证据】；无法确证的标注【推测】。
 
+> **v0.0.990 修订（2026-08-21）**：本篇主干结论（Express 5 内嵌主进程、`chat_threads.db` 单库 WAL、better-sqlite3 + drizzle + sqlite-vec、消息版本树 `parent_id/slot_id/depth`）在 v0.0.990 **全部仍成立**，但规模数字与协议细节已过期：
+>
+> - **路由规模**：本篇 §1.2 的「404 条路由」已增至 **497 个注册点**（`/tmp/alma-extract/routes-all.txt` 分组计数）。新增组：workspaces 扩到 64 条（含 git 全套 30 条 + PR + AI 解冲突）、iab 32 条、computer-use 30 条、refs 21 条、activity-recorder 18 条、memories 增 sleep/* 系列、plan/plan-mode、prompt-apps、people、plugins、remote-hosts、terminal、hooks、cloud-sync、mobile-relay、local-embeddings、bun、usage 等。完整目录见 **17 篇**。
+> - **Schema 变更**：v0.0.990 全量 **48 张普通表 + 2 张虚拟表**（`/tmp/alma-extract/tables-all.sql`）。本篇 §4 的表清单之外新增约 20 张：`agent_missions/agent_runs/agent_handoffs/mission_sprints/sprint_contracts/sprint_evaluations`（子代理 harness）、`reference_links/reference_snippets`（refs 双链）、`computer_use_app_approvals/computer_use_action_log`、`activity_*`（5 张，屏幕记录）、`agent_op_traces(+_steps)`（运行观测）、`channel_mappings`、`custom_themes`、`plugin_*`（3 张）、`thread_labels`、`remote_hosts`、`prompt_apps(+_executions)`、`usage_records`、`workspaces` 增 worktree/PR 列、`chat_messages` 增 `parent_tool_call_id`（`main.readable.js:3159`）。全量对照见 **18 篇**。
+> - **WS 协议帧新增类型**（详见 17 篇 WS 章）：上行从 `{type:"message"/"edit"}` 改为 **`generate_response` / `steer_generation`**（payload 含 `retryOfMessageId/replaceMessageId/ephemeralModel/source` 等约 15 字段，`main.readable.js:85391`）；下行流式从 AI SDK chunk 原样转发改为 **`message_delta` 携带 7 种 part-diff delta**（`part_add/text_append/text_done/part_update/tool_input_append/tool_output_set/tool_output_streaming`，reducer 规格在 `main.readable.js:84142` 附近），并新增 `context_compaction_started/compacted/context_usage_update/subagent_message_*/plan_update/todo_update` 等广播事件。
+> - **落库时机修订**：09 篇「onFinish 才一次性落库」在 v0.0.990 已过时——assistant 消息**流式防抖增量落库**（节流 1000ms、中途跳过 FTS 索引 `skipFtsIndex`，`main.readable.js:91183-91221`），崩溃恢复也从「整轮作废重生成」改为 `resetStuckGenerations` + `resumeInterruptedTasks` 自动续跑（`main.readable.js:93943-94053`）。
+> - **端口行为**：默认 23001 不变，但被占用时 `findAvailablePort` 向后递增扫描（`main.readable.js:70342`），实际端口写回 `process.env.API_SERVER_PORT` 并重生成 `~/.config/alma/api-spec.md`。
+
 ---
 
 ## 1. 后端总体架构

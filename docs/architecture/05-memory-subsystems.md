@@ -3,6 +3,14 @@
 > 本文档基于对本机 Alma 安装（`/Applications/Alma.app`）、用户数据目录（`~/.config/alma`、`~/.alma`、`~/Library/Application Support/alma`）以及 `chat_threads.db` SQLite 数据库 Schema 的实证调研写成。
 > 标注「推测」的条目表示从字符串/表结构/目录布局推断、未逐行核对源码。
 
+> **v0.0.990 修订（2026-08-21）**：本篇的四层分层框架（L1 文件 / L2 日记 / L3 归档 / L4 向量）在 v0.0.990 仍然成立，但两处核心论断已被推翻、若干新机制未覆盖，详见 **18/20 篇**：
+>
+> - **Embedding 默认路径翻转（本篇 §2 与「反模式提醒」已过期）**：v0.0.990 默认是**云端 OpenAI 兼容 `text-embedding-3-small`**，vec0 表定义为 `embedding FLOAT[1536]`（`main.readable.js:1793`）；本地 transformers.js（4 个 384 维 Xenova 模型）降级为 `providerId=__local__` 可选项，由 `/api/local-embeddings/models|download|progress` 管理（`:77658-77670`）。`getEmbeddingProvider()` 优先级链：settings 指定 → openai → aihubmix → openrouter → google → custom。**维度切换**：`ensureVectorTableDimensions` 只在 vec0 表为空时 DROP 重建（`:1848`）；非空时换模型触发 `rebuildEmbeddings` 全量重建（试算首条定维度 → 每 10 条一批重算 → `memory_metadata.embedding_model` 记账，`:1884-1984`），路由 `/api/memories/rebuild|rebuild-progress|cancel-rebuild`（`:77615` 等）。
+> - **「混合检索 RRF」不成立**：v0.0.990 全 bundle grep 不到 `rrf|bm25|hybrid`；记忆检索是**纯 vec0 余弦 KNN**（SQL 原文 `:2186-2190`：`SELECT memory_id, 1 - vec_distance_cosine(embedding, ?) as score FROM memory_embeddings WHERE score >= ? ORDER BY score DESC LIMIT ?`）+ userIds/threadId/tags 后置过滤；FTS5（`messages_fts`）只服务历史消息搜索，与记忆检索不融合。中文检索靠 tool model 查询改写（统一转英文检索词）补齐。
+> - **memory 表族新增**：`memories` 经 ALTER 增 **`user_id`** 列（`:1836`，多通道 `platform:external_user_id` 命名空间隔离）；`memory_archive` 初始即含 `user_id`（`:1799`）；**`memory_sleep_runs`** 表坐实 sleep 流程审计（`:1802` SQL 原文，列含 `trigger: manual|idle|count|scheduled`、`archived_exact/expired/orphan/similarity/llm` 五路计数、`input_tokens/output_tokens`）——sleep 是**四层归档管线**（exact 去重 → temporary 过期 → 相似度聚类（阈值 0.95 直接合并）→ LLM 合并（≥0.75 进 LLM、批 20 条、簇上限 50）），每日 03:00 触发、3 连败退避、`/api/memories/sleep/run|preview|cancel` 手动入口，详见 20 篇。
+> - **写入时机提前**：从「会话结束归档」提前为**每轮 assistant 响应完成后后台自动提取**（最近 4 条消息、`metadata.memoryExtracted` 去重、ADD 走 `addMemoryWithLLMDedup` LLM 判重，`:91811`、`:87447`）；另有 DELETE 操作与 temporary 记忆即时清理回路。
+> - **Activity Recorder 坐实**：本篇 §4 的目录级推测在 v0.0.990 已全部落地——`activity_sessions/events/snapshots/ocr_frames/summaries` 五张表（SQL 原文 `:2838-2853`），macOS 走 ScreenCaptureKit daemon + 运行时编译的 Swift helper（Vision OCR + NSEvent 全局输入监听），OCR 文本正则脱敏后入库，分析产出 `memoryCandidates` 反哺主记忆库；18 条 `/api/activity-recorder/*` 路由。详见 20 篇。
+
 ---
 
 ## 1. Memory 分层架构

@@ -1,5 +1,20 @@
 # 09 · 持久化与崩溃恢复：事件溯源，而不是快照
 
+> **v0.0.990 修订（2026-08-21）**：本篇 §3 版本树、§4 三件套、§5 无状态执行器、§6 不对称判断在 v0.0.990 **全部仍成立**（checkpoint 依然 0 命中、`--no-session-persistence` 依然在）。但有一处**实现级推翻**，本篇 §1/§2.2-b/§8 已就地修订：
+>
+> - **「流式不落库，onFinish 一次性 INSERT」过时**。v0.0.990 改为**流式防抖增量落库**——首帧即写、后续节流补写、FTS 索引标记 `skipFtsIndex:true` 跳过中途条目，结束再终写。崩溃后能看到半成品消息。证据：`main.readable.js:91183-91221`。
+> - **「崩溃不续跑」推翻（本篇最大的事实更正）**。v0.0.990 有了自动续跑，而且实现方式**恰恰绕开了本篇 §8 论证的两个困难**——它不从 partial token 流接着生成（那确实无法对齐），而是**新起一轮、注入一条伪造 System 消息让模型自己接着干**。机制三步，全部实证：
+>   1. `resetStuckGenerations`（`main:93943`）：启动把 `is_generating=1` 归零，并筛出「最后一条 assistant 消息里有工具 part 停在 `input-available`/`input-streaming`/或 `errorText='Interrupted (app restarted)'`」的 thread；
+>   2. `resumeInterruptedTasks`（`main:93996`）：延迟 10s 后，把这些 thread 的最后一条消息摘要（最后文本 300 字符 + 最后工具调用清单 300 字符）拼进一条 System 消息，**POST 回自己的 `/api/chat/completions`**，原文：
+>      > `[System: The app was restarted while you were in the middle of a task. Your previous generation was interrupted. ... Please review what you were doing and continue where you left off. Check the results of any interrupted tool calls — they may have partially completed. If the task is no longer relevant, just acknowledge the interruption.]`
+>   3. 若中断发生在子代理里，还有专门分支 `autoResumeInterruptedSubagents`（`main:94777`），System 消息原文改为「N 个子代理已从 transcript 续跑完成，结果已填进上面的 Task 工具调用，用这些结果继续整体任务、只重做最少必要的部分」。
+>
+>   **为什么这不算推翻本篇的设计哲学**：续跑的输入依然是「DB 里的消息历史」这个唯一事实，新起一轮 = 输入完全确定，和「事件溯源」地基完全一致。Alma 没有引入 checkpoint，只是**把「重跑」从「用户手动点重新生成」自动化成了「重启后系统替你补一轮」**。§8「别做」表第一行（checkpoint 快照）**仍然成立**；第二行「崩溃续跑」应精确化为「别做 token 级续流，可以做消息级系统补跑」。
+>
+> **对 Eva 的意义**：Eva 的 server 是独立 UtilityProcess，崩溃恢复本来就在 14 篇里有规划。这套「重启检测 → System 消息补跑」机制成本极低（一个启动钩子 + 一段 prompt 模板），收益是长任务被 Electron 重启/崩溃打断后不丢进度，**建议在 S7（子代理落地）时一并做**——子代理 resume 本就是 S7 验收项，这套是它的天然延伸。详见 16 篇 §3.1-2、20 篇 §3。
+
+---
+
 > 调研对象：Alma v0.0.960（Electron AI 桌面助手）
 > 调研方法：静态挖掘 minified 主进程 bundle（`out/main/index.js`）+ 只读查询运行中的 SQLite schema
 > 每条结论后标注【实证】；无法确证的标注【推测】。
@@ -15,7 +30,7 @@
 | -------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------- |
 | **Persistence**（状态存哪）      | ✅ 做满              | SQLite 全量落库，消息整条 JSON 存，token 用量逐轮落表                                             |
 | **Checkpoint**（生成中逐步快照） | ❌ 明确不做          | bundle 全文 grep `checkpoint` **0 次命中**【实证】。没有 LangGraph 式的 step-level state snapshot |
-| **Resume**（中断后恢复）         | 分三层，每层答案不同 | 断线重连 ✅ / 僵尸生成清理 ✅ / 崩溃续跑 ❌                                                       |
+| **Resume**（中断后恢复）         | 分三层，每层答案不同 | 断线重连 ✅ / 僵尸生成清理 ✅ / 崩溃续跑 ⚠️ **v0.0.990 起改为「消息级系统补跑」，见篇首修订框** |
 
 ### 1.1 为什么是"事件溯源式恢复"而不是"快照式恢复"
 
@@ -127,10 +142,10 @@ CREATE TABLE memory_sleep_runs (       -- 后台任务运行记录（启动清�
 
 > **复刻要点**：不要试图把 UIMessage 拆成关系表。parts 数组里嵌套的 tool-call/tool-result 结构用关系模型表达极其痛苦，而且你几乎永远不需要按 part 内容做 SQL 查询（需要全文检索就挂 FTS5 虚表，Alma 有 `messages_fts`【实证】）。
 
-**b. `onFinish` 时一次性 INSERT，不流式写。**
-流式生成过程不落库；生成完成（或失败）的回调里才把完整消息写入。【实证】bundle 中 `addMessage` 在事务里做 insert，且失败路径会插入一条 `⚠️ Generation failed` 的提示消息（挂在当前 activePath 尾部，`metadata.turnEndReason = "error"`）。
+**b. `onFinish` 时一次性 INSERT，不流式写。** ⚠️ **【v0.0.990 已推翻】**
+v0.0.960 及之前是「流式不落库，生成完成（或失败）的回调里才把完整消息写入」。**v0.0.990 改为流式防抖增量落库**：首帧即写、后续节流补写、FTS 索引标记 `skipFtsIndex:true` 跳过中途条目，结束再终写（`main.readable.js:91183-91221`）。崩溃后能看到半成品消息。失败路径仍插入一条 `⚠️ Generation failed` 提示消息（挂在当前 activePath 尾部，`metadata.turnEndReason = "error"`）这一点不变。
 
-> **推论**：如果你在前端刷新页面时看不到正在流式输出的半个回答——这是设计如此，不是 bug。崩了就是没了，重新生成。
+> **推论**：v0.0.990 之前，如果你在前端刷新页面时看不到正在流式输出的半个回答——那是设计如此，不是 bug。v0.0.990 起改为防抖增量落库，刷新后能看到半成品。
 
 **c. 用量逐轮落表，崩了也只丢当轮。**
 `usage_records` 按 `message_id` 外键挂到消息上，每轮生成完成即写入 token 消耗。崩溃丢的是当轮用量，历史用量分毫不差。【实证】schema 如上。
@@ -830,8 +845,8 @@ wss.on('connection', (ws) => store.onWsConnection(ws)) // 3. WS 接入
 
 | 项                                          | 为什么                                                                                                                                                |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Checkpoint 快照**（生成中逐步存状态）     | 对话生成的输入完全确定（消息历史），重跑成本就是一次 LLM 调用。快照引入 schema 迁移、版本兼容、"恢复到一半再崩"的递归问题，换来的是省一次调用。负收益 |
-| **崩溃续跑**（从 partial message 接着生成） | partial message 是树状 part 状态，接续点的上下文语义无法对齐，provider 侧也没有"接着上次流"的 API。Alma 连工具中断都只是标记 error 后整轮重来         |
+| **Checkpoint 快照**（生成中逐步存状态）     | 对话生成的输入完全确定（消息历史），重跑成本就是一次 LLM 调用。快照引入 schema 迁移、版本兼容、"恢复到一半再崩"的递归问题，换来的是省一次调用。负收益。**v0.0.990 复核：仍然 0 命中，Alma 至今没做** |
+| **崩溃续跑**（从 partial token 流接着生成） | **token 级续流确实别做**——partial message 是树状 part 状态，接续点上下文语义无法对齐，provider 也没有"接着上次流"的 API。**但注意 v0.0.990 起 Alma 做了「消息级系统补跑」**：新起一轮、注入伪造 System 消息让模型自己接着干（篇首修订框），这不算续流，是把"用户手动重新生成"自动化。Eva 可参考 |
 | **执行器 session 持久化**                   | 第二个事实来源 = reconcile 复杂度爆炸。状态只有一个家：你的 DB。外部 agent 一律 `--no-session-persistence`，每次从 DB 读回干净状态                    |
 
 ---

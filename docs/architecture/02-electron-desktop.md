@@ -4,6 +4,14 @@
 > 调研方法：静态分析 `app.asar`（660MB）内 `/out/main/index.js`、`/out/preload/index.js`、`/out/renderer/*.html`，以及 `Contents/Resources/` 下的 sidecar 二进制、`Info.plist`、`app-update.yml`、`codesign` 信息。
 > 证据标注：`E:` = 有直接证据；`[推测]` = 依据间接证据推断。
 
+> **v0.0.990 修订（2026-08-21）**：本篇骨架结论（进程拓扑、单实例锁、contextBridge 窄桥 + loopback HTTP 业务面、electron-updater）在 v0.0.990 仍成立，但以下条目已过期或需补充，详见 **21 篇**：
+>
+> - **窗口家族扩张**：本篇 §2 的入口清单之外，v0.0.990 的 renderer 实有 8 个 HTML（`index/settings/gallery/lightbox/livecoding/prompt-app-runner/share/notifications`，`/tmp/alma-extract/asar/out/renderer/`）。其中 **livecoding.html**（900×700 单例窗，`main.readable.js:106238`）与 **prompt-app-runner.html**（按 `prompt_apps.windowWidth/Height` 建窗，每次快捷键触发新建实例，`main.readable.js:104881/106170`）是正式入口；另有 `index.html#/minesweeper`（扫雷彩蛋 4 窗）与 `#/more-menu` 弹出面板。`loading` 目录仍在 asar 内但无 loadFile 调用点，疑似废弃。
+> - **preload API 面扩大**：`contextBridge.exposeInMainWorld` 实测 **43 处调用 / 44 个 namespace**（`asar/out/preload/index.js`，清单含 `almaIab/almaBrowserProfile/promptAppRunner/moreMenu/minesweeperWindow/galleryWindow/lightboxWindow/liveCodingWindow/plugin*(9 个)/toolApprovalDialog/userQuestionDialog/almaNotifications/snapshot/whisper/copilot/claudeSubscription/mcpOAuth` 等）——本篇 §3「约 10 个 namespace、惯用名 window.alma」的估计**已过时**；且无统一 `window.alma` 总对象。完整清单见 21 篇 §3。
+> - **sidecar 阵容扩大**：Resources 下实有 `bun/ uv/ lark-cli/ tts/(python 脚本 + sherpa worker) Alma Computer Use.app/ CalTool.app/ chrome-extension/ cli/`。whisper 不再是独立 sidecar，改为 `@fugood/whisper.node` N-API 模块直接加载（`main.readable.js:54224`）；`Alma Computer Use.app` 是 unix-socket daemon（`--idle-seconds 900` 自退，`main.readable.js:66202`）；lark-cli 缺失时从 npmmirror 下载（`main.readable.js:59839`）。各 sidecar 拉起/守护机制见 19 篇。
+> - **打包链新增原生模块**：`alma-notifications`（`asar/package.json:84`，`file:electron/native/alma-notifications`，通知走原生 NSPanel addon，`ALMA_NATIVE_NOTIFICATIONS=0` 可关）与 `electron-liquid-glass@^1.1.1`（窗口圆角毛玻璃）。
+> - **其他修订**：主窗红绿灯移到 (-100,-100) 隐藏（自绘标题栏）；`webviewTag:!0` 是 iab 的硬依赖；§3.3 推测的 loopback 鉴权 token 在 v0.0.990 仍不存在（HTTP 面纯 127.0.0.1 绑定）；quick-chat 快捷键固定 `Cmd/Ctrl+Shift+Space`（`main.readable.js:106107` 附近）。
+
 ---
 
 ## 1. 进程模型总览
