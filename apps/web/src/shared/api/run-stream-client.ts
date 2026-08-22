@@ -13,6 +13,7 @@ import type {
 import { toolPartOutput } from "@eva/shared";
 import { DeltaAccumulator } from "../streaming/delta-accumulator.js";
 import type { StreamEvent } from "../streaming/types.js";
+import { withLoopbackToken } from "./auth";
 
 export interface ToolCallInfo {
   readonly toolName: string;
@@ -240,7 +241,7 @@ export async function streamChat(
 ): Promise<void> {
   const response = await fetch("/api/v1/runs/stream", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await withLoopbackToken({ "Content-Type": "application/json" }),
     body: JSON.stringify(request),
     ...(signal ? { signal } : {})
   });
@@ -288,6 +289,7 @@ export async function attachRun(
   signal?: AbortSignal
 ): Promise<void> {
   const response = await fetch(`/api/v1/runs/${runId}/stream`, {
+    headers: await withLoopbackToken(),
     ...(signal ? { signal } : {})
   });
 
@@ -308,7 +310,8 @@ export async function attachRun(
 
 export async function abortRun(runId: string): Promise<void> {
   const response = await fetch(`/api/v1/runs/${runId}/abort`, {
-    method: "POST"
+    method: "POST",
+    headers: await withLoopbackToken()
   });
 
   if (response.status === 404) {

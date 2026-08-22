@@ -3,6 +3,8 @@
  * Native fetch only rejects on network errors, not HTTP errors.
  * This is required for @tanstack/react-query to properly detect errors.
  */
+import { withLoopbackToken } from "./auth";
+
 export async function apiFetch<T>(
   url: string,
   options?: RequestInit
@@ -12,10 +14,10 @@ export async function apiFetch<T>(
   // switch-version)不需要这个头。
   const hasBody = options?.body !== undefined && options.body !== null;
   const response = await fetch(url, {
-    headers: {
+    headers: await withLoopbackToken({
       ...(hasBody ? { "Content-Type": "application/json" } : {}),
-      ...options?.headers
-    },
+      ...(options?.headers as Record<string, string> | undefined)
+    }),
     ...options
   });
 

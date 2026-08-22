@@ -28,12 +28,22 @@ export const registerStaticRoutes = async (
     return;
   }
 
+  // T33 CSP:renderer 是 HTTP 托管(无 HTML 文件插 meta),CSP 走响应头。
+  // connect-src 放行 loopback HTTP/WS(SSE 走 fetch-HTTP,预留 WS);style-src
+  // 需 unsafe-inline(Tailwind/inline style)。dev 态 vite(5173)托管不经这里,别加。
+  const CSP =
+    "default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; " +
+    "img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'";
+
   const fastifyStatic = await import("@fastify/static");
 
   await app.register(fastifyStatic.default, {
     root: webDist,
     prefix: "/",
-    decorateReply: true
+    decorateReply: true,
+    setHeaders: (res) => {
+      res.setHeader("Content-Security-Policy", CSP);
+    }
   });
 
   // SPA fallback: non-API 404s serve index.html
@@ -43,6 +53,7 @@ export const registerStaticRoutes = async (
       return;
     }
 
+    reply.header("Content-Security-Policy", CSP);
     reply.sendFile("index.html", webDist);
   });
 
