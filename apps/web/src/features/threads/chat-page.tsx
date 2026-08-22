@@ -195,6 +195,27 @@ export function ChatPage() {
     navigate("/settings");
   }, [navigate]);
 
+  // eva:// 深链(thread 跳转 / 打开设置)。仅桌面端(preload 注入)有,浏览器下 electronAPI undefined。
+  useEffect(() => {
+    if (!isElectron()) return;
+
+    const unbind = window.electronAPI!.onDeepLink((url) => {
+      const thread = url.match(/^eva:\/\/thread\/([\w-]+)/);
+      if (thread) {
+        setPendingWorkspaceId(null);
+        setRejection(null);
+        setSearchParams({ threadId: thread[1]! }, { replace: true });
+        loadSession(thread[1]!);
+        return;
+      }
+      if (url.startsWith("eva://settings")) {
+        navigate("/settings");
+      }
+    });
+
+    return unbind;
+  }, [loadSession, navigate, setSearchParams]);
+
   return (
     <div className="h-screen bg-background text-foreground">
       {/* 自定义标题栏拖拽区 —— 只在 Electron(titleBarStyle: hidden*)下需要,

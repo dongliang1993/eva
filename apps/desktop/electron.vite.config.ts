@@ -23,7 +23,12 @@ export default defineConfig({
       rollupOptions: {
         external: ["electron"]
       },
-      externalizeDeps: true
+      // externalizeDeps 默认把所有 package.json 依赖都 external——但打包时 files 排除了
+      // node_modules,external 的依赖在 app.asar 里 require 不到(Cannot find module)。
+      // electron-updater 是纯 JS(无原生模块),bundle 进 main.js 即可,故从 external 排除。
+      externalizeDeps: {
+        exclude: ["electron-updater"]
+      }
     }
   },
   preload: {

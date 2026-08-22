@@ -2,6 +2,14 @@ appId: com.eva.desktop
 productName: Eva
 directories:
   output: release
+protocols:
+  - name: Eva
+    schemes:
+      - eva
+publish:
+  provider: github
+  owner: dongliang1993
+  repo: eva
 files:
   - dist-electron/**/*
   - "!node_modules"
@@ -19,6 +27,12 @@ extraResources:
     to: server/node_modules/
     filter:
       - "**/*"
+      # better-sqlite3 的 electron-rebuild 编译产物里带 test_extension.node(测试扩展,
+      # 运行时用不到),签名后它成未签/被改的密封资源 → codesign 报 "a sealed resource
+      # is missing or invalid",公证 check-signature 拒。排掉即可(T34 实测)。
+      - "!**/better-sqlite3/**/test_extension.node"
+      - "!**/better-sqlite3/**/test/**"
+      - "!**/better-sqlite3/**/benchmark/**"
   - from: ../../apps/server/package.json
     to: server/package.json
   - from: ../../apps/server/SOUL.md
@@ -31,6 +45,11 @@ mac:
   icon: build/icon.png
   category: public.app-category.developer-tools
   artifactName: "${productName}-${version}-${arch}.${ext}"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
   target:
     - target: dmg
       arch:

@@ -54,9 +54,10 @@ mac:
   APPLE_API_KEY=MS54PPR383
   APPLE_API_ISSUER=f0633a9d-2da9-45e6-a4c0-49afc20f6bce
   APPLE_API_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_MS54PPR383.p8   # 已落位,0600
-  APPLE_TEAM_ID=<TODO:10 位 Team ID，打包时补>   # developer.apple.com 账号页
+  APPLE_TEAM_ID=98T664BZ7J   # developer.apple.com 账号页
   ```
   electron-builder ≥24 认 `APPLE_API_KEY/ISSUER/KEY_PATH` 三件套（`.p8` 已在约定路径，私钥内容不进仓/不进聊天）。
+  > **打包前置（2026-08 实测）**：`@electron/rebuild` 须 ≥4.x（3.7.2 在 Node 26 下 ESM 报错 `require is not defined`，已升 4.2.0 解掉，`desktop:build` 全绿）；keychain 须有 **Developer ID Application** 证书（`security find-identity -v -p codesigning` 应非空，实测一度为 0 需先从 developer.apple.com 下载导入）。
 - **Eva 特有**：`better-sqlite3` 的 `.node` 在 `Resources/server/node_modules`（extraResources）——签名要覆盖 extraResources 里的原生二进制（electron-builder 对 extraResources 签名不一定全覆盖，必要时 `afterSign` 钩子补签，02 §9.7 坑 3）。
 - **asarIntegrity 坑（21 §5.2）**：`ElectronAsarIntegrity` 默认开，别 post-build 手改 asar，否则重算 hash 否则拒启动。
 
@@ -94,3 +95,6 @@ mac:
 4. **autoInstallOnAppQuit 别 true**——用户打字时被强退是事故（15 §S11-1）。
 5. **initUpdater 必须在 whenReady 后**——否则 autoUpdater 读 app.getPath 抛错。
 6. **别手改 asar**——asarIntegrity 校验，改了拒启动（21 §5.2）。
+7. **electron-updater 要 bundle 进 main.js，不能 external**（2026-08 实测）：它是 main 运行时依赖，builder.yml `files` 排了 `node_modules`，external 后 app.asar 里 `Cannot find module 'electron-updater'` 崩主进程。解法：`electron.vite.config.ts` `externalizeDeps: { exclude: ["electron-updater"] }`。
+8. **better-sqlite3 的 `test_extension.node` 破坏密封资源**（2026-08 实测）：electron-rebuild 编译带的测试扩展（运行时用不到），签名后成未签 sealed resource → codesign `a sealed resource is missing or invalid`、公证 check-signature 拒。解法：builder.yml extraResources filter 排 `!**/better-sqlite3/**/test_extension.node`。
+9. **别并发跑两个 electron-builder**（2026-08 实测）：都往 `release/mac-arm64` 写+签名互踩，报框架符号链接 `No such file or directory` 竞态错；单跑即正常。
