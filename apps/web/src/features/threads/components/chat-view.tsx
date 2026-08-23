@@ -2,10 +2,10 @@ import type { ApprovalDecision, EvaUIMessage } from "@eva/shared";
 
 import type { PendingApproval } from "../api";
 import { useWorkspaces } from "../../workspaces/hooks/use-workspaces";
+import { isElectron } from "../../../shared/runtime";
 import { MessageList } from "./message-list";
 import { ApprovalCard } from "./approval-card";
 import { ChatInput, type ChatInputRejection } from "./chat-input";
-import { ContextUsage } from "./context-usage";
 import { WorkspaceNameProvider } from "./workspace-name-context";
 import { useStickToBottom } from "../hooks/use-stick-to-bottom";
 
@@ -62,7 +62,15 @@ export function ChatView({
   return (
     <WorkspaceNameProvider name={workspaceName}>
       <div className="flex h-full flex-col bg-background">
-        <ContextUsage sessionId={sessionId} />
+        {/* 右侧内容区顶部拖拽栏(仅 Electron):42px 高 + 下划线,与侧栏占位同高,
+            折叠后侧栏 0px 时右侧顶部仍与左侧拉齐。可拖拽移动窗口。
+            外层整宽只画 border-b(不 drag),内层才是 titlebar-drag —— 这样下划线
+            贯通到最左,而可拖热区从 --mac-titlebar-inset 才开始,不吞折叠按钮。 */}
+        {isElectron() ? (
+          <div className="h-[42px] w-full shrink-0 border-b border-border">
+            <div className="titlebar-drag h-full" />
+          </div>
+        ) : null}
         <MessageList
         messages={messages}
         streamingMessage={streamingMessage}
@@ -94,6 +102,7 @@ export function ChatView({
         workspaceId={workspaceId}
         onSelectWorkspace={onSelectWorkspace}
         rejection={rejection ?? null}
+        sessionId={sessionId}
         {...(onRejectionSeen ? { onRejectionSeen } : {})}
       />
     </div>

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { PanelLeft } from "lucide-react";
 
 import { useChat } from "./hooks/use-chat";
 import { useApprovals } from "./hooks/use-approvals";
@@ -13,7 +14,7 @@ import type { ChatInputRejection } from "./components/chat-input";
 import { SubagentsProvider, useSubagentsStore } from "./components/subagents-context";
 import { VersionActionsProvider } from "./components/version-actions-context";
 import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
-import { isElectron } from "../../shared/runtime";
+import { isElectron, isMacDesktop } from "../../shared/runtime";
 import type { ThreadSummary } from "../../types/api";
 
 export function ChatPage() {
@@ -256,14 +257,28 @@ export function ChatPage() {
 
   return (
     <div className="h-screen bg-background text-foreground">
-      {/* 自定义标题栏拖拽区 —— 只在 Electron(titleBarStyle: hidden*)下需要,
-          浏览器有自己的原生标题栏 */}
-      {isElectron() ? (
-        <div className="titlebar-drag h-11 w-full fixed top-0 left-0 z-50" />
+      {/* mac 桌面:折叠按钮固定在红绿灯右侧,与侧栏折叠态无关。它就是普通按钮,
+          不进任何 titlebar-drag 容器;外层 fixed 壳只负责定位(pointer-events-none,
+          不拦截),按钮自身可点。标题栏拖拽由右侧内容区那条 42px 拖拽栏承担。
+          z-[60] + 壳自身 relative:压过侧栏/右侧那两条 42px titlebar-drag(drag 区),
+          否则 Electron 把按钮那片当拖拽、吞掉点击。 */}
+      {isMacDesktop() ? (
+        <div className="pointer-events-none fixed left-[78px] top-0 z-[60] flex h-[42px] w-9 items-center justify-center">
+          <button
+            type="button"
+            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+            onClick={handleToggleSidebar}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <PanelLeft size={15} />
+          </button>
+        </div>
       ) : null}
       <ResizableSidebar
         collapsed={sidebarCollapsed}
         onCollapsedChange={setSidebarCollapsed}
+        collapsedSizePixels={isElectron() ? 0 : 48}
         sidebar={
           <Sidebar
             collapsed={sidebarCollapsed}

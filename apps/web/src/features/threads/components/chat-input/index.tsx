@@ -4,6 +4,7 @@ import { Send, Square } from "lucide-react";
 import { Tooltip, TooltipProvider } from "../../../../shared/ui/tooltip";
 import { WorkspacePicker } from "../../../workspaces/components/workspace-picker";
 import { SelectModel } from "./select-model";
+import { ContextUsage } from "../context-usage";
 
 /** 服务端拒收了上一句(会话里还有一轮在飞)—— 话要还给用户,原因要说出来。 */
 export interface ChatInputRejection {
@@ -30,6 +31,8 @@ interface ChatInputProps {
   readonly rejection?: ChatInputRejection | null;
   /** 用户已经看到提示(打字或再次发送)—— 由页面清掉 rejection。 */
   readonly onRejectionSeen?: () => void;
+  /** 输入框右下角环形上下文占用圈要用。 */
+  readonly sessionId?: string | null;
 }
 
 export function ChatInput({
@@ -42,7 +45,8 @@ export function ChatInput({
   workspaceId,
   onSelectWorkspace,
   rejection,
-  onRejectionSeen
+  onRejectionSeen,
+  sessionId
 }: ChatInputProps) {
   const [text, setText] = useState("");
 
@@ -116,7 +120,9 @@ export function ChatInput({
               />
             </div>
 
-            {isStreaming ? (
+            <div className="flex items-center gap-2">
+              <ContextUsage sessionId={sessionId ?? null} />
+              {isStreaming ? (
               <button
                 type="button"
                 className="rounded-full p-2 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -143,6 +149,7 @@ export function ChatInput({
                 </span>
               </Tooltip>
             )}
+            </div>
           </div>
         </div>
       </div>

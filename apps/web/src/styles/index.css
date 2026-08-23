@@ -243,6 +243,17 @@ body {
 /* ------------------------------------------------------------------ */
 .titlebar-drag {
   -webkit-app-region: drag;
+  /* mac 桌面:折叠按钮钉在红绿灯右侧,占据左侧一条固定宽度的不可拖拽区。
+     用 margin-left 让可拖拽热区从 --mac-titlebar-inset 才开始,按钮不被当拖拽吞掉。
+     注意不能用 padding-left:padding 属于元素盒模型,native hit-test 会把整个元素
+     (含 padding)都当拖拽区,按钮区域又会被吞。下划线贯通问题由结构层单独处理。
+     浏览器无自定义标题栏,变量不起作用。 */
+  margin-left: var(--mac-titlebar-inset, 0px);
+}
+
+:root {
+  /* 红绿灯组 ~78px + 折叠按钮 36px。 */
+  --mac-titlebar-inset: 118px;
 }
 
 .titlebar-drag button,

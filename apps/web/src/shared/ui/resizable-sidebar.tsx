@@ -10,6 +10,8 @@ interface ResizableSidebarProps {
   /** 折叠状态(由外部控制, 与拖拽/双击双向同步) */
   readonly collapsed?: boolean;
   readonly onCollapsedChange?: (collapsed: boolean) => void;
+  /** 折叠后的宽度(px)。默认 48(留一条窄轨条);Electron 下传 0 完全收起。 */
+  readonly collapsedSizePixels?: number;
 }
 
 /**
@@ -25,7 +27,8 @@ export function ResizableSidebar({
   minSizePixels = 220,
   maxSizePixels = 420,
   collapsed = false,
-  onCollapsedChange
+  onCollapsedChange,
+  collapsedSizePixels = 48
 }: ResizableSidebarProps) {
   const panelRef = usePanelRef();
 
@@ -49,7 +52,7 @@ export function ResizableSidebar({
         minSize={minSizePixels}
         maxSize={maxSizePixels}
         collapsible
-        collapsedSize={48}
+        collapsedSize={collapsedSizePixels}
         onResize={() => {
           // 拖拽把 Panel 折叠/展开时, 反向同步外部状态
           onCollapsedChange?.(panelRef.current?.isCollapsed() ?? false);

@@ -369,30 +369,33 @@ export function Sidebar({
 
   return (
     <div className="flex h-full flex-col overflow-hidden border-r border-border bg-sidebar">
-      {/* Drag region spacer — 小程序化, 让折叠按钮避开上方全局 titlebar-drag 拦截层;
-          只在 Electron 下渲染(浏览器没有自定义标题栏) */}
+      {/* Drag region spacer — 只在 Electron 下渲染(浏览器没有自定义标题栏),
+          让内容避开窗口顶部。mac 的折叠/展开按钮已挪到红绿灯旁(chat-page 顶层
+          fixed),这条只是占位。h-[42px] 与右侧内容区顶部拖拽栏同高,左右拉齐。 */}
       {isElectron() ? (
-        <div className="titlebar-drag h-11 w-full shrink-0" />
+        <div className="titlebar-drag h-[42px] w-full shrink-0" />
       ) : null}
 
-      {/* Header: brand + collapse toggle */}
-      <div
-        className={`flex mb-2 shrink-0 items-center ${
-          collapsed ? "justify-center py-3" : "justify-between px-3 py-2"
-        }`}
-      >
-        {!collapsed && (
-          <span className="text-base font-bold text-foreground select-none">Eva</span>
-        )}
-        <button
-          type="button"
-          className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          onClick={onToggle}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      {/* Header: brand + collapse toggle(Electron 下都不渲染:折叠按钮挪到红绿灯旁,品牌行也不展示) */}
+      {!isElectron() && (
+        <div
+          className={`flex mb-2 shrink-0 items-center ${
+            collapsed ? "justify-center py-3" : "justify-between px-3 py-2"
+          }`}
         >
-          {collapsed ? <PanelLeft size={18} /> : <PanelLeft size={18} />}
-        </button>
-      </div>
+          {!collapsed && (
+            <span className="text-base font-bold text-foreground select-none">Eva</span>
+          )}
+          <button
+            type="button"
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            onClick={onToggle}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <PanelLeft size={18} />
+          </button>
+        </div>
+      )}
 
       {/* New chat — 展开=全宽主按钮 / 折叠=居中图标 */}
       <div className={`shrink-0 ${collapsed ? "px-1 pb-1" : "px-3 pb-2"}`}>

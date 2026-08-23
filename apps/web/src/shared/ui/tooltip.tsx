@@ -27,7 +27,7 @@ export function Tooltip({
   side = "top"
 }: {
   readonly children: ReactNode;
-  readonly content: string;
+  readonly content: ReactNode;
   readonly side?: "top" | "bottom" | "left" | "right";
 }) {
   return (

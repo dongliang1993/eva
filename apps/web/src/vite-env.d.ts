@@ -1,6 +1,11 @@
 /// <reference types="vite/client" />
 
 interface ElectronAPI {
+  readonly versions: {
+    readonly electron: string;
+    readonly node: string;
+    readonly platform: string;
+  };
   getServerPort: () => Promise<number | null>;
   getServerInfo: () => Promise<{ port: number | null; token: string | null }>;
   pickDirectory: () => Promise<string | null>;
