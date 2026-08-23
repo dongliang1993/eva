@@ -82,6 +82,18 @@ export type AgentTelemetryEvent =
       readonly messageCountAfter: number;
       readonly estimatedTokensBefore: number;
       readonly estimatedTokensAfter: number;
+    }
+  | {
+      /**
+       * T38: 模型真实报 context 超限(reactive compact 路径触发)——server 侧订阅此事件
+       * 把该模型的 contextWindow 永久钳小写 DB(Alma main:90647 clamping 学习)。
+       * observedTokens = 触发时估算/真实的用量,作为「实际能跑多少」的钳制参考。
+       */
+      readonly type: "context_overflow_clamp";
+      readonly providerId: string;
+      readonly modelId: string;
+      readonly contextWindow: number;
+      readonly observedTokens: number;
     };
 
 export type AgentObserver = (event: AgentTelemetryEvent) => void;

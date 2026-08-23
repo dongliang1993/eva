@@ -104,4 +104,11 @@ export interface CreateAgentOptions {
    * 同款)。server 不注入,字段留给测试和将来 workspace 级配置。
    */
   readOnlyConcurrency?: number;
+  /**
+   * T38:reactive compact(模型因上下文超限拒单)触发时,emit
+   * `context_overflow_clamp` 让 server 把这个模型的 contextWindow 钳到实测值的
+   * 90% —— 登记值虚高的模型从此学会自己的真实上限。harness 不知道也不该知道
+   * provider 登记处,只吐事件;钳制动作在 server 侧(deps → clampContextWindow)。
+   */
+  clampTarget?: { providerId: string; modelId: string };
 }

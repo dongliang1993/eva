@@ -34,6 +34,7 @@ import {
 import { isReactiveCompactCandidateError } from "../models/errors.js";
 import {
   applyReactiveLoopCompactWithStats,
+  estimateMessagesTokens,
   type RuntimeCompactResult,
 } from "../context/runtime-compact.js";
 import { coalesceTextDeltas } from "./coalesce-stream.js";
@@ -155,6 +156,8 @@ interface AgentOptions {
   toolTimeout?: { toolMs: number; tools?: Record<string, number> };
   /** T24:只读工具并发帽。不传 = DEFAULT_READ_ONLY_CONCURRENCY(10)。 */
   readOnlyConcurrency?: number;
+  /** T38:钳制目标(providerId+modelId)。传了才在真实超限时 emit context_overflow_clamp。 */
+  clampTarget?: { providerId: string; modelId: string };
 }
 
 /**
@@ -432,6 +435,21 @@ class Agent implements AgentInterface {
 
       // ---- reactive compact:上下文溢出类错误,全程只重试一次 ----
       if (streamError !== undefined) {
+        if (isReactiveCompactCandidateError(streamError)) {
+          // T38: 真实超限是「该模型 contextWindow 虚高」的实锤 —— emit 钳制事件让 server
+          // 永久钳小它的 contextWindow(下次 resolve 生效)。用真值(上一步 usage)优先,
+          // 没有就估算。与是否还能 reactive 重试无关,钳制是为下次 run。
+          if (this.options.clampTarget) {
+            this.emit({
+              type: "context_overflow_clamp",
+              providerId: this.options.clampTarget.providerId,
+              modelId: this.options.clampTarget.modelId,
+              contextWindow: this.contextPolicy.contextWindow,
+              observedTokens:
+                lastStepInputTokens ?? estimateMessagesTokens(messages),
+            });
+          }
+        }
         if (
           !hasCompactedReactively &&
           isReactiveCompactCandidateError(streamError)
@@ -657,6 +675,9 @@ export const createAgent = (options: CreateAgentOptions): AgentInterface => {
       : {}),
     ...(rest.readOnlyConcurrency !== undefined
       ? { readOnlyConcurrency: rest.readOnlyConcurrency }
+      : {}),
+    ...(rest.clampTarget !== undefined
+      ? { clampTarget: rest.clampTarget }
       : {}),
   });
 };

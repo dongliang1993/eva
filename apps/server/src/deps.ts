@@ -12,6 +12,7 @@ import { DrizzleRunRepository } from "./db/repositories/run-repository.js";
 import { failStaleTasks } from "./db/repositories/background-task-repository.js";
 import { ApprovalRepository } from "./db/repositories/approval-repository.js";
 import { createPinoObserver } from "./observability.js";
+import { clampContextWindow } from "./services/providers/context-clamp.js";
 import { findMonorepoRoot } from "./services/monorepo-root.js";
 import { syncMcpConfigFile } from "./services/mcp/mcp-config-file.js";
 import {
@@ -27,7 +28,16 @@ import type { AppInfrastructure, AppServices } from "./types/common.js";
 export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   const config = loadConfig();
   const logger = pino({ level: config.LOG_LEVEL });
-  const observer = createPinoObserver(logger);
+  const db = initializeDatabase(config, logger);
+  // T38: observer 订阅超限钳制事件 → 钳小该模型 contextWindow 写 DB(持久化,下次 resolve 生效)。
+  // clamp 只改 capabilities.contextWindow,不动 apiKey,encryptor 用缺省明文即可。
+  const observer = createPinoObserver(logger, (clamp) => {
+    clampContextWindow(db, {
+      providerId: clamp.providerId,
+      modelId: clamp.modelId,
+      observedTokens: clamp.observedTokens
+    });
+  });
   const workspaceRoot = findMonorepoRoot(process.cwd());
 
   // 用户技能在 ~/.eva/skills(打包后唯一可写位置);dev 时额外扫 monorepo 根的
@@ -49,8 +59,6 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   if (soulSection) {
     logger.info("SOUL.md loaded");
   }
-
-  const db = initializeDatabase(config, logger);
 
   // 一次性把旧 settings 结构迁到模型槽位(存在 models 行即幂等跳过)。
   migrateLegacySettings(db, logger);

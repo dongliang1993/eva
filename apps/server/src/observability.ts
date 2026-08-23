@@ -2,8 +2,16 @@ import type { FastifyBaseLogger } from "fastify";
 
 import type { AgentTelemetryEvent } from "@eva/harness";
 
+export interface ClampEvent {
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly contextWindow: number;
+  readonly observedTokens: number;
+}
+
 export const createPinoObserver = (
-  logger: FastifyBaseLogger
+  logger: FastifyBaseLogger,
+  onClamp?: (event: ClampEvent) => void
 ): ((event: AgentTelemetryEvent) => void) => {
   return (event: AgentTelemetryEvent): void => {
     switch (event.type) {
@@ -64,6 +72,24 @@ export const createPinoObserver = (
           },
           `agent context compacted via ${event.reason}`
         );
+        break;
+      case "context_overflow_clamp":
+        // T38: 模型真实超限 → 钳小它的 contextWindow(写 DB),下次 resolve 生效。
+        logger.warn(
+          {
+            event: "context_overflow_clamp",
+            model: event.modelId,
+            contextWindow: event.contextWindow,
+            observedTokens: event.observedTokens
+          },
+          `[AutoCompact] ${event.modelId} rejected ${event.observedTokens} tokens — clamping contextWindow`
+        );
+        onClamp?.({
+          providerId: event.providerId,
+          modelId: event.modelId,
+          contextWindow: event.contextWindow,
+          observedTokens: event.observedTokens
+        });
         break;
     }
   };

@@ -295,6 +295,12 @@ export class AgentFactory {
         ...defined("contextWindow", models.chat.contextWindow),
         ...defined("reservedOutputTokens", models.chat.maxOutputTokens),
       },
+      // T38:reactive compact 触发时回写更小的 contextWindow(自学习)——
+      // 需要知道钳哪家 provider 的哪个模型,绑的就是本轮 chat 槽位。
+      clampTarget: {
+        providerId: models.chat.providerId,
+        modelId: models.chat.modelId,
+      },
       ...defined("observer", this.infra.observer),
     });
 
