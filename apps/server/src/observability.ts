@@ -91,6 +91,18 @@ export const createPinoObserver = (
           observedTokens: event.observedTokens
         });
         break;
+      case "tool_count_degraded":
+        // T39: 工具数超限退化最小集 —— 必须可见,否则「配的 MCP 工具没生效」无从排查。
+        logger.warn(
+          {
+            event: "tool_count_degraded",
+            totalCount: event.totalCount,
+            keptCount: event.keptCount,
+            limit: event.limit
+          },
+          `[ToolSafetyNet] ${event.totalCount} tools > ${event.limit} — degraded to minimal set (${event.keptCount} kept)`
+        );
+        break;
     }
   };
 };

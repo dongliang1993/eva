@@ -16,6 +16,11 @@ export interface AgentRunInput {
   context?: Record<string, unknown>;
   maxSteps?: number;
   additionalTools?: AgentTool[];
+  /**
+   * T39:显式选定本轮生效的工具名(白名单)。设了就照单过滤、绕过数量安全网
+   * (显式选择优先);不设 = 走 applyToolCountSafetyNet,>40 退化最小集。
+   */
+  activeToolNames?: readonly string[];
   abortSignal?: AbortSignal;
   /**
    * 取待注入的子代理通知(S7 push)。只在 loop 走到 stop 终态前调用一次/轮。

@@ -94,6 +94,16 @@ export type AgentTelemetryEvent =
       readonly modelId: string;
       readonly contextWindow: number;
       readonly observedTokens: number;
+    }
+  | {
+      /**
+       * T39: 工具数超限且未显式设 activeTools → 退化最小集(Alma PM-011)。
+       * server observer 收到打 warning —— 静默退化会让「配的 MCP 工具没生效」无从排查。
+       */
+      readonly type: "tool_count_degraded";
+      readonly totalCount: number;
+      readonly keptCount: number;
+      readonly limit: number;
     };
 
 export type AgentObserver = (event: AgentTelemetryEvent) => void;

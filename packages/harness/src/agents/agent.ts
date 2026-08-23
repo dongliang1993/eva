@@ -40,6 +40,10 @@ import {
 import { coalesceTextDeltas } from "./coalesce-stream.js";
 import { createRepairToolCall } from "./repair-tool-call.js";
 import {
+  applyToolCountSafetyNet,
+  TOOL_COUNT_SAFETY_LIMIT,
+} from "./tool-safety-net.js";
+import {
   createPrepareStep,
   MAX_OUTPUT_CONTINUATION_MESSAGE,
   shouldContinueForMaxOutput,
@@ -268,7 +272,21 @@ class Agent implements AgentInterface {
 
   private async *run(input: AgentRunInput): AsyncGenerator<AgentStreamEvent> {
     const runStart = Date.now();
-    const toolSet: ToolSet = toToolSet([...this.resolveTools(input).values()]);
+    // T39 安全网:显式 activeToolNames 优先;没设且超 40 → 退化最小集 + 事件。
+    const resolvedTools = this.resolveTools(input);
+    const { tools: netTools, degraded } = applyToolCountSafetyNet(
+      resolvedTools,
+      input.activeToolNames,
+    );
+    if (degraded) {
+      this.emit({
+        type: "tool_count_degraded",
+        totalCount: resolvedTools.size,
+        keptCount: netTools.size,
+        limit: TOOL_COUNT_SAFETY_LIMIT,
+      });
+    }
+    const toolSet: ToolSet = toToolSet([...netTools.values()]);
     const maxSteps = input.maxSteps ?? this.maxSteps;
     const clock: ToolCallClock = new Map();
     const toolCalls: AgentToolCallResult[] = [];
