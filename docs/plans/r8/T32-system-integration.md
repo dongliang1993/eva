@@ -76,3 +76,4 @@
 3. **Alt+Space 被占**：register 返 false 要降级，别静默。
 4. **深链别塞大对象进 URL**：只传 threadId，数据 renderer 拉到（21 §2.3「主进程暂存+ready 回拉」同理）。
 5. **window-state 的 x/y 在副屏拔了后可能出屏**：恢复前校验坐标在当前显示器内，否则回中（Electron 公知坑）。
+6. **mac 关窗留进程后 `mainWindow` 指死对象 → 托盘点击崩**（2026-08-23 实测）：mac 关窗不 quit（托盘常驻），但 `mainWindow` 从没置空也没判 `isDestroyed()`，关窗后点托盘 `focusMainWindow` → `Object has been destroyed`（`main.js` `Tray.<anonymous>`）。修法三件套：`focusMainWindow`/`toggleMainWindow` 判 `!mainWindow || mainWindow.isDestroyed()` 时用 `serverPort` 重建；`createWindow` 挂 `closed` 把 `mainWindow` 置空；`activate`（点 Dock）改走 `focusMainWindow` 复用同一重建逻辑。所有碰 `mainWindow` 的入口（托盘/快捷键/深链/activate）都要先过这一层判活。

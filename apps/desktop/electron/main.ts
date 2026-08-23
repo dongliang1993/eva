@@ -463,6 +463,13 @@ function createWindow(url?: string): BrowserWindow {
     writeWindowState(win);
   });
 
+  // 销毁后置空,托盘/深链/快捷键下次走时 focusMainWindow 会重建,不再指死对象。
+  win.on("closed", () => {
+    if (mainWindow === win) {
+      mainWindow = null;
+    }
+  });
+
   // Open external links in system browser
   win.webContents.setWindowOpenHandler(({ url: linkUrl }) => {
     if (linkUrl.startsWith("http")) {
@@ -515,8 +522,13 @@ ipcMain.handle("updater:status", () => getUpdaterStatus());
 // ---------------------------------------------------------------------------
 
 function focusMainWindow(): void {
-  if (!mainWindow) {
-    return;
+  // 窗口被关/销毁后 mainWindow 仍指向死对象(mac 关窗留进程,托盘常驻)——判
+  // isDestroyed 并重建,否则托盘一点就 "Object has been destroyed"。
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (!serverPort) {
+      return; // server 还没起,没东西可显示
+    }
+    mainWindow = createWindow(`http://127.0.0.1:${serverPort}`);
   }
 
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -570,7 +582,8 @@ app.on("open-url", (event, url) => {
 // ---------------------------------------------------------------------------
 
 function toggleMainWindow(): void {
-  if (!mainWindow) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    focusMainWindow(); // 已关则重建
     return;
   }
 
@@ -713,8 +726,9 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
+  // 点 Dock 图标:没窗就重建(focusMainWindow 内部已处理 destroyed 重建 + show)。
   if (BrowserWindow.getAllWindows().length === 0 && serverPort) {
-    mainWindow = createWindow(`http://127.0.0.1:${serverPort}`);
+    focusMainWindow();
   }
 });
 
