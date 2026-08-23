@@ -279,6 +279,8 @@ class Agent implements AgentInterface {
     let continuedText = "";
     let totalTokens: TokenUsage = ZERO_TOKEN_USAGE;
     let stepStartTime = runStart;
+    // T36: 上一步真实 inputTokens,prepareStep 的 compact 判定用它(真值优先,首步 undefined 退估算)。
+    let lastStepInputTokens: number | undefined;
 
     this.emit({ type: "agent_run_start" });
 
@@ -305,6 +307,7 @@ class Agent implements AgentInterface {
           this.emitCompaction(stepsUsed, "proactive_loop_compact", result);
           this.emitTransition(stepsUsed, "proactive_loop_compact");
         },
+        getLastStepInputTokens: () => lastStepInputTokens,
       });
 
       const result = streamText({
@@ -342,6 +345,12 @@ class Agent implements AgentInterface {
           stepsUsed += 1;
           const stepUsage = readTokenUsage(usage);
           if (stepUsage) totalTokens = addTokenUsage(totalTokens, stepUsage);
+          // T36: 存上一步真实 inputTokens,供下一步 prepareStep 的 compact 判定。
+          // 0 视为「模型没报 inputTokens」→ undefined 退估算,别拿 0 当真值(会误判不溢出)。
+          lastStepInputTokens =
+            stepUsage && stepUsage.promptTokens > 0
+              ? stepUsage.promptTokens
+              : undefined;
           this.emit({
             type: "llm_call_end",
             step: stepIndex,

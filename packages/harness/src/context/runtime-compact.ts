@@ -122,6 +122,37 @@ const estimateMessageTokens = (message: ModelMessage): number => {
 export const estimateMessagesTokens = (messages: readonly ModelMessage[]): number =>
   messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
 
+/**
+ * T36: 判定是否溢出。有上一步真实 usage 就用真值(Alma aA() 思路,main:90740
+ * 步中用上一步 usage 判定),没有(首步)退回 chars/4 估算兜底。
+ *
+ * 阈值口径 = policy 的 softLimit(contextWindow - reservedOutput - loopCompactBuffer),
+ * 与 applyProactiveLoopCompactWithStats 一致。严格大于才算溢出。
+ */
+export const isOverflowing = (
+  messages: readonly ModelMessage[],
+  policy: ContextWindowPolicy,
+  lastStepInputTokens?: number
+): boolean => {
+  const softLimit = Math.max(
+    0,
+    policy.contextWindow
+      - policy.reservedOutputTokens
+      - policy.loopCompactBufferTokens
+  );
+
+  if (softLimit <= 0) {
+    return false;
+  }
+
+  const tokens =
+    lastStepInputTokens !== undefined
+      ? lastStepInputTokens
+      : estimateMessagesTokens(messages);
+
+  return tokens > softLimit;
+};
+
 const isRuntimeSummaryMessage = (
   message: ModelMessage | undefined
 ): message is SystemModelMessage =>
@@ -252,17 +283,13 @@ const buildRuntimeCompactResult = (
 export const applyProactiveLoopCompactWithStats = (
   messages: readonly ModelMessage[],
   prefixMessageCount: number,
-  policy: ContextWindowPolicy
+  policy: ContextWindowPolicy,
+  lastStepInputTokens?: number
 ): RuntimeCompactResult => {
   const estimatedTokensBefore = estimateMessagesTokens(messages);
-  const softLimit = Math.max(
-    0,
-    policy.contextWindow
-      - policy.reservedOutputTokens
-      - policy.loopCompactBufferTokens
-  );
 
-  if (softLimit <= 0 || estimatedTokensBefore <= softLimit) {
+  // T36: 溢出判定真值优先(有上一步 usage 用它),首步无 usage 退回估算兜底。
+  if (!isOverflowing(messages, policy, lastStepInputTokens)) {
     return buildRuntimeCompactResult(
       messages,
       [...messages],

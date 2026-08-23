@@ -21,6 +21,11 @@ export interface ContextStrategyOptions {
   readonly prefixMessageCount: number;
   /** compact 真的发生时回调,用来打 observer 事件。 */
   readonly onCompacted: (result: RuntimeCompactResult) => void;
+  /**
+   * T36: 取上一步真实 usage.inputTokens(getter 每步调一次取最新值,不是构造时快照)。
+   * 首步无值返回 undefined,判定退回估算。不传则始终走估算(向后兼容)。
+   */
+  readonly getLastStepInputTokens?: () => number | undefined;
 }
 
 /**
@@ -43,7 +48,8 @@ export const createPrepareStep = <TOOLS extends ToolSet>(
   const compaction = applyProactiveLoopCompactWithStats(
     budgeted,
     options.prefixMessageCount,
-    options.policy
+    options.policy,
+    options.getLastStepInputTokens?.()
   );
 
   if (compaction.changed) {
