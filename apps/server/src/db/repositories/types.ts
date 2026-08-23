@@ -59,7 +59,7 @@ export interface ISessionRepository {
   findById(id: string): Session | undefined;
   listAll(limit?: number): readonly Session[];
   updateTimestamp(id: string): void;
-  updateTitle(id: string, title: string): void;
+  updateTitle(id: string, title: string): Session | undefined;
   updateModel(id: string, model: string): void;
   updateWorkspace(id: string, workspaceId: string | null): Session | undefined;
   /** 会话的激活分支叶子。允许悬空(id 可指向已删消息) —— 读路径已处理。 */

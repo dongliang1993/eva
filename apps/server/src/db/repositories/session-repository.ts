@@ -46,12 +46,14 @@ export class DrizzleSessionRepository implements ISessionRepository {
       .run();
   }
 
-  updateTitle(id: string, title: string): void {
+  updateTitle(id: string, title: string): Session | undefined {
     this.db
       .update(sessions)
       .set({ title })
       .where(eq(sessions.id, id))
       .run();
+
+    return this.findById(id);
   }
 
   updateModel(id: string, model: string): void {

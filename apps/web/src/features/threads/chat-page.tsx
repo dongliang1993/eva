@@ -183,6 +183,18 @@ export function ChatPage() {
     setSearchParams({}, { replace: true });
   }, [newConversation, setSearchParams]);
 
+  // 工作区模式下,在某工作区下新建 thread:清成新会话,工作区暂存 pending,
+  // 首条消息让服务端建出会话后经既有 effect(见上)PUT 绑定到该工作区。
+  const handleNewThreadInWorkspace = useCallback(
+    (workspaceId: string) => {
+      newConversation();
+      setPendingWorkspaceId(workspaceId);
+      setRejection(null);
+      setSearchParams({}, { replace: true });
+    },
+    [newConversation, setSearchParams]
+  );
+
   const handleSelectThread = useCallback((threadId: string) => {
     setPendingWorkspaceId(null);
     // 提示是"上一句没发出去"的说明,换会话就过期了。
@@ -190,6 +202,20 @@ export function ChatPage() {
     setSearchParams({ threadId }, { replace: true });
     loadSession(threadId);
   }, [setSearchParams, loadSession]);
+
+  // 删除 thread 的善后: 删的是当前正在看的会话 → 退回新会话页(清态+清 URL)。
+  // 删别的会话不影响当前视图,只靠 [threads] invalidate 刷新侧栏即可。
+  const handleDeleteThread = useCallback(
+    (threadId: string) => {
+      if (threadId === sessionId) {
+        newConversation();
+        setPendingWorkspaceId(null);
+        setRejection(null);
+        setSearchParams({}, { replace: true });
+      }
+    },
+    [sessionId, newConversation, setSearchParams]
+  );
 
   const handleOpenSettings = useCallback(() => {
     navigate("/settings");
@@ -233,6 +259,8 @@ export function ChatPage() {
             onNewChat={handleNewChat}
             onOpenSettings={handleOpenSettings}
             onSelectThread={handleSelectThread}
+            onNewThreadInWorkspace={handleNewThreadInWorkspace}
+            onDeleteThread={handleDeleteThread}
             sessionId={sessionId}
           />
         }

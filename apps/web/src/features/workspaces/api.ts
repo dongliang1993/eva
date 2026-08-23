@@ -1,6 +1,21 @@
 import { apiFetch } from "../../shared/api/fetch";
 import type { Workspace, WorkspaceInput } from "../../types/api";
 
+/** 从 ApiError 的 "HTTP 400: {json}" 里抠出服务端给的面向用户的 error 原文。 */
+export const extractErrorText = (err: unknown): string => {
+  if (!(err instanceof Error)) return String(err);
+
+  const jsonStart = err.message.indexOf("{");
+  if (jsonStart < 0) return err.message;
+
+  try {
+    const parsed = JSON.parse(err.message.slice(jsonStart)) as { error?: unknown };
+    return typeof parsed.error === "string" ? parsed.error : err.message;
+  } catch {
+    return err.message;
+  }
+};
+
 export const listWorkspaces = async (): Promise<readonly Workspace[]> =>
   apiFetch<readonly Workspace[]>("/api/v1/workspaces");
 

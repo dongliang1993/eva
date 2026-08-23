@@ -1,6 +1,6 @@
 import { apiFetch } from "../../shared/api/fetch";
 import type { ToolRisk } from "@eva/shared";
-import type { SubagentMessage, ThreadMessage, ThreadStatus, ThreadUsage } from "../../types/api";
+import type { SubagentMessage, ThreadMessage, ThreadStatus, ThreadSummary, ThreadUsage } from "../../types/api";
 
 export const fetchThreadStatus = async (threadId: string): Promise<ThreadStatus> =>
   apiFetch<ThreadStatus>(`/api/v1/threads/${threadId}/status`);
@@ -8,9 +8,27 @@ export const fetchThreadStatus = async (threadId: string): Promise<ThreadStatus>
 export const fetchThreadUsage = async (threadId: string): Promise<ThreadUsage> =>
   apiFetch<ThreadUsage>(`/api/v1/threads/${threadId}/usage`);
 
+/** 重命名会话标题。 */
+export const renameThread = async (
+  threadId: string,
+  title: string
+): Promise<ThreadSummary> =>
+  apiFetch<ThreadSummary>(`/api/v1/threads/${threadId}`, {
+    method: "PUT",
+    body: JSON.stringify({ title })
+  });
+
+/**
+ * 删除会话(硬删: messages/runs/usage_records 等对 sessions 都是 onDelete cascade,
+ * 整链一起没,不可恢复 —— 调用方必须先确认)。
+ */
+export const deleteThread = async (threadId: string): Promise<void> =>
+  apiFetch<void>(`/api/v1/threads/${threadId}`, { method: "DELETE" });
+
 /** 拉取该会话激活链上的全部消息(含 siblingIds 版本信息)。 */
 export const fetchThreadMessages = async (
   threadId: string
+
 ): Promise<readonly ThreadMessage[]> =>
   apiFetch<readonly ThreadMessage[]>(`/api/v1/threads/${threadId}/messages`);
 

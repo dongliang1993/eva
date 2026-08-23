@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, ChevronDown, Folder, Plus } from "lucide-react";
 
 import type { Workspace } from "../../../types/api";
+import { extractErrorText } from "../api";
 import { useWorkspaces } from "../hooks/use-workspaces";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../shared/ui/popover";
 import { Tooltip, TooltipProvider } from "../../../shared/ui/tooltip";
@@ -13,21 +14,6 @@ interface WorkspacePickerProps {
 
 /** 桌面壳(通过 preload 暴露)打完目录选择后返回真实路径,浏览器里回落成输入框。 */
 const hasNativePicker = typeof window !== "undefined" && !!window.electronAPI?.pickDirectory;
-
-/** 从 ApiError 的 "HTTP 400: {json}" 里抠出服务端给的面向用户的 error 原文。 */
-const extractErrorText = (err: unknown): string => {
-  if (!(err instanceof Error)) return String(err);
-
-  const jsonStart = err.message.indexOf("{");
-  if (jsonStart < 0) return err.message;
-
-  try {
-    const parsed = JSON.parse(err.message.slice(jsonStart)) as { error?: unknown };
-    return typeof parsed.error === "string" ? parsed.error : err.message;
-  } catch {
-    return err.message;
-  }
-};
 
 export function WorkspacePicker({ workspaceId, onSelect }: WorkspacePickerProps) {
   const { workspaces, add } = useWorkspaces();

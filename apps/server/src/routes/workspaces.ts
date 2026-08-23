@@ -3,6 +3,7 @@ import type { Workspace } from "@eva/shared";
 import { z } from "zod";
 
 import { UnusableWorkspacePathError } from "../services/workspaces/workspace-guard.js";
+import { pickDirectory } from "../services/workspaces/directory-picker.js";
 
 const createWorkspaceSchema = z.object({
   path: z.string().min(1),
@@ -17,6 +18,29 @@ export const registerWorkspaceRoutes = (app: FastifyInstance): void => {
   app.get("/api/v1/workspaces", async (): Promise<readonly Workspace[]> => {
     return app.services.workspaces.list();
   });
+
+  // 本机原生目录选择框:server 弹系统框拿绝对路径返回,浏览器/Electron 都不用
+  // 手输路径。取消 → { path: null };平台弹不出 → { path: null, unsupported: true }
+  // (前端回落手输)。串行化:同时只弹一个框,避免连点叠多个原生窗。
+  let picking: Promise<unknown> | null = null;
+  app.post(
+    "/api/v1/workspaces/pick-directory",
+    async (request, reply): Promise<{ path: string | null; unsupported?: boolean }> => {
+      if (picking) {
+        reply.code(409);
+        return { path: null };
+      }
+      picking = pickDirectory();
+      try {
+        return (await picking) as { path: string | null; unsupported?: boolean };
+      } catch (error) {
+        request.log.warn({ err: error }, "native directory picker unavailable");
+        return { path: null, unsupported: true };
+      } finally {
+        picking = null;
+      }
+    }
+  );
 
   app.post(
     "/api/v1/workspaces",

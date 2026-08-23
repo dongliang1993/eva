@@ -38,6 +38,10 @@ const setThreadWorkspaceSchema = z.object({
   workspaceId: z.string().nullable()
 });
 
+const renameThreadSchema = z.object({
+  title: z.string().min(1).max(200)
+});
+
 interface ThreadCompactResult {
   success: boolean;
   compacted: boolean;
@@ -127,6 +131,23 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
 
       const updated = sessionRepo.updateWorkspace(id, body.workspaceId);
 
+      if (!updated) {
+        reply.code(404);
+        return { error: "Thread not found" };
+      }
+
+      return listThreadSummaries(app, 1000).find((item) => item.id === id)!;
+    }
+  );
+
+  app.put(
+    "/api/v1/threads/:id",
+    async (request, reply): Promise<ThreadSummary | { error: string }> => {
+      const { id } = request.params as { id: string };
+      const body = renameThreadSchema.parse(request.body ?? {});
+      const sessionRepo = new DrizzleSessionRepository(app.infra.db);
+
+      const updated = sessionRepo.updateTitle(id, body.title);
       if (!updated) {
         reply.code(404);
         return { error: "Thread not found" };
