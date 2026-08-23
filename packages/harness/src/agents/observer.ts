@@ -1,7 +1,15 @@
+import type { StreamTokenUsage } from "@eva/shared";
+
 export interface TokenUsage {
   readonly promptTokens: number;
   readonly completionTokens: number;
   readonly totalTokens: number;
+  /** T40:命中 prompt cache 的 input tokens(SDK inputTokenDetails.cacheReadTokens)。非 cache 模型留 undefined。 */
+  readonly cachedInputTokens?: number;
+  /** T40:写入 prompt cache 的 input tokens(SDK inputTokenDetails.cacheWriteTokens)。 */
+  readonly cacheWriteTokens?: number;
+  /** T40:o1/Claude thinking 的 reasoning tokens(SDK outputTokenDetails.reasoningTokens)。 */
+  readonly reasoningTokens?: number;
 }
 
 export type LoopTransitionReason =
@@ -114,10 +122,80 @@ export const ZERO_TOKEN_USAGE: TokenUsage = {
   totalTokens: 0
 };
 
-export const addTokenUsage = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
-  promptTokens: a.promptTokens + b.promptTokens,
-  completionTokens: a.completionTokens + b.completionTokens,
-  totalTokens: a.totalTokens + b.totalTokens
+export const addTokenUsage = (a: TokenUsage, b: TokenUsage): TokenUsage => {
+  // 可选明细字段:两边都有才相加,单边有就保留,全无 → undefined(不落 0,语义干净)。
+  const opt = (
+    x: number | undefined,
+    y: number | undefined
+  ): number | undefined => (x === undefined ? y : y === undefined ? x : x + y);
+  const cachedInputTokens = opt(a.cachedInputTokens, b.cachedInputTokens);
+  const cacheWriteTokens = opt(a.cacheWriteTokens, b.cacheWriteTokens);
+  const reasoningTokens = opt(a.reasoningTokens, b.reasoningTokens);
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {})
+  };
+};
+
+/**
+ * 从 SDK LanguageModelUsage 读 TokenUsage。SDK v7 已把 cache/reasoning 归一进
+ * inputTokenDetails/outputTokenDetails(ai@7.0.64)——这里读归一出口,跨 provider
+ * 免费,不抠 Anthropic 私货 cacheCreationInputTokens。
+ * 明细缺失 → undefined(不写 0),由落库层 ?? 0。
+ */
+export const readTokenUsage = (
+  u:
+    | {
+        inputTokens: number | undefined;
+        outputTokens: number | undefined;
+        totalTokens: number | undefined;
+        inputTokenDetails?: {
+          noCacheTokens?: number | undefined;
+          cacheReadTokens?: number | undefined;
+          cacheWriteTokens?: number | undefined;
+        };
+        outputTokenDetails?: {
+          textTokens?: number | undefined;
+          reasoningTokens?: number | undefined;
+        };
+      }
+    | undefined
+): TokenUsage | undefined => {
+  if (!u) return undefined;
+  const promptTokens = u.inputTokens ?? 0;
+  const completionTokens = u.outputTokens ?? 0;
+  const totalTokens = u.totalTokens ?? promptTokens + completionTokens;
+  if (promptTokens === 0 && completionTokens === 0 && totalTokens === 0)
+    return undefined;
+  const cachedInputTokens = u.inputTokenDetails?.cacheReadTokens ?? undefined;
+  const cacheWriteTokens = u.inputTokenDetails?.cacheWriteTokens ?? undefined;
+  const reasoningTokens = u.outputTokenDetails?.reasoningTokens ?? undefined;
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {})
+  };
+};
+
+/** TokenUsage → SSE finish 帧的 StreamTokenUsage(蛇形 → 驼峰直透,明细缺则省键)。 */
+export const toStreamTokenUsage = (u: TokenUsage): StreamTokenUsage => ({
+  inputTokens: u.promptTokens,
+  outputTokens: u.completionTokens,
+  totalTokens: u.totalTokens,
+  ...(u.cachedInputTokens !== undefined
+    ? { cachedInputTokens: u.cachedInputTokens }
+    : {}),
+  ...(u.cacheWriteTokens !== undefined
+    ? { cacheWriteTokens: u.cacheWriteTokens }
+    : {}),
+  ...(u.reasoningTokens !== undefined ? { reasoningTokens: u.reasoningTokens } : {})
 });
 
 export const extractTokenUsage = (

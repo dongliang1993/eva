@@ -59,13 +59,44 @@ describe("usage_records 双写", () => {
     expect(rows[0]!.date).toMatch(/^\d{4}-\d{2}-\d{2}$/); // UTC YYYY-MM-DD
   });
 
-  it("settle 不带 usage(aborted/error)→ usage_records 不插行", () => {
+  it("settle 带 cache_write → usage_records.cache_write_input_tokens 非零(T40)", () => {
     const { db, runs, usage } = setup();
     seedSession(db, "s1");
 
-    settleRun(runs, "s1", { status: "aborted" });
+    const runId = settleRun(runs, "s1", {
+      status: "completed",
+      assistantMessageId: randomUUID(),
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        cachedInputTokens: 30,
+        cacheWriteTokens: 20,
+        reasoningTokens: 10
+      }
+    });
 
-    expect(usage.listBySessionId("s1")).toHaveLength(0);
+    const rows = usage.listBySessionId("s1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      runId,
+      cachedInputTokens: 30,
+      cacheWriteTokens: 20, // 新列真实落库
+      reasoningTokens: 10
+    });
+  });
+
+  it("settle 不带 cache_write → cache_write_input_tokens 落 0", () => {
+    const { db, runs, usage } = setup();
+    seedSession(db, "s1");
+
+    settleRun(runs, "s1", {
+      status: "completed",
+      assistantMessageId: randomUUID(),
+      usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 }
+    });
+
+    expect(usage.listBySessionId("s1")[0]?.cacheWriteTokens).toBe(0);
   });
 });
 
@@ -88,7 +119,7 @@ describe("sumUsageBySessionId 改走新表", () => {
     settleRun(runs, "s1", {
       status: "completed",
       assistantMessageId: randomUUID(),
-      usage: { inputTokens: 200, outputTokens: 100, totalTokens: 320, reasoningTokens: 20 }
+      usage: { inputTokens: 200, outputTokens: 100, totalTokens: 320, reasoningTokens: 20, cacheWriteTokens: 5 }
     });
     settleRun(runs, "s1", { status: "aborted" }); // 无 usage
 
@@ -99,7 +130,8 @@ describe("sumUsageBySessionId 改走新表", () => {
       outputTokens: 150,
       totalTokens: 470,
       reasoningTokens: 20,
-      cachedInputTokens: 10
+      cachedInputTokens: 10,
+      cacheWriteTokens: 5 // T40:五元组齐
     });
     // runCount 语义不漂移:该会话 run 总数(含无 usage 的),不是 usage_records 行数
     expect(runCount).toBe(3);
@@ -116,7 +148,8 @@ describe("sumUsageBySessionId 改走新表", () => {
       outputTokens: 0,
       totalTokens: 0,
       reasoningTokens: 0,
-      cachedInputTokens: 0
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0
     });
     expect(runCount).toBe(1);
   });

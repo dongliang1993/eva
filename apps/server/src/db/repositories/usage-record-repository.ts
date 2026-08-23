@@ -14,6 +14,7 @@ export interface UsageRecordInsert {
   readonly outputTokens: number;
   readonly reasoningTokens: number;
   readonly cachedInputTokens: number;
+  readonly cacheWriteTokens: number;
   readonly totalTokens: number;
 }
 
@@ -27,6 +28,7 @@ export interface DailyUsageRow {
   readonly outputTokens: number;
   readonly reasoningTokens: number;
   readonly cachedInputTokens: number;
+  readonly cacheWriteTokens: number;
   readonly totalTokens: number;
 }
 
@@ -40,6 +42,7 @@ const toRow = (row: typeof usageRecords.$inferSelect): UsageRecordRow => ({
   outputTokens: row.outputTokens,
   reasoningTokens: row.reasoningTokens,
   cachedInputTokens: row.cachedInputTokens,
+  cacheWriteTokens: row.cacheWriteTokens,
   totalTokens: row.totalTokens,
   createdAt: row.createdAt
 });
@@ -64,6 +67,7 @@ export class UsageRecordRepository {
         outputTokens: input.outputTokens,
         reasoningTokens: input.reasoningTokens,
         cachedInputTokens: input.cachedInputTokens,
+        cacheWriteTokens: input.cacheWriteTokens,
         totalTokens: input.totalTokens
       })
       .run();
@@ -86,6 +90,7 @@ export class UsageRecordRepository {
     readonly totalTokens: number;
     readonly reasoningTokens: number;
     readonly cachedInputTokens: number;
+    readonly cacheWriteTokens: number;
   } {
     const row = this.db
       .select({
@@ -93,7 +98,8 @@ export class UsageRecordRepository {
         outputTokens: sql<number>`COALESCE(SUM(${usageRecords.outputTokens}), 0)`,
         totalTokens: sql<number>`COALESCE(SUM(${usageRecords.totalTokens}), 0)`,
         reasoningTokens: sql<number>`COALESCE(SUM(${usageRecords.reasoningTokens}), 0)`,
-        cachedInputTokens: sql<number>`COALESCE(SUM(${usageRecords.cachedInputTokens}), 0)`
+        cachedInputTokens: sql<number>`COALESCE(SUM(${usageRecords.cachedInputTokens}), 0)`,
+        cacheWriteTokens: sql<number>`COALESCE(SUM(${usageRecords.cacheWriteTokens}), 0)`
       })
       .from(usageRecords)
       .where(eq(usageRecords.sessionId, sessionId))
@@ -104,7 +110,8 @@ export class UsageRecordRepository {
       outputTokens: row?.outputTokens ?? 0,
       totalTokens: row?.totalTokens ?? 0,
       reasoningTokens: row?.reasoningTokens ?? 0,
-      cachedInputTokens: row?.cachedInputTokens ?? 0
+      cachedInputTokens: row?.cachedInputTokens ?? 0,
+      cacheWriteTokens: row?.cacheWriteTokens ?? 0
     };
   }
 
@@ -130,6 +137,7 @@ export class UsageRecordRepository {
         outputTokens: sql<number>`COALESCE(SUM(${usageRecords.outputTokens}), 0)`,
         reasoningTokens: sql<number>`COALESCE(SUM(${usageRecords.reasoningTokens}), 0)`,
         cachedInputTokens: sql<number>`COALESCE(SUM(${usageRecords.cachedInputTokens}), 0)`,
+        cacheWriteTokens: sql<number>`COALESCE(SUM(${usageRecords.cacheWriteTokens}), 0)`,
         totalTokens: sql<number>`COALESCE(SUM(${usageRecords.totalTokens}), 0)`
       })
       .from(usageRecords)

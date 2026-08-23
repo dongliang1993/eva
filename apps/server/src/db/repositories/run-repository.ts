@@ -117,6 +117,7 @@ export class DrizzleRunRepository {
           outputTokens: input.usage.outputTokens ?? 0,
           reasoningTokens: input.usage.reasoningTokens ?? 0,
           cachedInputTokens: input.usage.cachedInputTokens ?? 0,
+          cacheWriteTokens: input.usage.cacheWriteTokens ?? 0,
           totalTokens: input.usage.totalTokens ?? 0
         });
       }

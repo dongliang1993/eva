@@ -225,6 +225,8 @@ export const usageRecords = sqliteTable(
     outputTokens: integer("output_tokens").notNull().default(0),
     reasoningTokens: integer("reasoning_tokens").notNull().default(0),
     cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    /** T40:写入 prompt cache 的 input tokens(0025 加列;T21 时 SDK 不暴露而砍,v7 已标准化)。 */
+    cacheWriteTokens: integer("cache_write_input_tokens").notNull().default(0),
     totalTokens: integer("total_tokens").notNull().default(0),
     createdAt: text("created_at")
       .notNull()

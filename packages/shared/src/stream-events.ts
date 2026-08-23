@@ -16,6 +16,8 @@ export interface StreamTokenUsage {
   totalTokens?: number;
   reasoningTokens?: number;
   cachedInputTokens?: number;
+  /** T40:写入 prompt cache 的 input tokens(cache 五元组之一)。 */
+  cacheWriteTokens?: number;
 }
 
 /** finish 帧携带的单条工具调用摘要（对齐 harness AgentToolCallResult）。 */

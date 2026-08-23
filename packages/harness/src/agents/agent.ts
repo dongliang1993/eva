@@ -20,6 +20,8 @@ import { buildAgentSystemPrompt } from "../prompts/prompt-builder.js";
 import {
   ZERO_TOKEN_USAGE,
   addTokenUsage,
+  readTokenUsage,
+  toStreamTokenUsage,
   type AgentObserver,
   type AgentTelemetryEvent,
   type ContextCompactionReason,
@@ -76,12 +78,6 @@ const MAX_NOTICE_ROUNDS = 4;
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "AbortError";
 
-const toStreamTokenUsage = (u: TokenUsage): StreamTokenUsage => ({
-  inputTokens: u.promptTokens,
-  outputTokens: u.completionTokens,
-  totalTokens: u.totalTokens,
-});
-
 const toStreamToolCallSummary = (
   tc: AgentToolCallResult,
 ): StreamToolCallSummary => ({
@@ -99,24 +95,6 @@ const formatContext = (
   !context || Object.keys(context).length === 0
     ? undefined
     : `Additional context:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``;
-
-const readTokenUsage = (
-  u:
-    | {
-        inputTokens: number | undefined;
-        outputTokens: number | undefined;
-        totalTokens: number | undefined;
-      }
-    | undefined,
-): TokenUsage | undefined => {
-  if (!u) return undefined;
-  const promptTokens = u.inputTokens ?? 0;
-  const completionTokens = u.outputTokens ?? 0;
-  const totalTokens = u.totalTokens ?? promptTokens + completionTokens;
-  if (promptTokens === 0 && completionTokens === 0 && totalTokens === 0)
-    return undefined;
-  return { promptTokens, completionTokens, totalTokens };
-};
 
 const resolveSystemMessage = (
   prompt: string | SystemModelMessage | undefined,
