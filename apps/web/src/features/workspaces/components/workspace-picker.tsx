@@ -4,6 +4,7 @@ import { Check, ChevronDown, Folder, Plus } from "lucide-react";
 import type { Workspace } from "../../../types/api";
 import { extractErrorText } from "../api";
 import { useWorkspaces } from "../hooks/use-workspaces";
+import { pickWorkspaceDirectory } from "../pick-directory";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../shared/ui/popover";
 import { Tooltip, TooltipProvider } from "../../../shared/ui/tooltip";
 
@@ -11,9 +12,6 @@ interface WorkspacePickerProps {
   readonly workspaceId: string | null;
   readonly onSelect: (workspaceId: string | null) => void;
 }
-
-/** 桌面壳(通过 preload 暴露)打完目录选择后返回真实路径,浏览器里回落成输入框。 */
-const hasNativePicker = typeof window !== "undefined" && !!window.electronAPI?.pickDirectory;
 
 export function WorkspacePicker({ workspaceId, onSelect }: WorkspacePickerProps) {
   const { workspaces, add } = useWorkspaces();
@@ -44,13 +42,14 @@ export function WorkspacePicker({ workspaceId, onSelect }: WorkspacePickerProps)
   };
 
   const handleAdd = async () => {
-    if (hasNativePicker) {
-      const picked = await window.electronAPI!.pickDirectory();
-      if (picked) {
-        await submitPath(picked);
-      }
+    // Electron IPC → server 弹系统框,拿到绝对路径直接建并选中;取消静默;
+    // 只有都弹不出才回落手输路径(与侧栏新建工作区一致)。
+    const result = await pickWorkspaceDirectory();
+    if (result.kind === "picked") {
+      await submitPath(result.path);
       return;
     }
+    if (result.kind === "cancelled") return;
 
     setShowAdd(true);
     setError(null);
@@ -121,7 +120,7 @@ export function WorkspacePicker({ workspaceId, onSelect }: WorkspacePickerProps)
             <div className="max-h-72 overflow-y-auto py-1">
               <button
                 type="button"
-                className={`flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors ${workspaceId === null
+                className={`flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors rounded-md ${workspaceId === null
                   ? "bg-accent"
                   : "hover:bg-accent/50"
                   }`}
@@ -138,7 +137,7 @@ export function WorkspacePicker({ workspaceId, onSelect }: WorkspacePickerProps)
                 <button
                   key={workspace.id}
                   type="button"
-                  className={`flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors ${workspace.id === workspaceId
+                  className={`flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors rounded-md ${workspace.id === workspaceId
                     ? "bg-accent"
                     : "hover:bg-accent/50"
                     }`}
@@ -159,7 +158,7 @@ export function WorkspacePicker({ workspaceId, onSelect }: WorkspacePickerProps)
 
               <button
                 type="button"
-                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-muted-foreground hover:bg-accent/50 transition-colors"
+                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-muted-foreground rounded-md hover:bg-accent/50 transition-colors"
                 onClick={handleAdd}
               >
                 <Plus size={14} />

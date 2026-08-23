@@ -107,12 +107,24 @@ export function ChatPage() {
     if (sessionId === syncedSessionRef.current) return;
     if (threads === undefined) return; // 列表还没到,等下一轮
 
+    if (sessionId === null) {
+      syncedSessionRef.current = sessionId;
+      setSelectedModel(null);
+      return;
+    }
+
+    const thread = threads.find((t) => t.id === sessionId);
+    if (thread === undefined) {
+      // 新会话刚建,threads 缓存还是旧的(不含它)—— 别用 null 盖掉用户刚选的
+      // 模型,等下一轮 invalidate 把新 thread 带回来再回填。
+      return;
+    }
+
     syncedSessionRef.current = sessionId;
-    setSelectedModel(
-      sessionId === null
-        ? null
-        : threads.find((t) => t.id === sessionId)?.model ?? null
-    );
+    // 新会话的 model 是 per-run 的,第一条消息落库前 DB 里可能是 null —— 同样别盖。
+    if (thread.model !== null) {
+      setSelectedModel(thread.model);
+    }
   }, [sessionId, threads]);
 
   // 新会话还没有 sessionId,没法 PUT —— 先把用户选的工作区暂存在这里。

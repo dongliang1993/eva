@@ -3,11 +3,10 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { SettingsHeader } from "./components/settings-header";
 import { ResizableSidebar } from "../../shared/ui/resizable-sidebar";
-import { ThemeToggle } from "../../shared/ui/theme-toggle";
 
 const NAV_ITEMS = [
   { to: "/settings/models", label: "通用", icon: SettingsIcon },
-  { to: "/settings/providers", label: "供应商", icon: Store },
+  { to: "/settings/providers", label: "提供商", icon: Store },
   { to: "/settings/memory", label: "记忆", icon: Brain },
   { to: "/settings/security", label: "Security", icon: ShieldCheck },
   { to: "/settings/mcp", label: "MCP", icon: Plug }
@@ -24,18 +23,15 @@ export function SettingsLayout() {
   const settingsNav = (
     <div className="flex h-full flex-col bg-sidebar">
       <div className="flex items-center justify-between px-3 py-3">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="flex items-center gap-2 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-            onClick={() => navigate("/chat")}
-            title="返回聊天"
-          >
-            <ArrowLeft size={18} />
-            <span className="text-sm font-medium text-foreground">设置</span>
-          </button>
-        </div>
-        <ThemeToggle />
+        <button
+          type="button"
+          className="flex items-center gap-2 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors w-full"
+          onClick={() => navigate("/chat")}
+          title="返回聊天"
+        >
+          <ArrowLeft size={18} />
+          <span className="text-sm font-medium text-foreground">设置</span>
+        </button>
       </div>
 
       <nav className="flex-1 px-2 py-2 space-y-1">

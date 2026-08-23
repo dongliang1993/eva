@@ -19,6 +19,7 @@ import { apiFetch } from "../../../shared/api/fetch";
 import { isElectron } from "../../../shared/runtime";
 import type { ThreadSummary, Workspace } from "../../../types/api";
 import { extractErrorText } from "../../workspaces/api";
+import { pickWorkspaceDirectory } from "../../workspaces/pick-directory";
 import { useWorkspaces } from "../../workspaces/hooks/use-workspaces";
 import {
   ContextMenu,
@@ -37,7 +38,6 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "../../../shared/ui/popover";
 import { deleteThread, renameThread } from "../api";
 import { SessionStatusDot } from "./session-status-dot";
-import { ThemeToggle } from "../../../shared/ui/theme-toggle";
 
 interface SidebarProps {
   readonly collapsed: boolean;
@@ -51,30 +51,6 @@ interface SidebarProps {
   readonly onDeleteThread: (threadId: string) => void;
   readonly sessionId: string | null;
 }
-
-/** Electron 壳经 preload 暴露的系统原生目录框(最高优先,体验最正)。 */
-const hasElectronPicker =
-  typeof window !== "undefined" && typeof window.electronAPI?.pickDirectory === "function";
-
-type ServerPick =
-  | { readonly kind: "picked"; readonly path: string }
-  | { readonly kind: "cancelled" }
-  | { readonly kind: "unavailable" };
-
-/** 让本机 server 弹系统目录框。区分「选中 / 取消 / server 弹不出」三种结果,
- *  只有「弹不出」才回落手输。 */
-const pickDirectoryViaServer = async (): Promise<ServerPick> => {
-  try {
-    const res = await apiFetch<{ path: string | null; unsupported?: boolean }>(
-      "/api/v1/workspaces/pick-directory",
-      { method: "POST" }
-    );
-    if (res.path) return { kind: "picked", path: res.path };
-    return res.unsupported ? { kind: "unavailable" } : { kind: "cancelled" };
-  } catch {
-    return { kind: "unavailable" };
-  }
-};
 
 /** 「未分类」组的固定 id(workspace 为 null 的桶)。 */
 const UNCATEGORIZED_ID = "__uncategorized__";
@@ -361,21 +337,14 @@ export function Sidebar({
   };
 
   const handleAddWorkspace = async () => {
-    // 1) Electron 壳: IPC → 系统原生目录框,拿绝对路径直接建。
-    if (hasElectronPicker) {
-      const picked = await window.electronAPI!.pickDirectory();
-      if (picked) await submitWorkspacePath(picked);
-      return;
-    }
-    // 2) 纯浏览器: server 跑在本机,让 server 弹系统原生目录框拿绝对路径。
-    //    选中直接建;取消静默;只有 server 弹不出才回落手输。
-    const result = await pickDirectoryViaServer();
+    // Electron IPC → server 弹系统框,拿到绝对路径直接建;取消静默;只有都
+    // 弹不出才回落手输路径 Popover。
+    const result = await pickWorkspaceDirectory();
     if (result.kind === "picked") {
       await submitWorkspacePath(result.path);
       return;
     }
     if (result.kind === "cancelled") return;
-    // 3) server 弹不出(平台不支持/无 GUI)→ 才回落手输路径 Popover。
     setAddOpen(true);
     setAddError(null);
   };
@@ -408,7 +377,7 @@ export function Sidebar({
 
       {/* Header: brand + collapse toggle */}
       <div
-        className={`flex shrink-0 items-center ${
+        className={`flex mb-2 shrink-0 items-center ${
           collapsed ? "justify-center py-3" : "justify-between px-3 py-2"
         }`}
       >
@@ -417,11 +386,11 @@ export function Sidebar({
         )}
         <button
           type="button"
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
           onClick={onToggle}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
+          {collapsed ? <PanelLeft size={18} /> : <PanelLeft size={18} />}
         </button>
       </div>
 
@@ -456,7 +425,7 @@ export function Sidebar({
         <div className="flex-1 overflow-y-auto px-2">
           {/* 「工作区」区头: 标题 + hover 出行尾新建按钮(原生选目录 / 手输路径) */}
           <div className="group flex w-full items-center justify-between px-1.5 pb-1 pt-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground select-none">
+            <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground select-none h-8 flex items-center">
               工作区
             </span>
             <Popover
@@ -527,7 +496,7 @@ export function Sidebar({
           {groups.length === 0 ? (
             <p className="px-2 py-4 text-xs text-muted-foreground">No conversations yet</p>
           ) : (
-            <div className="space-y-3">
+            <div>
               {groups.map((group) => {
                 const isCollapsed = collapsedGroups.has(group.id);
                 const isUncategorized = group.workspace === null;
@@ -559,25 +528,31 @@ export function Sidebar({
                         }}
                         title={isCollapsed ? "展开" : "折叠"}
                       >
-                        {isCollapsed ? (
-                          <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
-                        ) : (
-                          <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
-                        )}
+                        {/* icon 与 chevron 共用一个 16px 槽位(对齐 disclosure-row):
+                            默认显示 folder/状态,hover 就地换成 chevron。同槽位 → 不抖动。 */}
+                        <span className="relative inline-flex h-4 w-4 flex-none items-center justify-center text-muted-foreground">
+                          <span className="inline-flex items-center justify-center transition-opacity duration-100 group-hover:opacity-0">
+                            {isUncategorized || ws === null ? (
+                              <ChevronDown size={16} />
+                            ) : (
+                              <Folder size={16} />
+                            )}
+                          </span>
+                          <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 transition-opacity duration-100 group-hover:opacity-100">
+                            {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                          </span>
+                        </span>
                         {isUncategorized || ws === null ? (
                           <span className="truncate text-sm font-medium text-muted-foreground">
                             未分类
                           </span>
                         ) : (
-                          <>
-                            <Folder size={14} className="shrink-0 text-muted-foreground" />
-                            <span
-                              className="truncate text-sm font-medium text-foreground"
-                              title={ws.path}
-                            >
-                              {ws.name}
-                            </span>
-                          </>
+                          <span
+                            className="truncate text-sm font-medium text-foreground"
+                            title={ws.path}
+                          >
+                            {ws.name}
+                          </span>
                         )}
 
                         {ws !== null ? (
@@ -639,25 +614,24 @@ export function Sidebar({
         </div>
       )}
 
-      {/* Bottom: theme toggle + settings */}
+      {/* Bottom: settings */}
       <div
         className={`shrink-0 ${
           collapsed
             ? "flex flex-col items-center gap-1 py-2"
-            : "flex items-center justify-between px-2 py-2"
+            : "flex items-center px-2 py-2"
         }`}
       >
-        <ThemeToggle />
         <button
           type="button"
           className={`flex items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors ${
             collapsed ? "h-9 w-9 justify-center" : "flex-1 justify-start gap-2 px-2.5 py-2 text-sm"
           }`}
           onClick={onOpenSettings}
-          title="Settings"
+          title="设置"
         >
           <Settings size={16} />
-          {!collapsed && <span>Settings</span>}
+          {!collapsed && <span>设置</span>}
         </button>
       </div>
     </div>
