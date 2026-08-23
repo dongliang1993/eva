@@ -100,7 +100,6 @@
 - [ ] agent 的 cwd = workspace.path，文件工具在其目录干活
 - [ ] workspace 有 CLAUDE.md 时，其内容注入 system prompt
 - **文档**：03 §4.1 workspaces 表 / 10 §3 features 切分
-- **接缝**：这是 WeaveLynx 视角补的，06 篇没有
 
 ### S4 · 工具 + Agent loop + 审批（3–4 天）
 **做**：Read/Write/Edit/Bash + `stopWhen: stepCountIs(N)` + tool-overflow + 危险工具审批闸门。
@@ -167,7 +166,7 @@
 > 这批任务来自 Alma v0.0.990 调研（16–21 篇）的「值得抄」清单（16 §3.1）。它们不是新阶段，而是穿插进关键路径的增量补丁。**每个任务的「参考文档」都标到 v2 篇目的具体小节**——动手前先读那一节，规格都在那里。
 > 排序即建议施工顺序：`S18 → S19 → S7 → S24 → S6 → S9`。S20–S23 是低耦合小件，可穿插。
 
-### S18 · 审批中心升级（S4 收尾，0.5–1 天）⬅ 下一个就做
+### S18 · 审批中心升级（S4 收尾，0.5–1 天）✅ 已完成（r7 T27–T31）
 **做**：把现有 approval-gateway 补齐到 Alma `Sy()` 形态的三个可抄点（不抄 120s 超时——14 §4.4 已定「永远等人」）：
 1. `allow_always` 改 **thread 作用域 policy key**：`bash:thread:<id>:command:<完整命令>` / `:all`、`mcp:thread:<id>:tool:<name>`。
 2. Bash 命令**本地规则快速分级**：安全命令枚举（ls/cat/grep…直放）vs 需批命令枚举（rm/curl|sh…必批），只抄 Alma 指令的本地规则前半段，小模型二审推迟。
@@ -178,7 +177,7 @@
 - [ ] 审批决策（含 reason）出现在消息 part 上，刷新后仍在
 **文档**：**22 篇（S18 技术方案，含现状盘点 + r7 施工拆分 T27–T30）** / 16 §3.1-3（取舍与边界）/ 04 修订框（Alma `Sy()` 七级放行链 + policy key 模板）/ 14 §4.4（不抄超时的理由）/ **施工卡：`docs/plans/r7/`（T27–T30）**
 
-### S19 · AutoCompact 步中压缩 + 工具数安全网（1–2 天）
+### S19 · AutoCompact 步中压缩 + 工具数安全网（1–2 天）⬅ 下一个就做
 **做**：给 Eva 已有的 proactive/reactive compact 补两层 Alma 有的：
 1. **prepareStep 步中压缩**：多步工具循环中途 context 溢出当场压缩，不等 turn 结束。
 2. **上下文钳制学习**：模型报 token 超限就把它登记的 contextWindow 永久钳小（写 settings/model_capabilities）。

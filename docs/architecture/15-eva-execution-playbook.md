@@ -329,17 +329,17 @@
 > `docs/plans/r2/00-overview.md` §2.1）。下面的图反映实际完成情况。
 
 ```
-已完成：S0 ✅ S1 ✅ S1.1 ✅ S2 ✅ S3 ✅ S4(主体) ⚙️ S5 ✅ S8 ✅ 记忆 ✅ compact ✅
-   │                    │
-   ├─> S18(审批收尾) ──> S19(AutoCompact+安全网) ──> S7(fork-join+崩溃补跑)
-   │                                                          │
+已完成：S0 ✅ S1 ✅ S1.1 ✅ S2 ✅ S3 ✅ S4(主体) ✅ S5 ✅ S8 ✅ 记忆 ✅ compact ✅ S18 ✅ S11 ✅
+                                  │
+   ├─> S19(AutoCompact+安全网) ──> S7(fork-join+崩溃补跑)
+   │                                        │
    ├─> S24(hooks 前奏) ──> S6(扩展宿主) ──> S9(Git面板=S6验收)
-   │                                                          │
-   │                                                  S22(auto-worktree)/S23(preview) ← S9 后迭代
+   │                                        │
+   │                                S22(auto-worktree)/S23(preview) ← S9 后迭代
    │
    └─> S21(refs) ← 等 S7+S9 对象凑齐；S20(usage) 任意穿插
 
-S11(桌面化) 可与 B/C 后期并行；S10 独立；S12–S17 全独立按需
+S18/S11 已完成移出关键路径；S10 独立；S12–S17 全独立按需
 ```
 
 **关键路径**（v2 重排后最短通路）：
@@ -348,7 +348,7 @@ S11(桌面化) 可与 B/C 后期并行；S10 独立；S12–S17 全独立按需
 S18 → S19 → S7 → S24 → S6 → S9 → S11
 ```
 
-**下一步（S18 审批中心升级）**：见 11 §3.5 S18 + 16 §3.1-3 + 20 §审批。S18/S19 是 S4 遗留收尾，半天到两天，先清掉再上 S7。
+**下一步（S19 AutoCompact 步中压缩 + 工具数安全网）**：见 11 §3.5 S19 + 16 §3.1-4,5 + 04 修订框 + 20 §compact。~~S18~~ 已完成（r7 T27–T31：thread policy key + bash 直放 + 决策回写 + 退役 alwaysAllowTools，详见 `docs/plans/r7/00-overview.md` + `docs/architecture/22-s18-approval-center.md`）；S11 桌面化也已提前完成（r8 T32–T35，端到端含自更新，见 `docs/plans/r8/00-overview.md`）。**当前关键路径：`S19 → S7 → S24 → S6 → S9`**（S18 ✅ / S11 ✅ 已移出）。施工卡：`docs/plans/r9/`。
 
 ---
 
