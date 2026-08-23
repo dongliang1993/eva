@@ -32,6 +32,11 @@ export interface DailyUsageRow {
   readonly totalTokens: number;
 }
 
+/** T41:usage/stats 的行 —— date+model 分组。 */
+export interface UsageStatsRow extends DailyUsageRow {
+  readonly model: string | null;
+}
+
 const toRow = (row: typeof usageRecords.$inferSelect): UsageRecordRow => ({
   id: row.id,
   runId: row.runId,
@@ -144,6 +149,52 @@ export class UsageRecordRepository {
       .where(and(...conditions))
       .groupBy(usageRecords.date)
       .orderBy(asc(usageRecords.date))
+      .all();
+  }
+
+  /**
+   * T41:按 date+model 分组聚合 —— /api/usage/stats 的数据源。
+   *
+   * provider 过滤走 model 冗余列 LIKE 'providerId:%'(T21 反范式口径:model =
+   * "providerId:modelId",无独立 provider_id 列,为其再加列是过度规范化)。
+   * modelId 过滤:裸 id 走后缀匹配 '%:modelId',全限定 "pid:mid" 走精确 =。
+   */
+  sumByDateAndModel(opts: {
+    readonly fromDate: string;
+    readonly toDate: string;
+    readonly providerId?: string;
+    readonly modelId?: string;
+  }): readonly UsageStatsRow[] {
+    const conditions = [
+      gte(usageRecords.date, opts.fromDate),
+      lte(usageRecords.date, opts.toDate),
+      ...(opts.providerId !== undefined
+        ? [sql`${usageRecords.model} LIKE ${opts.providerId + ":%"}`]
+        : []),
+      ...(opts.modelId !== undefined
+        ? [
+            opts.modelId.includes(":")
+              ? eq(usageRecords.model, opts.modelId)
+              : sql`${usageRecords.model} LIKE ${"%:" + opts.modelId}`
+          ]
+        : [])
+    ];
+
+    return this.db
+      .select({
+        date: usageRecords.date,
+        model: usageRecords.model,
+        inputTokens: sql<number>`COALESCE(SUM(${usageRecords.inputTokens}), 0)`,
+        outputTokens: sql<number>`COALESCE(SUM(${usageRecords.outputTokens}), 0)`,
+        reasoningTokens: sql<number>`COALESCE(SUM(${usageRecords.reasoningTokens}), 0)`,
+        cachedInputTokens: sql<number>`COALESCE(SUM(${usageRecords.cachedInputTokens}), 0)`,
+        cacheWriteTokens: sql<number>`COALESCE(SUM(${usageRecords.cacheWriteTokens}), 0)`,
+        totalTokens: sql<number>`COALESCE(SUM(${usageRecords.totalTokens}), 0)`
+      })
+      .from(usageRecords)
+      .where(and(...conditions))
+      .groupBy(usageRecords.date, usageRecords.model)
+      .orderBy(asc(usageRecords.date), asc(usageRecords.model))
       .all();
   }
 }
