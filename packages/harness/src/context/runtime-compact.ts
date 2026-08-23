@@ -4,17 +4,25 @@ import type {
   SystemModelMessage,
   ToolModelMessage,
   ToolResultPart,
-  ToolCallPart
+  ToolCallPart,
+  UserModelMessage
 } from "ai";
 
 import type { ContextWindowPolicy } from "./policy.js";
 
 const ESTIMATED_CHARS_PER_TOKEN = 4;
-const RUNTIME_SUMMARY_PREFIX = "Runtime summary:";
+// T37: 压缩产出对齐 Alma —— <context_summary> 包裹的 user 消息(不再是 system Runtime summary)。
+const CONTEXT_SUMMARY_OPEN = "<context_summary>";
+const CONTEXT_SUMMARY_CLOSE = "</context_summary>";
 const MAX_SUMMARY_ITEMS = 8;
 const MAX_SUMMARY_TEXT_LENGTH = 220;
 const PRESERVED_RECENT_RUNTIME_MESSAGES = 4;
 const PRESERVED_RECENT_REACTIVE_MESSAGES = 2;
+
+/** T37 §2.3: 压缩后告诉模型「接着干,别从头再来」(Alma 的 system-reminder)。 */
+const CONTEXT_SUMMARY_REMINDER =
+  "Context was compacted. The <context_summary> above replaces earlier messages. " +
+  "Continue from where the task left off — do NOT start over.";
 
 export interface RuntimeCompactResult {
   readonly messages: ModelMessage[];
@@ -155,11 +163,11 @@ export const isOverflowing = (
 
 const isRuntimeSummaryMessage = (
   message: ModelMessage | undefined
-): message is SystemModelMessage =>
+): message is UserModelMessage =>
   message !== undefined
-  && message.role === "system"
+  && message.role === "user"
   && typeof message.content === "string"
-  && message.content.startsWith(RUNTIME_SUMMARY_PREFIX);
+  && message.content.startsWith(CONTEXT_SUMMARY_OPEN);
 
 const buildToolNameByCallId = (
   messages: readonly ModelMessage[]
@@ -229,39 +237,82 @@ const summarizeMessage = (
   return undefined;
 };
 
+/** 从消息里抽 tool 涉及的文件路径(read/write/edit/list 的 path 参数)。 */
+const extractFilePaths = (messages: readonly ModelMessage[]): string[] => {
+  const paths = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const tc of readToolCalls(message)) {
+      const input = tc.input as Record<string, unknown> | undefined;
+      const p = input?.path ?? input?.file ?? input?.filePath;
+      if (typeof p === "string" && p) paths.add(p);
+    }
+  }
+  return [...paths];
+};
+
+/**
+ * T37 §2.2: 六段摘要结构(对齐 Alma main:71821 DO 常量的六段)。
+ * 本地规则拼装(不引入 LLM 摘要成本),从 compactedMessages 抽取。
+ */
 const buildRuntimeSummary = (
   compactedMessages: readonly ModelMessage[],
   previousSummary: string | undefined
 ): string => {
   const toolNameByCallId = buildToolNameByCallId(compactedMessages);
-  const summaryItems = compactedMessages
-    .map((message) => summarizeMessage(message, toolNameByCallId))
-    .filter((item): item is string => Boolean(item))
-    .slice(-MAX_SUMMARY_ITEMS);
 
-  const lines: string[] = [RUNTIME_SUMMARY_PREFIX];
+  // 分段原料
+  const userMessages = compactedMessages
+    .filter((m) => m.role === "user")
+    .map((m) => stringifyContent(m.content).trim())
+    .filter(Boolean);
+  const assistantPoints = compactedMessages
+    .filter((m) => m.role === "assistant")
+    .map((m) => summarizeMessage(m, toolNameByCallId))
+    .filter((item): item is string => Boolean(item));
+  const toolNotes = compactedMessages
+    .filter((m) => m.role === "tool")
+    .map((m) => summarizeMessage(m, toolNameByCallId))
+    .filter((item): item is string => Boolean(item));
+  const errors = compactedMessages
+    .filter((m) => m.role === "tool" && readToolStatus(m) === "error")
+    .map((m) => summarizeMessage(m, toolNameByCallId))
+    .filter((item): item is string => Boolean(item));
+  const filePaths = extractFilePaths(compactedMessages);
 
+  const primaryRequest = userMessages[0] ?? "(无用户请求)";
+
+  const sections: string[] = [];
+  sections.push(`## Primary Request\n${normalizeSummaryText(primaryRequest)}`);
+  sections.push(
+    `## Key Technical Concepts\n${assistantPoints.length > 0 ? assistantPoints.slice(0, 4).map((s) => `- ${s}`).join("\n") : "- (无)"}`
+  );
+  sections.push(
+    `## Files and Code\n${filePaths.length > 0 ? filePaths.map((p) => `- ${p}`).join("\n") : "- (无文件操作)"}`
+  );
+  sections.push(
+    `## Errors and Fixes\n${errors.length > 0 ? errors.map((e) => `- ${e}`).join("\n") : "- (无错误)"}`
+  );
+  sections.push(
+    `## Problem Solving\n${toolNotes.length > 0 ? toolNotes.slice(0, 4).map((s) => `- ${s}`).join("\n") : "- (无)"}`
+  );
+  // 用户意图最不能丢 —— 全量保留原文,不做摘要截断。
+  sections.push(
+    `## All User Messages\n${userMessages.map((u) => `- ${u}`).join("\n")}`
+  );
+
+  let body = sections.join("\n\n");
+
+  // 二次 compact:把上一次 summary 并进来,不丢历史。
   if (previousSummary) {
-    const normalizedPreviousSummary = normalizeSummaryText(
-      previousSummary.replace(RUNTIME_SUMMARY_PREFIX, "").trim()
-    );
-
-    lines.push("");
-    lines.push("Previously compacted context:");
-    lines.push(`- ${normalizedPreviousSummary}`);
+    const prev = previousSummary
+      .replace(CONTEXT_SUMMARY_OPEN, "")
+      .replace(CONTEXT_SUMMARY_CLOSE, "")
+      .trim();
+    body = `${body}\n\n## Previously Compacted Context\n${prev}`;
   }
 
-  if (summaryItems.length === 0) {
-    lines.push("");
-    lines.push("- Earlier runtime context was compacted.");
-    return lines.join("\n");
-  }
-
-  lines.push("");
-  lines.push("Earlier runtime context:");
-  lines.push(...summaryItems.map((item) => `- ${item}`));
-
-  return lines.join("\n");
+  return `${CONTEXT_SUMMARY_OPEN}\n${body}\n${CONTEXT_SUMMARY_CLOSE}`;
 };
 
 const buildRuntimeCompactResult = (
@@ -353,9 +404,18 @@ const compactRuntimeMessages = (
   const existingSummary = isRuntimeSummaryMessage(runtimeSegment[0])
     ? runtimeSegment[0]
     : undefined;
-  const runtimeMessages = existingSummary
+  // 二次 compact:剥掉旧 summary(user)以及紧跟的旧 reminder(system),避免 reminder 越积越多。
+  let runtimeMessages = existingSummary
     ? runtimeSegment.slice(1)
     : runtimeSegment;
+  if (
+    existingSummary &&
+    runtimeMessages[0]?.role === "system" &&
+    typeof runtimeMessages[0].content === "string" &&
+    runtimeMessages[0].content === CONTEXT_SUMMARY_REMINDER
+  ) {
+    runtimeMessages = runtimeMessages.slice(1);
+  }
 
   if (runtimeMessages.length <= preservedRecentRuntimeMessages) {
     return buildRuntimeCompactResult(
@@ -381,12 +441,20 @@ const compactRuntimeMessages = (
     );
   }
 
-  const summaryMessage: SystemModelMessage = {
+  // T37: summary 用 user 消息装(留在历史原位,不被 context-strategy 上提);
+  // reminder 用 system(会被上提到 instructions,提醒模型接着干)。
+  // isRuntimeSummaryMessage 已保证 existingSummary.content 是 string(startsWith 判定过),收窄类型。
+  const previousSummaryText =
+    existingSummary && typeof existingSummary.content === "string"
+      ? existingSummary.content
+      : undefined;
+  const summaryMessage: UserModelMessage = {
+    role: "user",
+    content: buildRuntimeSummary(compactedMessages, previousSummaryText)
+  };
+  const reminderMessage: SystemModelMessage = {
     role: "system",
-    content: buildRuntimeSummary(
-      compactedMessages,
-      existingSummary?.content
-    )
+    content: CONTEXT_SUMMARY_REMINDER
   };
 
   return buildRuntimeCompactResult(
@@ -394,6 +462,7 @@ const compactRuntimeMessages = (
     [
       ...prefix,
       summaryMessage,
+      reminderMessage,
       ...preservedTail
     ],
     true,
