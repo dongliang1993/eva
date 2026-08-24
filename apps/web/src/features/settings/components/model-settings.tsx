@@ -13,10 +13,10 @@ const THEME_OPTIONS: readonly {
   readonly label: string;
   readonly icon: typeof Sun;
 }[] = [
-  { value: "light", label: "浅色", icon: Sun },
-  { value: "dark", label: "深色", icon: Moon },
-  { value: "system", label: "跟随系统", icon: Monitor }
-];
+    { value: "light", label: "浅色", icon: Sun },
+    { value: "dark", label: "深色", icon: Moon },
+    { value: "system", label: "跟随系统", icon: Monitor }
+  ];
 
 /** 外观:浅/深/跟随系统 三卡片,即点即存(localStorage + .dark class,无后端)。 */
 function AppearanceSection() {
@@ -64,11 +64,10 @@ function ThemeCard({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`flex w-full flex-col items-center justify-center gap-2 rounded-xl border py-5 transition-colors ${
-        active
-          ? "border-ring/60 bg-accent text-foreground"
-          : "border-border bg-card text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-      }`}
+      className={`flex w-full flex-col items-center justify-center gap-2 rounded-xl border py-5 transition-colors ${active
+        ? "border-ring/60 bg-accent text-foreground"
+        : "border-border bg-card text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+        }`}
     >
       {icon}
       <span className="text-sm">{label}</span>
@@ -181,7 +180,7 @@ export function ModelSettings() {
         </div>
       </div>
 
-      <div className="sticky bottom-0 flex items-center justify-between border-t border-border bg-background px-0 pt-4 mt-8">
+      <div className="mt-4 -mx-8 -mb-6 flex shrink-0 items-center justify-between border-t border-border bg-background px-8 py-3">
         <span className="text-xs text-muted-foreground">
           {saveSuccess && !dirty ? "All changes saved" : dirty ? "Unsaved changes" : ""}
         </span>
@@ -194,7 +193,7 @@ export function ModelSettings() {
           onClick={handleSave}
           disabled={!dirty || isSaving}
         >
-          {isSaving ? "Saving..." : saveSuccess && !dirty ? (<><Check size={14} /> Saved</>) : "Save"}
+          {isSaving ? "保存中..." : saveSuccess && !dirty ? (<><Check size={14} /> 已保存</>) : "保存"}
         </button>
       </div>
     </div>
