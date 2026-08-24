@@ -4,6 +4,12 @@
 
 Eva is a local-first AI agent desktop assistant built as a pnpm monorepo. An Electron desktop shell forks an embedded Fastify server (localhost-only), and a **Vercel AI SDK v7** agent harness (`packages/harness`) handles tool calling, skills, and memory.
 
+## Reference Sources
+
+`.refrences/` (gitignored) holds read-only clones of related projects. When building a feature that overlaps with one of them, search there first for implementation approaches before designing from scratch:
+
+- `.refrences/cindy/` — XD Inc.'s desktop + mobile AI client monorepo (Electron desktop shell, agent runtime). Closest architectural neighbor to Eva.
+
 ## Architecture
 
 ```
@@ -159,6 +165,12 @@ pnpm desktop:pack # Pack the desktop app for distribution
 Electron ABI）→ electron-vite。产物：`Eva.app/Contents/Resources/{app.asar, server/dist,
 server/node_modules, web/dist}`。用户数据与技能在 `~/.eva/`（`~/.eva/skills/<name>/SKILL.md`
 是打包态技能唯一可写位置；dev 态额外扫 monorepo 根 `skills/`）。单实例锁在多开时聚焦已有窗口。
+
+自更新（23 篇）：electron-updater + GitHub Releases feed，mac 走 Squirrel ShipIt 整包换包。
+**代码类组件（server/web/sidecar）一律随整包更新，不做组件级热更**；未来引入的重型数据
+（模型权重、浏览器二进制等）不进安装包，落 `~/.eva/` 运行时按需下载。发版前跑
+`pnpm --filter @eva/desktop check:release`（四类产物 zip/zip.blockmap/dmg/latest-mac.yml，
+漏 blockmap = 差量静默失效）。
 
 ## Configuration
 

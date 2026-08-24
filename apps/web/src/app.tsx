@@ -9,6 +9,7 @@ import { ProviderSettings } from "./features/settings/components/provider-settin
 import { MemorySettings } from "./features/settings/components/memory-settings";
 import { McpSettings } from "./features/settings/components/mcp-settings";
 import { SecuritySettings } from "./features/settings/components/security-settings";
+import { AboutSettings } from "./features/settings/components/about-settings";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,6 +35,7 @@ export function App() {
             <Route path="memory" element={<MemorySettings />} />
             <Route path="security" element={<SecuritySettings />} />
             <Route path="mcp" element={<McpSettings />} />
+            <Route path="about" element={<AboutSettings />} />
           </Route>
         </Routes>
       </BrowserRouter>

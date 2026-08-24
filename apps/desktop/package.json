@@ -14,6 +14,7 @@
     "build": "pnpm run build:web && pnpm run build:server && pnpm run build:server-deps && pnpm run flatten:deps && pnpm run rebuild:native && pnpm run build:electron",
     "pack": "pnpm run build && electron-builder --config electron-builder.yml",
     "pack:mac": "pnpm run pack -- --mac",
+    "check:release": "node scripts/check-release-artifacts.mjs",
     "typecheck": "tsc -p electron/tsconfig.json --noEmit"
   },
   "devDependencies": {

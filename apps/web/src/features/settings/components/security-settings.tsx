@@ -29,25 +29,15 @@ export function SecuritySettings() {
 
   // 自启动是桌面端 OS 级设置(Login Item),不进 app settings DB —— 仅 Electron 显示。
   const [autoLaunch, setAutoLaunch] = useState<boolean | null>(null);
-  // T34 updater 状态条:downloaded 时露「重启更新」按钮。
-  const [update, setUpdate] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     if (!isElectron()) return;
     window.electronAPI!.getAutoLaunch().then(setAutoLaunch).catch(() => setAutoLaunch(null));
-    const unbind = window.electronAPI!.onUpdaterStatus(setUpdate);
-    // 启动时那次 updater 检查/下载的广播可能早于本页订阅(时序)——先拉 main 缓存的
-    // 最近态兜底,再触发一次检查(已是最新会回 not-available,有新版会继续下)。
-    window.electronAPI!.getUpdaterStatus().then((s) => {
-      if (s) setUpdate(s);
-    }).catch(() => {});
-    window.electronAPI!.updaterCheck().catch(() => {});
-    return unbind;
   }, []);
 
   const toggleAutoLaunch = (enabled: boolean) => {
     setAutoLaunch(enabled); // 乐观
-    window.electronAPI!.setAutoLaunch(enabled).then(setAutoLaunch).catch(() => {});
+    window.electronAPI!.setAutoLaunch(enabled).then(setAutoLaunch).catch(() => { });
   };
 
   if (isLoading || !data) {
@@ -98,38 +88,6 @@ export function SecuritySettings() {
               onChange={(e) => toggleAutoLaunch(e.target.checked)}
             />
           </label>
-
-          {/* T34 更新状态:有事件才显示。downloaded 露「重启更新」。 */}
-          {update ? (
-            <div className="mt-3 flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
-              <div className="text-sm text-foreground">
-                {update.event === "checking" ? "检查更新中…"
-                  : update.event === "available" ? `发现新版本 ${String(update.version ?? "")},下载中…`
-                  : update.event === "downloading" ? `下载更新中 ${String(update.percent ?? 0)}%`
-                  : update.event === "downloaded" ? `新版本 ${String(update.version ?? "")} 已就绪`
-                  : update.event === "not-available" ? "已是最新"
-                  : update.event === "error" ? "检查更新失败(详见日志)"
-                  : null}
-              </div>
-              {update.event === "downloaded" ? (
-                <button
-                  type="button"
-                  className="rounded border border-border px-3 py-1 text-xs font-medium text-foreground hover:bg-accent"
-                  onClick={() => window.electronAPI!.updaterInstall()}
-                >
-                  重启更新
-                </button>
-              ) : update.event === "not-available" || update.event === "error" ? (
-                <button
-                  type="button"
-                  className="rounded border border-border px-3 py-1 text-xs font-medium text-foreground hover:bg-accent"
-                  onClick={() => window.electronAPI!.updaterCheck()}
-                >
-                  重新检查
-                </button>
-              ) : null}
-            </div>
-          ) : null}
         </section>
       ) : null}
 

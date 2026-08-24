@@ -18,7 +18,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import { checkForUpdates, getUpdaterStatus, initUpdater, installUpdate } from "./updater";
+import { checkForUpdates, downloadUpdate, getUpdaterStatus, initUpdater, installUpdate } from "./updater";
 
 // ---------------------------------------------------------------------------
 // State
@@ -487,6 +487,8 @@ function createWindow(url?: string): BrowserWindow {
 // ---------------------------------------------------------------------------
 
 ipcMain.handle("get-server-port", () => serverPort);
+// app 模块在 sandboxed preload 里拿不到(主进程专属),版本号走 IPC。
+ipcMain.handle("get-app-version", () => app.getVersion());
 
 // T33:renderer 拿 loopback token 注入 fetch/SSE 的 x-eva-token。
 ipcMain.handle("get-server-info", () => ({ port: serverPort, token: loopbackToken }));
@@ -512,9 +514,15 @@ ipcMain.handle("auto-launch:set", (_event, enabled: boolean) => {
   return app.getLoginItemSettings().openAtLogin;
 });
 
-// T34 updater:renderer 手动检查 / 确认安装 / 拉当前状态(补启动时错过的广播)。
+// T34 updater:renderer 手动检查 / 下载(D1) / 确认安装 / 拉当前状态(补启动时错过的广播)。
 ipcMain.handle("updater:check", () => checkForUpdates());
-ipcMain.handle("updater:install", () => installUpdate());
+ipcMain.handle("updater:download", () => downloadUpdate());
+// D7:安装前先收 server(及其 MCP 子进程)——驻留进程会锁住安装目录导致
+// ShipIt 换包失败(Cindy adb 教训,23 篇 §4 D7)。before-quit 里的 killServer 是双保险。
+ipcMain.handle("updater:install", () => {
+  killServer();
+  installUpdate();
+});
 ipcMain.handle("updater:status", () => getUpdaterStatus());
 
 // ---------------------------------------------------------------------------

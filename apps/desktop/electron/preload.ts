@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     node: process.versions.node,
     platform: process.platform
   },
+  // 当前应用版本(关于页)。app 模块是主进程专属,sandboxed preload 里 undefined,
+  // 走 IPC 拿 —— 直接在 preload require("electron").app 会让整个 preload 崩掉。
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke("get-app-version"),
   getServerPort: (): Promise<number | null> =>
     ipcRenderer.invoke("get-server-port"),
   // T33:renderer 拿 loopback token 注入 fetch/SSE。
@@ -24,8 +27,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getAutoLaunch: (): Promise<boolean> => ipcRenderer.invoke("auto-launch:get"),
   setAutoLaunch: (enabled: boolean): Promise<boolean> =>
     ipcRenderer.invoke("auto-launch:set", enabled),
-  // T34 updater:状态推送 + 手动检查/安装/拉当前状态。
+  // T34/D1 updater:状态推送 + 手动检查/下载/安装/拉当前状态。
   updaterCheck: (): Promise<void> => ipcRenderer.invoke("updater:check"),
+  updaterDownload: (): Promise<void> => ipcRenderer.invoke("updater:download"),
   updaterInstall: (): Promise<void> => ipcRenderer.invoke("updater:install"),
   getUpdaterStatus: (): Promise<Record<string, unknown> | null> =>
     ipcRenderer.invoke("updater:status"),

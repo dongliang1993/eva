@@ -6,6 +6,7 @@ interface ElectronAPI {
     readonly node: string;
     readonly platform: string;
   };
+  getAppVersion: () => Promise<string>;
   getServerPort: () => Promise<number | null>;
   getServerInfo: () => Promise<{ port: number | null; token: string | null }>;
   pickDirectory: () => Promise<string | null>;
@@ -13,6 +14,7 @@ interface ElectronAPI {
   getAutoLaunch: () => Promise<boolean>;
   setAutoLaunch: (enabled: boolean) => Promise<boolean>;
   updaterCheck: () => Promise<void>;
+  updaterDownload: () => Promise<void>;
   updaterInstall: () => Promise<void>;
   getUpdaterStatus: () => Promise<Record<string, unknown> | null>;
   onUpdaterStatus: (
