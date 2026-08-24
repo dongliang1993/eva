@@ -53,6 +53,9 @@ export function ResizableSidebar({
         maxSize={maxSizePixels}
         collapsible
         collapsedSize={collapsedSizePixels}
+        style={{
+          overflow: 'hidden'
+        }}
         onResize={() => {
           // 拖拽把 Panel 折叠/展开时, 反向同步外部状态
           onCollapsedChange?.(panelRef.current?.isCollapsed() ?? false);
