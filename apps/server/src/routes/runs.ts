@@ -21,6 +21,7 @@ import {
   type RunInput,
   type RunPreparationDependencies
 } from "../services/runs/run-preparation.js";
+import { selectRunSkills } from "../services/skills/select-run-skills.js";
 import { SubagentRunner } from "../services/subagents/subagent-runner.js";
 import { ReportGateway } from "../services/subagents/report-gateway.js";
 import { runRequestSchema } from "../types/runs.js";
@@ -142,10 +143,22 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       // 的窗口信息 —— 所以 section 在 resolve 之前备好,别和模型相关准备混在一起。
       const memoryFilesSection = await loadMemoryFilesSection(evaDataDir(), todayString());
 
+      // T44:skill auto-selection 在装 agent 前完成 —— 它决定 prompt 列哪些
+      // metadata,也决定本轮显式 activeToolNames(always ∪ thread 累积 ∪ 新选)。
+      const skillSelection = await selectRunSkills({
+        db: app.infra.db,
+        skills: app.infra.skills,
+        agents: app.services.agents,
+        sessionId,
+        modelId: runInput.modelId,
+        humanText: runInput.humanText
+      });
+
       const resolved = app.services.agents.build({
         modelId: runInput.modelId,
         extraTools: app.services.mcp.listTools(),
         requestApproval,
+        selectedSkills: skillSelection.selectedSkills,
         ...defined("workspace", runInput.workspace),
         ...defined("memoryFilesSection", memoryFilesSection)
       });
@@ -228,6 +241,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         abortSignal: controller.signal,
         drainNotices: (opts) => reportGateway!.drain(opts),
         additionalTools: [...runContext.additionalTools, ...subagentTools],
+        // T44:skill allowed-tools 只作 preferred —— <=40 全集本来就可用,>40 并入首步 active。
+        preferredToolNames: skillSelection.preferredToolNames,
         ...(runContext.context !== undefined ? { context: runContext.context } : {})
       })) {
         emit(event);

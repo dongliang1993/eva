@@ -1,3 +1,5 @@
+import { dirname } from "node:path";
+
 import { z } from "zod";
 
 import { buildTool, type AgentTool } from "../tools/index.js";
@@ -25,7 +27,15 @@ export const createReadSkillTool = (skills: Skill[]): AgentTool => {
         return `Skill "${name}" not found. Available skills: ${available || "none"}`;
       }
 
-      return skill.content;
+      return [
+        `# Skill: ${skill.name}`,
+        "",
+        `**Skill File:** ${skill.filePath}`,
+        "",
+        `IMPORTANT: Any relative file path mentioned by this skill is relative to \`${dirname(skill.filePath)}\`. Read those files with absolute paths.`,
+        "",
+        skill.content
+      ].join("\n");
     }
   });
 };

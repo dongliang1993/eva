@@ -92,7 +92,7 @@ export const createPinoObserver = (
         });
         break;
       case "tool_count_degraded":
-        // T39: 工具数超限退化最小集 —— 必须可见,否则「配的 MCP 工具没生效」无从排查。
+        // T43: 工具数超限进 discovery mode —— 必须可见,否则「配的 MCP 工具没直接出现」无从排查。
         logger.warn(
           {
             event: "tool_count_degraded",
@@ -100,7 +100,7 @@ export const createPinoObserver = (
             keptCount: event.keptCount,
             limit: event.limit
           },
-          `[ToolSafetyNet] ${event.totalCount} tools > ${event.limit} — degraded to minimal set (${event.keptCount} kept)`
+          `[ToolSafetyNet] ${event.totalCount} tools > ${event.limit} — discovery mode (${event.keptCount} core tools active; use tool_search to activate more)`
         );
         break;
     }

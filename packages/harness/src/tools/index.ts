@@ -16,3 +16,4 @@ export * from "./fs/index.js";
 export * from "./memory/index.js";
 export * from "./web-fetch/index.js";
 export * from "./web-search/index.js";
+export * from "./tool-search/index.js";

@@ -13,7 +13,7 @@ import {
 } from "../context/runtime-compact.js";
 import type { ContextWindowPolicy } from "../context/policy.js";
 
-export interface ContextStrategyOptions {
+export interface ContextStrategyOptions<TOOLS extends ToolSet = ToolSet> {
   readonly policy: ContextWindowPolicy;
   /** 固定 system prompt(始终作为 instructions 的第一条)。 */
   readonly systemPrompt: SystemModelMessage;
@@ -26,6 +26,13 @@ export interface ContextStrategyOptions {
    * 首步无值返回 undefined,判定退回估算。不传则始终走估算(向后兼容)。
    */
   readonly getLastStepInputTokens?: () => number | undefined;
+  /**
+   * T43:每步最新的 activeTools(discovery mode 下含 tool_search 激活结果)。
+   * 返回 undefined = 不限制。
+   */
+  readonly getActiveTools?: () => readonly (keyof TOOLS & string)[] | undefined;
+  /** T43:degraded/discovery 时追加的 system notice(跟在主 system prompt 后)。 */
+  readonly extraInstructions?: SystemModelMessage[];
 }
 
 /**
@@ -42,7 +49,7 @@ export interface ContextStrategyOptions {
  * 顶层 messages 不允许 system 角色,校验在 prepareStep 之前)。
  */
 export const createPrepareStep = <TOOLS extends ToolSet>(
-  options: ContextStrategyOptions
+  options: ContextStrategyOptions<TOOLS>
 ): PrepareStepFunction<TOOLS> => ({ messages }) => {
   const budgeted = applyToolResultBudget(messages, options.policy);
   const compaction = applyProactiveLoopCompactWithStats(
@@ -67,7 +74,13 @@ export const createPrepareStep = <TOOLS extends ToolSet>(
     }
   }
 
-  return { instructions, messages: rest };
+  const activeTools = options.getActiveTools?.();
+
+  return {
+    instructions: [...instructions, ...(options.extraInstructions ?? [])],
+    messages: rest,
+    ...(activeTools !== undefined ? { activeTools } : {}),
+  };
 };
 
 /** 触发 max-output 续写时追加的用户消息。 */

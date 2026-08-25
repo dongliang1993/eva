@@ -11,6 +11,8 @@ import {
   loadSkills
 } from "../packages/harness/src/skills/loader.js";
 import { skillsToPromptSection } from "../packages/harness/src/skills/prompt.js";
+import { createReadSkillTool } from "../packages/harness/src/skills/read-skill-tool.js";
+import type { Skill } from "../packages/harness/src/skills/types.js";
 
 const tempDirs: string[] = [];
 
@@ -30,28 +32,67 @@ afterEach(async () => {
   );
 });
 
+const skillMd = (
+  name: string,
+  description: string,
+  options: { allowedTools?: string; alwaysInject?: boolean; body?: string } = {}
+): string =>
+  [
+    "---",
+    `name: ${name}`,
+    `description: ${description}`,
+    `allowed-tools: ${options.allowedTools ?? "[Bash]"}`,
+    ...(options.alwaysInject ? ["always-inject: true"] : []),
+    "---",
+    "",
+    options.body ?? `# ${name}\n\nInstructions.`
+  ].join("\n");
+
+const testSkill = (overrides: Partial<Skill> = {}): Skill => ({
+  name: "test-skill",
+  description: "A test skill.",
+  content: "UNIQUE_SKILL_BODY_DO_NOT_INJECT",
+  filePath: "/path/to/test-skill/SKILL.md",
+  source: "bundled",
+  allowedTools: [],
+  alwaysInject: false,
+  ...overrides
+});
+
 describe("parseSkillFile", () => {
   it("parses frontmatter and content from a SKILL.md file", () => {
-    const raw = [
-      "---",
-      "name: test-skill",
-      "description: A test skill for unit testing.",
-      "---",
-      "",
-      "# Test Skill",
-      "",
-      "Some content here."
-    ].join("\n");
-
-    const result = parseSkillFile(raw);
+    const result = parseSkillFile(
+      skillMd("test-skill", "A test skill for unit testing.", {
+        allowedTools: "[Bash, Read]",
+        alwaysInject: true,
+        body: "# Test Skill\n\nSome content here."
+      })
+    );
 
     expect(result).toEqual({
       frontmatter: {
         name: "test-skill",
-        description: "A test skill for unit testing."
+        description: "A test skill for unit testing.",
+        allowedTools: ["Bash", "Read"],
+        alwaysInject: true
       },
       content: "# Test Skill\n\nSome content here."
     });
+  });
+
+  it("parses block-list allowed-tools", () => {
+    const raw = [
+      "---",
+      "name: block-skill",
+      "description: Block list.",
+      "allowed-tools:",
+      "  - Bash",
+      "  - Read",
+      "---",
+      "Body."
+    ].join("\n");
+
+    expect(parseSkillFile(raw)?.frontmatter.allowedTools).toEqual(["Bash", "Read"]);
   });
 
   it("returns undefined when frontmatter is missing", () => {
@@ -59,9 +100,18 @@ describe("parseSkillFile", () => {
   });
 
   it("returns undefined when required fields are missing", () => {
-    const raw = "---\nname: only-name\n---\nContent";
+    expect(parseSkillFile("---\nname: only-name\n---\nContent")).toBeUndefined();
+  });
 
-    expect(parseSkillFile(raw)).toBeUndefined();
+  it("returns undefined when allowed-tools is missing or not a list", () => {
+    expect(
+      parseSkillFile("---\nname: a\ndescription: b\n---\nContent")
+    ).toBeUndefined();
+    expect(
+      parseSkillFile(
+        "---\nname: a\ndescription: b\nallowed-tools: Bash\n---\nContent"
+      )
+    ).toBeUndefined();
   });
 });
 
@@ -80,7 +130,7 @@ describe("loadProjectSkills", () => {
     await mkdir(path.join(dir, "my-skill"), { recursive: true });
     await writeFile(
       path.join(dir, "my-skill", "SKILL.md"),
-      "---\nname: my-skill\ndescription: Does things.\n---\n\n# My Skill\n\nInstructions."
+      skillMd("my-skill", "Does things.", { body: "# My Skill\n\nInstructions." })
     );
 
     const skills = await loadProjectSkills(dir);
@@ -91,8 +141,28 @@ describe("loadProjectSkills", () => {
       description: "Does things.",
       content: "# My Skill\n\nInstructions.",
       filePath: path.join(dir, "my-skill", "SKILL.md"),
-      source: "project"
+      source: "project",
+      allowedTools: ["Bash"],
+      alwaysInject: false
     });
+  });
+
+  it("skips invalid SKILL.md and reports the file path", async () => {
+    const dir = await createTempDir();
+    const invalid: string[] = [];
+
+    await mkdir(path.join(dir, "bad-skill"), { recursive: true });
+    await writeFile(
+      path.join(dir, "bad-skill", "SKILL.md"),
+      "---\nname: bad\ndescription: missing allowed-tools\n---\nBody."
+    );
+
+    const skills = await loadProjectSkills(dir, {
+      onInvalidSkill: (filePath) => invalid.push(filePath)
+    });
+
+    expect(skills).toEqual([]);
+    expect(invalid).toEqual([path.join(dir, "bad-skill", "SKILL.md")]);
   });
 
   it("returns empty array for non-existent directory", async () => {
@@ -109,7 +179,7 @@ describe("loadSkills", () => {
     await mkdir(path.join(dir, "my-tool"), { recursive: true });
     await writeFile(
       path.join(dir, "my-tool", "SKILL.md"),
-      "---\nname: my-tool\ndescription: Custom tool skill.\n---\nCustom content."
+      skillMd("my-tool", "Custom tool skill.", { body: "Custom content." })
     );
 
     const skills = await loadSkills([{ dir, source: "project" }]);
@@ -132,7 +202,7 @@ describe("loadSkills", () => {
     await mkdir(path.join(dir, "zebra"), { recursive: true });
     await writeFile(
       path.join(dir, "zebra", "SKILL.md"),
-      "---\nname: zebra\ndescription: Z skill.\n---\nZ content."
+      skillMd("zebra", "Z skill.", { body: "Z content." })
     );
 
     const skills = await loadSkills([{ dir, source: "project" }]);
@@ -145,26 +215,55 @@ describe("loadSkills", () => {
 });
 
 describe("skillsToPromptSection", () => {
-  it("generates a prompt section listing skills", () => {
-    const section = skillsToPromptSection([
-      {
-        name: "test-skill",
-        description: "A test skill.",
-        content: "...",
-        filePath: "/path/to/SKILL.md",
-        source: "bundled"
-      }
-    ]);
+  it("injects only skill metadata, not the body or file path", () => {
+    const section = skillsToPromptSection([testSkill()]);
 
     expect(section.heading).toBe("Available Skills");
     expect(section.body).toContain("**test-skill**");
     expect(section.body).toContain("A test skill.");
     expect(section.body).toContain("read_skill");
+    expect(section.body).toContain("BLOCKING REQUIREMENT");
+    expect(section.body).not.toContain("UNIQUE_SKILL_BODY_DO_NOT_INJECT");
+    expect(section.body).not.toContain("/path/to/test-skill/SKILL.md");
   });
 
   it("handles empty skills list", () => {
     const section = skillsToPromptSection([]);
 
     expect(section.body).toContain("No skills");
+  });
+
+  it("uses the not-selected wording when selection was applied and empty", () => {
+    const section = skillsToPromptSection([], { selectionApplied: true });
+
+    expect(section.body).toContain("No skills were auto-selected");
+  });
+});
+
+describe("createReadSkillTool", () => {
+  const skill = testSkill({ content: "UNIQUE_SKILL_BODY_DO_LOAD" });
+
+  it("returns full content with the skill file resolution contract", async () => {
+    const tool = createReadSkillTool([skill]);
+    const result = await tool.tool.execute!(
+      { name: "test-skill" },
+      { toolCallId: "tc-read-skill" } as never
+    );
+
+    expect(result).toContain("# Skill: test-skill");
+    expect(result).toContain("**Skill File:** /path/to/test-skill/SKILL.md");
+    expect(result).toContain("relative to `/path/to/test-skill`");
+    expect(result).toContain("UNIQUE_SKILL_BODY_DO_LOAD");
+  });
+
+  it("returns available skills when the name is missing", async () => {
+    const tool = createReadSkillTool([skill]);
+    const result = await tool.tool.execute!(
+      { name: "missing" },
+      { toolCallId: "tc-read-skill-missing" } as never
+    );
+
+    expect(result).toContain('Skill "missing" not found');
+    expect(result).toContain("test-skill");
   });
 });

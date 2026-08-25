@@ -18,6 +18,11 @@ const BUNDLED_SKILLS_DIR = path.join(
   "bundled"
 );
 
+export interface LoadSkillsOptions {
+  /** T44:非法 SKILL.md(skip)的可见出口 —— 不兼容、不兜底,但必须能排查。 */
+  readonly onInvalidSkill?: (filePath: string) => void;
+}
+
 const scanDirectory = async (dir: string): Promise<string[]> => {
   const entries = await readdir(dir, { withFileTypes: true });
   const paths: string[] = [];
@@ -37,7 +42,8 @@ const scanDirectory = async (dir: string): Promise<string[]> => {
 
 const loadSkillsFromDir = async (
   dir: string,
-  source: Skill["source"]
+  source: Skill["source"],
+  options: LoadSkillsOptions = {}
 ): Promise<Skill[]> => {
   try {
     const dirStat = await stat(dir);
@@ -56,25 +62,33 @@ const loadSkillsFromDir = async (
     const raw = await readFile(filePath, "utf-8");
     const parsed = parseSkillFile(raw);
 
-    if (parsed) {
-      skills.push({
-        name: parsed.frontmatter.name,
-        description: parsed.frontmatter.description,
-        content: parsed.content,
-        filePath,
-        source
-      });
+    if (!parsed) {
+      options.onInvalidSkill?.(filePath);
+      continue;
     }
+
+    skills.push({
+      name: parsed.frontmatter.name,
+      description: parsed.frontmatter.description,
+      content: parsed.content,
+      filePath,
+      source,
+      allowedTools: parsed.frontmatter.allowedTools,
+      alwaysInject: parsed.frontmatter.alwaysInject ?? false
+    });
   }
 
   return skills;
 };
 
-export const loadBundledSkills = (): Promise<Skill[]> =>
-  loadSkillsFromDir(BUNDLED_SKILLS_DIR, "bundled");
+export const loadBundledSkills = (
+  options: LoadSkillsOptions = {}
+): Promise<Skill[]> => loadSkillsFromDir(BUNDLED_SKILLS_DIR, "bundled", options);
 
-export const loadProjectSkills = (skillsDir: string): Promise<Skill[]> =>
-  loadSkillsFromDir(skillsDir, "project");
+export const loadProjectSkills = (
+  skillsDir: string,
+  options: LoadSkillsOptions = {}
+): Promise<Skill[]> => loadSkillsFromDir(skillsDir, "project", options);
 
 export interface SkillSourceDir {
   readonly dir: string;
@@ -86,9 +100,10 @@ export interface SkillSourceDir {
  * 于是用户可以用同名 skill 覆盖内置的。
  */
 export const loadSkills = async (
-  dirs: readonly SkillSourceDir[]
+  dirs: readonly SkillSourceDir[],
+  options: LoadSkillsOptions = {}
 ): Promise<Skill[]> => {
-  const bundled = await loadBundledSkills();
+  const bundled = await loadBundledSkills(options);
   const byName = new Map<string, Skill>();
 
   for (const skill of bundled) {
@@ -96,7 +111,7 @@ export const loadSkills = async (
   }
 
   for (const { dir, source } of dirs) {
-    const skills = await loadSkillsFromDir(dir, source);
+    const skills = await loadSkillsFromDir(dir, source, options);
 
     for (const skill of skills) {
       if (!byName.has(skill.name)) {

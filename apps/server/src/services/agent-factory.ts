@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
 import {
+  autoSelectSkills,
   buildAgentSystemPrompt,
   createAgent,
   createAnthropicModel,
@@ -22,6 +23,7 @@ import {
   type Agent,
   type AgentObserver,
   type AgentTool,
+  type AutoSelectSkillsResult,
   type PromptSection,
   type RequestApproval,
   type Skill,
@@ -77,6 +79,11 @@ export interface AgentBuildOptions {
   readonly extraTools?: readonly AgentTool[] | undefined;
   /** per-run 读好的人类可读记忆 section（L1 MEMORY.md + 近几天日记）。 */
   readonly memoryFilesSection?: PromptSection | undefined;
+  /**
+   * T44:auto-selection 的产出(always ∪ thread 累积 ∪ 本轮新选)。
+   * 传了(含空数组)就按选中集注 prompt;不传 = 兼容路径,列全部 infra.skills。
+   */
+  readonly selectedSkills?: readonly Skill[] | undefined;
 }
 
 export interface ResolvedModels {
@@ -242,6 +249,29 @@ export class AgentFactory {
   }
 
   /**
+   * T44:skill AutoSkillSelection(Alma 对齐)。用 tool 槽位模型,失败走确定性 fallback;
+   * 不复用 build —— 选择发生在装 agent 之前,且不能因为没有可用 skill 让 build 失败。
+   */
+  async selectSkillsForRun(options: {
+    readonly modelId: string;
+    readonly humanText: string;
+    readonly alreadySelected?: readonly string[];
+    readonly maxNew?: number;
+  }): Promise<AutoSelectSkillsResult> {
+    const models = this.resolveModels({ modelId: options.modelId });
+
+    return autoSelectSkills({
+      model: this.getModel(models.tool),
+      skills: this.infra.skills,
+      humanText: options.humanText,
+      ...(options.alreadySelected !== undefined
+        ? { alreadySelected: options.alreadySelected }
+        : {}),
+      ...(options.maxNew !== undefined ? { maxNew: options.maxNew } : {}),
+    });
+  }
+
+  /**
    * 按本轮配置装一台主 agent。
    *
    * 为什么叫 build 不叫 resolve:resolve 只描述了"定模型"这一半,这个方法的
@@ -264,6 +294,8 @@ export class AgentFactory {
     );
 
     // defined() 摊的是 {key: value} 对象,这里要的是数组元素 —— 条件展开回原样。
+    // T44:selectedSkills 传了(含空)就按选中集注;不传 = 兼容路径,列全部 skills。
+    const promptSkills = options.selectedSkills ?? this.infra.skills;
     const sections: PromptSection[] = [
       ...(this.infra.soulSection ? [this.infra.soulSection] : []),
       ...(options.workspace?.docsSection
@@ -271,8 +303,12 @@ export class AgentFactory {
         : []),
       ...(options.memoryFilesSection ? [options.memoryFilesSection] : []),
       MEMORY_PROMPT_SECTION,
-      ...(this.infra.skills.length > 0
-        ? [skillsToPromptSection([...this.infra.skills])]
+      ...(promptSkills.length > 0 || options.selectedSkills !== undefined
+        ? [
+            skillsToPromptSection([...promptSkills], {
+              selectionApplied: options.selectedSkills !== undefined,
+            }),
+          ]
         : []),
       createWebSearchPromptSection(),
       createWebFetchPromptSection(),

@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const sessions = sqliteTable(
@@ -321,5 +321,31 @@ export const mcpServers = sqliteTable(
   (table) => [
     uniqueIndex("idx_mcp_servers_name").on(table.name),
     index("idx_mcp_servers_origin").on(table.origin)
+  ]
+);
+
+export const sessionSkillSelectionOrigins = ["auto", "forced"] as const;
+
+export type SessionSkillSelectionOrigin =
+  (typeof sessionSkillSelectionOrigins)[number];
+
+/** T44:skill auto-selection 的 thread 累积集(LLM 选中不可重放,落选表)。 */
+export const sessionSkillSelections = sqliteTable(
+  "session_skill_selections",
+  {
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    skillName: text("skill_name").notNull(),
+    origin: text("origin", { enum: sessionSkillSelectionOrigins })
+      .notNull()
+      .default("auto"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`)
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.skillName] }),
+    index("idx_session_skill_selections_session").on(table.sessionId)
   ]
 );

@@ -50,6 +50,7 @@ export const buildJsonSchemaTool = (
 
   return {
     name: definition.name,
+    description: definition.description,
     tool: built,
     ...(definition.readOnly !== undefined
       ? { readOnly: definition.readOnly }

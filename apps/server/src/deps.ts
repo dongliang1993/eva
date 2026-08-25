@@ -43,10 +43,16 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   // 用户技能在 ~/.eva/skills(打包后唯一可写位置);dev 时额外扫 monorepo 根的
   // skills/,方便在仓库里试写并提交。打包态 findMonorepoRoot 会退化成 cwd,
   // 那个目录不存在,scanDirectory 返回空,无副作用。
-  const skills = await loadSkills([
-    { dir: userSkillsDir(), source: "project" },
-    { dir: path.join(workspaceRoot, "skills"), source: "project" }
-  ]);
+  const skills = await loadSkills(
+    [
+      { dir: userSkillsDir(), source: "project" },
+      { dir: path.join(workspaceRoot, "skills"), source: "project" }
+    ],
+    {
+      onInvalidSkill: (filePath) =>
+        logger.warn({ filePath }, "invalid SKILL.md skipped"),
+    }
+  );
 
   logger.info(
     { skillCount: skills.length, skills: skills.map((s) => `${s.name} (${s.source})`) },

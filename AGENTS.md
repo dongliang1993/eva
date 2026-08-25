@@ -47,6 +47,8 @@ Fastify decorators:
 
 - **`AgentModel`** is `LanguageModel` from the AI SDK. `LeadAgent` drives the tool loop with `streamText({ stopWhen, prepareStep })` (the SDK drives the loop; `prepareStep` applies tool-result budget + proactive compact and hoists system messages into `instructions`).
 - `stream-part-mapper.ts` translates SDK stream parts → `AgentStreamEvent`; `context-strategy.ts` builds `prepareStep`.
+- Tool exposure (T43): `createAgent` injects `tool_search`. When resolved tools exceed 40 and no explicit `activeToolNames` are set, the run keeps the full `toolSet` but enters discovery mode — step 1 activates only core tools + `tool_search` via `activeTools`, and tools found by `tool_search` become active from the next step (`tool_count_degraded` still warns). Explicit `activeToolNames` always win.
+- Skill exposure (T44): `SKILL.md` requires `name` / `description` / `allowed-tools` (invalid files are skipped with a warning; `always-inject` is optional). Each run auto-selects skills with the tool model, stores new selections in `session_skill_selections`, injects only selected skills' `name + description`, and merges selected `allowed-tools` as `preferredToolNames` (always plus `bash` / `read_skill` / `tool_search`) — a merge, not a replacement for the whole tool set.
 - Subagents were a half-built scaffold and have been **removed**; fork-join will be rebuilt from scratch in S7.
 
 ### Tool Convention (`packages/harness/src/tools/<kebab-case>/`)

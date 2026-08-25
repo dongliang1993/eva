@@ -6,6 +6,8 @@ import type { z } from "zod";
 export interface AgentTool {
   readonly name: string;
   readonly tool: Tool;
+  /** T43:tool_search 的检索语料。与 SDK tool.description 同源,冗余到外层免回读。 */
+  readonly description?: string;
   readonly readOnly?: boolean;
   /** 危险工具标记(与 SDK needsApproval 同名对齐);由 createAgent 用 withApproval 包装 execute 实现闸门。 */
   readonly needsApproval?: boolean;
@@ -104,6 +106,7 @@ export const buildTool = <S extends z.ZodObject<z.ZodRawShape>>(
 
   return {
     name: definition.name,
+    description,
     tool: built,
     ...(definition.readOnly !== undefined ? { readOnly: definition.readOnly } : {}),
     ...(definition.needsApproval !== undefined

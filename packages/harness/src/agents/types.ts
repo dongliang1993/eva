@@ -17,10 +17,16 @@ export interface AgentRunInput {
   maxSteps?: number;
   additionalTools?: AgentTool[];
   /**
-   * T39:显式选定本轮生效的工具名(白名单)。设了就照单过滤、绕过数量安全网
-   * (显式选择优先);不设 = 走 applyToolCountSafetyNet,>40 退化最小集。
+   * T39/T43:显式选定本轮生效的工具名(白名单)。设了就照单过滤、绕过数量安全网
+   * (显式选择优先);不设 = 走 resolveToolExposure,>40 进 discovery mode
+   * (首步 core + tool_search,搜索激活后下一 step 可用)。
    */
   activeToolNames?: readonly string[];
+  /**
+   * T44:skill allowed-tools 的「合并」名单(不是显式白名单)。<=40 时全集本来就可用,
+   * 它不改变行为;>40 进 discovery mode 时并入首步 active(core ∪ preferred,仍受 40 上限)。
+   */
+  preferredToolNames?: readonly string[];
   abortSignal?: AbortSignal;
   /**
    * 取待注入的子代理通知(S7 push)。只在 loop 走到 stop 终态前调用一次/轮。

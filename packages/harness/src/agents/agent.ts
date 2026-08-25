@@ -9,7 +9,11 @@ import {
 import type { StreamToolCallSummary, StreamTokenUsage } from "@eva/shared";
 
 import type { AgentTool } from "../tools/index.js";
-import { toToolSet, TOOL_CALL_ABORTED_OUTPUT } from "../tools/index.js";
+import {
+  createToolSearchTool,
+  toToolSet,
+  TOOL_CALL_ABORTED_OUTPUT,
+} from "../tools/index.js";
 import {
   DEFAULT_READ_ONLY_CONCURRENCY,
   Semaphore,
@@ -41,8 +45,9 @@ import {
 } from "../context/runtime-compact.js";
 import { coalesceTextDeltas } from "./coalesce-stream.js";
 import { createRepairToolCall } from "./repair-tool-call.js";
+import { ToolDiscoveryController } from "./tool-discovery.js";
 import {
-  applyToolCountSafetyNet,
+  resolveToolExposure,
   TOOL_COUNT_SAFETY_LIMIT,
 } from "./tool-safety-net.js";
 import {
@@ -74,6 +79,14 @@ const NOTICE_GRACE_MS = 20_000;
 
 /** 一个 run 内最多因通知续跑几圈 —— 防子代理互相唤起的病态循环。 */
 const MAX_NOTICE_ROUNDS = 4;
+
+/** T43:discovery mode 首步之后的指路 system notice(只陈述机制,不列工具目录)。 */
+const TOOL_DISCOVERY_NOTICE: SystemModelMessage = {
+  role: "system",
+  content:
+    "Tool discovery mode is active: only core tools are enabled initially. " +
+    "Use `tool_search` to find and activate additional tools; activated tools become callable from the next model step.",
+};
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "AbortError";
@@ -140,6 +153,8 @@ interface AgentOptions {
   readOnlyConcurrency?: number;
   /** T38:钳制目标(providerId+modelId)。传了才在真实超限时 emit context_overflow_clamp。 */
   clampTarget?: { providerId: string; modelId: string };
+  /** T43:工具发现状态。createAgent 注入;直造 Agent(只发生在测试)时给默认。 */
+  toolDiscovery?: ToolDiscoveryController;
 }
 
 /**
@@ -154,6 +169,7 @@ class Agent implements AgentInterface {
   private readonly maxSteps: number;
   private readonly observer: AgentObserver | undefined;
   private readonly contextPolicy: ContextWindowPolicy;
+  private readonly toolDiscovery: ToolDiscoveryController;
 
   constructor(private readonly options: AgentOptions) {
     this.toolsByName = new Map(
@@ -163,6 +179,7 @@ class Agent implements AgentInterface {
     this.maxSteps = options.maxSteps ?? 5;
     this.observer = options.observer;
     this.contextPolicy = resolveContextWindowPolicy(options.contextPolicy);
+    this.toolDiscovery = options.toolDiscovery ?? new ToolDiscoveryController();
   }
 
   private emit(event: AgentTelemetryEvent): void {
@@ -250,21 +267,24 @@ class Agent implements AgentInterface {
 
   private async *run(input: AgentRunInput): AsyncGenerator<AgentStreamEvent> {
     const runStart = Date.now();
-    // T39 安全网:显式 activeToolNames 优先;没设且超 40 → 退化最小集 + 事件。
+    // T43/T44 安全网:显式 activeToolNames 优先;没设且超 40 → 不裁 toolSet,
+    // 首步 active core + tool_search + skill preferred,后续由 tool_search 激活并入。
     const resolvedTools = this.resolveTools(input);
-    const { tools: netTools, degraded } = applyToolCountSafetyNet(
+    const exposure = resolveToolExposure(
       resolvedTools,
       input.activeToolNames,
+      this.toolDiscovery,
+      input.preferredToolNames,
     );
-    if (degraded) {
+    if (exposure.degraded) {
       this.emit({
         type: "tool_count_degraded",
-        totalCount: resolvedTools.size,
-        keptCount: netTools.size,
+        totalCount: exposure.totalCount,
+        keptCount: exposure.keptCount,
         limit: TOOL_COUNT_SAFETY_LIMIT,
       });
     }
-    const toolSet: ToolSet = toToolSet([...netTools.values()]);
+    const toolSet: ToolSet = toToolSet([...resolvedTools.values()]);
     const maxSteps = input.maxSteps ?? this.maxSteps;
     const clock: ToolCallClock = new Map();
     const toolCalls: AgentToolCallResult[] = [];
@@ -307,12 +327,25 @@ class Agent implements AgentInterface {
           this.emitTransition(stepsUsed, "proactive_loop_compact");
         },
         getLastStepInputTokens: () => lastStepInputTokens,
+        getActiveTools: () =>
+          this.toolDiscovery.activeTools() as
+            | readonly (keyof ToolSet & string)[]
+            | undefined,
+        ...(exposure.degraded
+          ? { extraInstructions: [TOOL_DISCOVERY_NOTICE] }
+          : {}),
       });
 
       const result = streamText({
         model: this.options.model,
         messages,
         tools: toolSet,
+        ...(exposure.activeTools !== undefined
+          ? {
+              activeTools: exposure.activeTools as readonly (keyof ToolSet &
+                string)[],
+            }
+          : {}),
         stopWhen: stepCountIs(maxSteps - stepsUsed),
         prepareStep,
         ...(this.options.repairModel !== undefined
@@ -642,7 +675,14 @@ export const createAgent = (options: CreateAgentOptions): AgentInterface => {
   // (子代理 fork-join 半成品已在 T4 移除,S7 会从零实现带独立流式通道与消息落库的版本。)
   // 包装顺序:限流在审批内层 —— 审批弹窗可能挂很久,若限流在外层,
   // "排队等帽的只读调用"会占着帽等一个人工确认,帽被审批拖死。
-  const capTools = (rest.tools ?? []).map((t) =>
+  // T43:发现工具与业务工具同一层装配 —— tool_search 也吃只读并发帽,
+  // 但它不需要审批(needsApproval 不置位)。controller 随 Agent 实例进 run。
+  const toolDiscovery = new ToolDiscoveryController();
+  const withDiscoveryTools = [
+    ...(rest.tools ?? []),
+    createToolSearchTool(toolDiscovery),
+  ];
+  const capTools = withDiscoveryTools.map((t) =>
     withConcurrencyCap(t, limiter),
   );
   const tools = requestApproval
@@ -651,6 +691,7 @@ export const createAgent = (options: CreateAgentOptions): AgentInterface => {
 
   return new Agent({
     model: rest.model,
+    toolDiscovery,
     ...(tools !== undefined ? { tools } : {}),
     ...(rest.systemPrompt !== undefined
       ? { systemPrompt: rest.systemPrompt }
