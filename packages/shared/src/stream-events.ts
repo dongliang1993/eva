@@ -180,6 +180,54 @@ export interface RunApprovalResolvedEvent {
 
 export type RunApprovalEvent = RunApprovalRequestEvent | RunApprovalResolvedEvent;
 
+// ---------- T45b:plan review 平行决策通道（不动普通工具的 boolean 协议） ----------
+
+export const planReviewOutcomes = [
+  "approve",
+  "revise",
+  "reject",
+  "reject_and_exit",
+  "dismissed"
+] as const;
+
+export type PlanReviewOutcome = (typeof planReviewOutcomes)[number];
+
+/** plan review 的结构化决策。feedback 是用户原文,不摘要/不改写/不截断。 */
+export interface PlanReviewDecision {
+  readonly outcome: PlanReviewOutcome;
+  /** revise 必填;reject 可选。 */
+  readonly feedback?: string;
+  /** approve 且用户选了 option 时。 */
+  readonly selectedLabel?: string;
+  readonly decidedAt: string;
+}
+
+export interface PlanReviewOptionView {
+  readonly label: string;
+  readonly description: string;
+}
+
+/** exit_plan_mode 挂起等待 plan review 决策。planMarkdown 直接带正文,前端不必再拉文件。 */
+export interface RunPlanReviewRequestEvent {
+  type: "plan_review_request";
+  callId: string;
+  planId: string;
+  planPath: string;
+  planMarkdown: string;
+  options?: readonly PlanReviewOptionView[];
+  revision: number;
+}
+
+export interface RunPlanReviewResolvedEvent {
+  type: "plan_review_resolved";
+  callId: string;
+  decision: PlanReviewDecision;
+}
+
+export type RunPlanReviewEvent =
+  | RunPlanReviewRequestEvent
+  | RunPlanReviewResolvedEvent;
+
 /**
  * 子代理域事件(Eva 自有域,与主 SDK 命名空间隔离)。
  * 信封(parentToolCallId/subagentType)在唯一入口 runSubagent 注入,前端据此把
@@ -213,6 +261,8 @@ export type RunStreamEvent =
   | RunEndEvent
   | RunApprovalRequestEvent
   | RunApprovalResolvedEvent
+  | RunPlanReviewRequestEvent
+  | RunPlanReviewResolvedEvent
   | RunSubagentUpdateEvent
   | RunSubagentReportEvent;
 

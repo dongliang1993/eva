@@ -269,10 +269,18 @@ export const approvalRequests = sqliteTable(
     sessionId: text("session_id").notNull(),
     runId: text("run_id"),
     tool: text("tool").notNull(),
+    /** T45b:普通工具审批 vs plan review 平行通道;老行默认 tool,读法不变。 */
+    kind: text("kind", { enum: ["tool", "plan_review"] })
+      .notNull()
+      .default("tool"),
     args: text("args").notNull(), // JSON
-    status: text("status", { enum: ["pending", "granted", "denied"] })
+    status: text("status", {
+      enum: ["pending", "granted", "denied", "revise", "reject_and_exit", "dismissed"]
+    })
       .notNull()
       .default("pending"),
+    /** T45b:kind='plan_review' 时存 PlanReviewDecision JSON(定格/刷新重建用)。 */
+    decision: text("decision"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),
@@ -348,4 +356,32 @@ export const sessionSkillSelections = sqliteTable(
     primaryKey({ columns: [table.sessionId, table.skillName] }),
     index("idx_session_skill_selections_session").on(table.sessionId)
   ]
+);
+
+export const planStatuses = ["active", "approved", "rejected"] as const;
+
+export type PlanStatus = (typeof planStatuses)[number];
+
+/** T45a:Plan Gate 的 session 级规划态。plan 文件在 workspace 的 .eva/plan-gate/ 下。 */
+export const plans = sqliteTable(
+  "plans",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    status: text("status", { enum: planStatuses }).notNull().default("active"),
+    revisionCount: integer("revision_count").notNull().default(0),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`(datetime('now'))`)
+  },
+  (table) => [index("idx_plans_session_status").on(table.sessionId, table.status)]
 );

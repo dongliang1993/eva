@@ -49,6 +49,8 @@ Fastify decorators:
 - `stream-part-mapper.ts` translates SDK stream parts → `AgentStreamEvent`; `context-strategy.ts` builds `prepareStep`.
 - Tool exposure (T43): `createAgent` injects `tool_search`. When resolved tools exceed 40 and no explicit `activeToolNames` are set, the run keeps the full `toolSet` but enters discovery mode — step 1 activates only core tools + `tool_search` via `activeTools`, and tools found by `tool_search` become active from the next step (`tool_count_degraded` still warns). Explicit `activeToolNames` always win.
 - Skill exposure (T44): `SKILL.md` requires `name` / `description` / `allowed-tools` (invalid files are skipped with a warning; `always-inject` is optional). Each run auto-selects skills with the tool model, stores new selections in `session_skill_selections`, injects only selected skills' `name + description`, and merges selected `allowed-tools` as `preferredToolNames` (always plus `bash` / `read_skill` / `tool_search`) — a merge, not a replacement for the whole tool set.
+- Plan Gate (T45a, workspace-only): `enter_plan_mode` creates a `plans` row plus `<workspace>/.eva/plan-gate/<planId>/current.md` (with `.eva/.gitignore` seeded to `plan-gate/` only when the file does not exist). A run-scoped `PlanGateState` feeds `withPlanGate` (outermost wrapper: it hard-blocks `write`/`edit` to non-plan paths only; bash/memory/MCP keep their normal approval semantics) and the per-step plan reminder. `exit_plan_mode` uses the existing boolean approval: approved → revision snapshot + `status=approved` + gate off; denied → gate stays on. Writes to the current plan file are auto-approved with `reason="plan-file"` via the same `matchesPlanGatePath` helper — do not bypass that shared path check. Plan Gate is a guardrail, not a sandbox.
+- Plan review (T45b): `exit_plan_mode` has a parallel `requestPlanReview` channel (the boolean `RequestApproval` path for ordinary tools is untouched). Decisions are `approve / revise / reject / reject_and_exit / dismissed` (+ user `feedback` / `selectedLabel`), stored on `approval_requests.kind='plan_review'` + `decision` JSON, and `reject` / `reject_and_exit` set a run-scoped `shouldStopTurn` read by the `stopWhen` predicate. `cancelByRun` and startup stale sweeps map plan-review pendings to `dismissed` (ordinary tool pendings still become `denied`). The web UI renders a separate `PlanReviewCard` (never the risk-colored approval card), and `exit_plan_mode` must never gain an always-allow policy key.
 - Subagents were a half-built scaffold and have been **removed**; fork-join will be rebuilt from scratch in S7.
 
 ### Tool Convention (`packages/harness/src/tools/<kebab-case>/`)
@@ -134,6 +136,18 @@ Approvals are driven by the SSE `approval_request` / `approval_resolved` events 
 
 - **Workspaces** (`app.services.workspaces`): a local directory bound to a session (`sessions.workspace_id`). fs tools are injected per-run from it; `CLAUDE.md`/`AGENTS.md` under it are injected into the system prompt (16 KB cap). Paths must pass `assertUsableWorkspacePath` ($HOME and `/` rejected). Tool overflow lands in `~/.eva/tool-overflow/<workspaceId>/`, and `read_file` has a read-only whitelist for it.
 - **MCP** (`app.services.mcp`, T9): DB `mcp_servers` is the only runtime source; `~/.eva/mcp.json` imports file-origin entries at startup. MCP tools are named `mcp__<server>__<tool>` and require approval unless the server declares `readOnlyHint`. A broken server degrades to `state: "error"` and never fails the chat.
+
+## Plan Weave (T46)
+
+Workspace 级文件型任务图（与 Plan Gate 的 `.eva/plan-gate/` 目录刻意拉开，互不共享文件）：
+
+- 状态在 `<workspace>/.eva/plan-weave/`（`plan.json` + `state.json` + `results/`），archive 落到 `.eva/plan-weave-archive/<ts>-<slug>/`；路径只在 `apps/server/src/paths.ts` 拼。**不写进 `.gitignore`** —— 进 git 是有意的（人可直接改、可追踪）。
+- block 状态机 `pending → ready → in_progress → done`（旁路 `blocked`）；**ready 不是持久字段**，每次读写按 deps 重算，手改 `plan.json` 能自愈。`state.json` 的 `current` 必带 `owner: runId`；`submit` 后让出坑位等 review，`done/reset/archive` 都必须清 `current`。
+- 写盘全部 tmp→fsync→rename 原子写；**另有 per-workspace in-process mutex**（`PlanFileStore.withLock`）防跨 `await` 的 read-modify-write lost update —— 去掉它并发 submit 测试必红。
+- review：`needs_changes` 必带 notes 且 block 回 `ready`、`reviews+1`；达 `maxReviewCycles` 自动关门放行并在 review 文件里留痕「已达上限，强制通过」。open feedback 永远优先于新 block；`resolve` 写 `FB-N.resolution.md` 关闭。
+- 11 条 REST 挂在 `/api/v1/workspaces/:id/plan...`（不接 `dir`，避免任意路径入口）；6 个内置工具 `plan_create/plan_status/plan_claim/plan_submit/plan_review/plan_resolve`（`packages/harness/src/tools/plan-weave/`），工具工厂吃 `PlanWeaveGateway`，server 侧直接调 service —— **不过 HTTP、不带 token**。
+- 工具**入参不带任何路径**（workspaceId/runId 在 runs.ts 绑进 gateway，无 workspace 不注入），这是「不设 `needsApproval`」站得住的理由；只有 `plan_status` 是 `readOnly`（误标会被 T24 只读并发帽放行，绕过 mutex 的串行意图）。
+- 首版只有 REST，无 WS 广播、无 UI 面板（plan 是 workspace 级，per-run SSE 帧会漏给别的会话）。
 
 ## Memory (T16)
 

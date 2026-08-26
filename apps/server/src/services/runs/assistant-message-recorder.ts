@@ -4,6 +4,7 @@ import type {
   ApprovalDecision,
   EvaDynamicToolPart,
   EvaUIMessage,
+  PlanReviewDecision,
   RunAgentStreamEvent,
   StreamFinishReason,
   StreamTokenUsage
@@ -22,6 +23,8 @@ export interface AssistantMessageRecorderOptions {
    * 决策数据源是 approval_requests 行(finish 时已 decided),不是 SSE 事件。
    */
   readonly lookupDecision?: (callId: string) => ApprovalDecision | undefined;
+  /** T45b:exit_plan_mode 的 plan review 决策定格,写进 part.toolMetadata.planReviewDecision。 */
+  readonly lookupPlanReviewDecision?: (callId: string) => PlanReviewDecision | undefined;
 }
 
 export interface RecordedAssistantRun {
@@ -114,15 +117,21 @@ export class AssistantMessageRecorder {
     if (!lookup) return message;
 
     let touched = false;
+    const lookupPlanReview = this.options.lookupPlanReviewDecision;
     const parts = message.parts.map((part) => {
       if (!isDynamicToolPart(part)) return part;
       const decision = lookup(part.toolCallId);
-      if (!decision) return part;
+      const planReviewDecision = lookupPlanReview?.(part.toolCallId);
+      if (!decision && !planReviewDecision) return part;
       touched = true;
       // toolMetadata 是宽松 JSONValue 记录,spread 后 SDK 判别联合收窄不了 —— 经 unknown 转回。
       return {
         ...part,
-        toolMetadata: { ...part.toolMetadata, approvalDecision: decision }
+        toolMetadata: {
+          ...part.toolMetadata,
+          ...(decision !== undefined ? { approvalDecision: decision } : {}),
+          ...(planReviewDecision !== undefined ? { planReviewDecision } : {})
+        }
       } as unknown as EvaDynamicToolPart;
     });
 

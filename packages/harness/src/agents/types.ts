@@ -8,7 +8,7 @@ import type {
 
 import type { ContextWindowPolicyOptions } from "../context/policy.js";
 import type { AgentModel } from "../models/agent-model.js";
-import type { AgentTool } from "../tools/index.js";
+import type { AgentTool, PlanGateState } from "../tools/index.js";
 import type { AgentObserver } from "./observer.js";
 
 export interface AgentRunInput {
@@ -122,4 +122,6 @@ export interface CreateAgentOptions {
    * provider 登记处,只吐事件;钳制动作在 server 侧(deps → clampContextWindow)。
    */
   clampTarget?: { providerId: string; modelId: string };
+  /** T45a:run-scoped plan gate 状态。传了就在最外层包 withPlanGate + 每步注 reminder。 */
+  planGateState?: PlanGateState;
 }

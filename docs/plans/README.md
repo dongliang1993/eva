@@ -3,6 +3,7 @@
 ## 在用
 - `r10/` —— S20 usage_records 补全（T40–T41）。入口：[`r10/00-overview.md`](./r10/00-overview.md)
 - `r11/` —— S25 工具发现与 Skill 渐进披露加固（T42–T44）。入口：[`r11/00-overview.md`](./r11/00-overview.md)
+- `r12/` —— S26 Plan Gate 闸门 × 审批决策协议 × Plan Weave 任务图（T45a/T45b/T46）。入口：[`r12/00-overview.md`](./r12/00-overview.md)
 
 ## 已完成（保留作施工记录）
 - `r9/` —— S19 AutoCompact 步中压缩 + 工具数安全网（T36–T39），已落地（`e063466`/`95b6910`/`76dc545`/`ebbf870`）。

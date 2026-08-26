@@ -11,8 +11,11 @@ import type { StreamToolCallSummary, StreamTokenUsage } from "@eva/shared";
 import type { AgentTool } from "../tools/index.js";
 import {
   createToolSearchTool,
+  planGateInstructions,
   toToolSet,
   TOOL_CALL_ABORTED_OUTPUT,
+  withPlanGate,
+  type PlanGateState,
 } from "../tools/index.js";
 import {
   DEFAULT_READ_ONLY_CONCURRENCY,
@@ -155,6 +158,8 @@ interface AgentOptions {
   clampTarget?: { providerId: string; modelId: string };
   /** T43:工具发现状态。createAgent 注入;直造 Agent(只发生在测试)时给默认。 */
   toolDiscovery?: ToolDiscoveryController;
+  /** T45a:run-scoped plan gate 状态。传了就在最外层包 withPlanGate + 每步注 reminder。 */
+  planGateState?: PlanGateState;
 }
 
 /**
@@ -331,6 +336,10 @@ class Agent implements AgentInterface {
           this.toolDiscovery.activeTools() as
             | readonly (keyof ToolSet & string)[]
             | undefined,
+        getExtraInstructions: () =>
+          planGateInstructions(
+            this.options.planGateState?.current() ?? { active: false },
+          ),
         ...(exposure.degraded
           ? { extraInstructions: [TOOL_DISCOVERY_NOTICE] }
           : {}),
@@ -346,7 +355,11 @@ class Agent implements AgentInterface {
                 string)[],
             }
           : {}),
-        stopWhen: stepCountIs(maxSteps - stepsUsed),
+        stopWhen: [
+          stepCountIs(maxSteps - stepsUsed),
+          // T45b:reject / reject_and_exit 的一次性终止信号(run-scoped,不落库)。
+          () => this.options.planGateState?.shouldStopTurn() === true,
+        ],
         prepareStep,
         ...(this.options.repairModel !== undefined
           ? {
@@ -685,13 +698,21 @@ export const createAgent = (options: CreateAgentOptions): AgentInterface => {
   const capTools = withDiscoveryTools.map((t) =>
     withConcurrencyCap(t, limiter),
   );
-  const tools = requestApproval
+  const approvalTools = requestApproval
     ? capTools.map((t) => withApproval(t, requestApproval))
     : capTools;
+  // T45a:planGate 包到最外层 —— 执行序 planGate → approval → cap,
+  // 被拒的写不会先进审批弹窗。
+  const tools = rest.planGateState
+    ? approvalTools.map((t) => withPlanGate(t, rest.planGateState!))
+    : approvalTools;
 
   return new Agent({
     model: rest.model,
     toolDiscovery,
+    ...(rest.planGateState !== undefined
+      ? { planGateState: rest.planGateState }
+      : {}),
     ...(tools !== undefined ? { tools } : {}),
     ...(rest.systemPrompt !== undefined
       ? { systemPrompt: rest.systemPrompt }

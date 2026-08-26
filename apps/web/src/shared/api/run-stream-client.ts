@@ -4,6 +4,8 @@ import type {
   RunAgentStreamEvent,
   RunApprovalRequestEvent,
   RunApprovalResolvedEvent,
+  RunPlanReviewRequestEvent,
+  RunPlanReviewResolvedEvent,
   RunStreamEvent,
   RunStreamFrame,
   RunSubagentUpdateEvent,
@@ -30,8 +32,14 @@ export interface StreamCallbacks {
   readonly onRunStart?: (runId: string, sessionId: string) => void;
   /** 已按 seq 归位的 agent 事件,交给 SSE 累积。 */
   readonly onEvent: (event: RunAgentStreamEvent) => void;
-  /** T0.4 引入的 Eva 自有域审批事件。 */
-  readonly onApproval?: (event: RunApprovalRequestEvent | RunApprovalResolvedEvent) => void;
+  /** T0.4 引入的 Eva 自有域审批事件（含 T45b plan review 平行通道帧）。 */
+  readonly onApproval?: (
+    event:
+      | RunApprovalRequestEvent
+      | RunApprovalResolvedEvent
+      | RunPlanReviewRequestEvent
+      | RunPlanReviewResolvedEvent
+  ) => void;
   /** S7:子代理事件。与主链隔离 —— 走专属 callback,绝不并进 onEvent 的主 builder。 */
   readonly onSubagent?: (event: RunSubagentUpdateEvent) => void;
   /** S7:子代理主动交付了结论 —— 卡片即时显示"已回报"。 */
@@ -133,9 +141,11 @@ const dispatchEvent = (ev: RunStreamEvent, callbacks: StreamCallbacks): void => 
     case "run_start":
       callbacks.onRunStart?.(ev.runId, ev.sessionId);
       break;
-    // T0.4 引入的审批事件:T3 接进 useApprovals。
+    // T0.4 引入的审批事件:T3 接进 useApprovals。T45b:plan review 平行通道同口接入。
     case "approval_request":
     case "approval_resolved":
+    case "plan_review_request":
+    case "plan_review_resolved":
       callbacks.onApproval?.(ev);
       break;
     // S7:子代理事件与主链隔离段 —— 🔴 若漏掉这个 case,会掉进 default 被并进主

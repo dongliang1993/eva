@@ -1,21 +1,32 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import type { AppDatabase } from "../index.js";
 import { approvalRequests } from "../schema.js";
 
-export type ApprovalStatus = "pending" | "granted" | "denied";
+export type ApprovalStatus =
+  | "pending"
+  | "granted"
+  | "denied"
+  | "revise"
+  | "reject_and_exit"
+  | "dismissed";
+
+export type ApprovalKind = "tool" | "plan_review";
 
 export interface ApprovalRequestRow {
   readonly id: string;
   readonly sessionId: string;
   readonly runId: string | null;
   readonly tool: string;
+  readonly kind: ApprovalKind;
   readonly args: string; // JSON stringified
   readonly status: ApprovalStatus;
   readonly createdAt: string;
   readonly decidedAt: string | null;
   /** T28:决策来源(policy:<key>/stale-restart/...),NULL = 用户手批。 */
   readonly reason: string | null;
+  /** T45b:kind='plan_review' 时的 PlanReviewDecision JSON。 */
+  readonly decision: string | null;
 }
 
 export interface CreateApprovalInput {
@@ -24,6 +35,7 @@ export interface CreateApprovalInput {
   readonly runId: string;
   readonly tool: string;
   readonly args: unknown;
+  readonly kind?: ApprovalKind;
 }
 
 export class ApprovalRepository {
@@ -37,6 +49,7 @@ export class ApprovalRepository {
         sessionId: input.sessionId,
         runId: input.runId,
         tool: input.tool,
+        kind: input.kind ?? "tool",
         args: JSON.stringify(input.args)
       })
       .run();
@@ -58,35 +71,43 @@ export class ApprovalRepository {
       sessionId: row.sessionId,
       runId: row.runId,
       tool: row.tool,
+      kind: row.kind,
       args: row.args,
       status: row.status as ApprovalStatus,
       createdAt: row.createdAt,
       decidedAt: row.decidedAt,
-      reason: row.reason
+      reason: row.reason,
+      decision: row.decision
     };
   }
 
   /**
-   * 进程启动时把上次遗留的 pending 审批收成 denied。
-   *
-   * 审批不再超时(出口只有人工决策 / cancelByRun / 进程重启)之后,这一步是
-   * 必需的:待决表在内存 Map 里,随进程消失;DB 里的 pending 行没人收就永远挂着,
-   * 和 runs 表当初的问题一模一样(见 DrizzleRunRepository.failStale)。
+   * 进程启动清扫遗留 pending。按 kind 分流(契约 6):
+   * - tool → denied(用户点 Stop/重启,对这些工具确实算拒绝);
+   * - plan_review → dismissed(没有人拒绝过,不能伪造用户决策)。
    * @returns 被收尾的数量
    */
   failStalePending(): number {
-    const result = this.db
+    const decidedAt = new Date().toISOString();
+
+    const tools = this.db
       .update(approvalRequests)
-      .set({ status: "denied", decidedAt: new Date().toISOString(), reason: "stale-restart" })
-      .where(eq(approvalRequests.status, "pending"))
+      .set({ status: "denied", decidedAt, reason: "stale-restart" })
+      .where(and(eq(approvalRequests.status, "pending"), eq(approvalRequests.kind, "tool")))
       .run();
 
-    return result.changes;
+    const planReviews = this.db
+      .update(approvalRequests)
+      .set({ status: "dismissed", decidedAt, reason: "stale-restart" })
+      .where(and(eq(approvalRequests.status, "pending"), eq(approvalRequests.kind, "plan_review")))
+      .run();
+
+    return tools.changes + planReviews.changes;
   }
 
   decide(
     id: string,
-    status: Extract<ApprovalStatus, "granted" | "denied">,
+    status: Extract<ApprovalStatus, "granted" | "denied" | "revise" | "reject_and_exit" | "dismissed">,
     reason?: string
   ): void {
     this.db
@@ -96,6 +117,23 @@ export class ApprovalRepository {
         decidedAt: new Date().toISOString(),
         // T28:reason 是决策时的产物(policy:/stale-restart/readonly-safe),不传不动该列。
         ...(reason !== undefined ? { reason } : {})
+      })
+      .where(eq(approvalRequests.id, id))
+      .run();
+  }
+
+  /** T45b:plan review 决策 —— status 映射 + PlanReviewDecision JSON 一起落。 */
+  decidePlanReview(
+    id: string,
+    status: Extract<ApprovalStatus, "granted" | "denied" | "revise" | "reject_and_exit" | "dismissed">,
+    decisionJson: string
+  ): void {
+    this.db
+      .update(approvalRequests)
+      .set({
+        status,
+        decision: decisionJson,
+        decidedAt: new Date().toISOString()
       })
       .where(eq(approvalRequests.id, id))
       .run();

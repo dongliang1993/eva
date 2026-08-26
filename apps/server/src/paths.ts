@@ -20,6 +20,19 @@ export const toolOverflowDir = (workspaceId: string): string =>
   path.join(evaDataDir(), "tool-overflow", workspaceId);
 
 /**
+ * T46:Plan Weave 任务图目录(plan.json/state.json/results)。
+ * 与 plan-gate 同一个 `.eva/` 根但词拉开一层;**不**写进 .gitignore ——
+ * 进 git 是有意的:人可直接改、可追踪(docs/plans/r12/T46 §2.1)。
+ * 路径拼接只有这一处,service/REST/工具都不许自己拼。
+ */
+export const planWeaveDir = (workspaceRoot: string): string =>
+  path.join(workspaceRoot, ".eva", "plan-weave");
+
+/** archive 去向:<workspace>/.eva/plan-weave-archive/<timestamp>-<slug>/。 */
+export const planWeaveArchiveDir = (workspaceRoot: string): string =>
+  path.join(workspaceRoot, ".eva", "plan-weave-archive");
+
+/**
  * 用户技能目录。技能是用户内容,必须在用户数据目录里 ——
  * 放 App 包内部的话,装完的用户根本没有途径加 skill(docs 14 §7.3)。
  */

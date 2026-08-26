@@ -2,21 +2,34 @@ import { useCallback, useState } from "react";
 
 import type {
   ApprovalDecision,
+  PlanReviewDecision,
   RunApprovalRequestEvent,
-  RunApprovalResolvedEvent
+  RunApprovalResolvedEvent,
+  RunPlanReviewRequestEvent,
+  RunPlanReviewResolvedEvent
 } from "@eva/shared";
 
-import { decideApproval, listApprovals, type PendingApproval } from "../api";
+import {
+  decideApproval,
+  decidePlanReview as decidePlanReviewApi,
+  listApprovals,
+  type PendingApproval,
+  type PendingPlanReview,
+  type PlanReviewClientOutcome
+} from "../api";
+
+type ApprovalStreamEvent =
+  | RunApprovalRequestEvent
+  | RunApprovalResolvedEvent
+  | RunPlanReviewRequestEvent
+  | RunPlanReviewResolvedEvent;
 
 /**
- * 待审批的危险工具请求。
+ * 待审批的危险工具请求 + T45b plan review 请求。
  *
- * 事实源是 SSE 的 approval_request / approval_resolved 事件(T0.4)。
- * `refresh(sessionId)` 只覆盖「页面刷新时正好有 run 在等审批」这一种
- * 情况 —— 会话切换/刷新时由 chat-page 用 effect 驱动,不轮询。
- *
- * T30:决策后不再即删,而是把这条从 pending 移入 resolved(定格态)。
- * 刷新恢复的事实源是消息 part 的 toolMetadata.approvalDecision,不是这里。
+ * 事实源是 SSE 的 approval_request / approval_resolved / plan_review_request / plan_review_resolved。
+ * `refresh(sessionId)` 只覆盖普通工具的刷新恢复;plan review 的定格事实源是消息 part 的
+ * toolMetadata.planReviewDecision。
  */
 export function useApprovals(
   allowAlwaysEnabled?: (tool: string, args: Record<string, unknown>) => Promise<void> | void
@@ -24,11 +37,16 @@ export function useApprovals(
   const [pending, setPending] = useState<readonly PendingApproval[]>([]);
   /** 本次会话内刚决策的定格态(callId → 决策)。只覆盖「在看的这一张」。 */
   const [resolved, setResolved] = useState<Readonly<Record<string, ApprovalDecision>>>({});
+  const [pendingPlanReviews, setPendingPlanReviews] = useState<readonly PendingPlanReview[]>([]);
+  const [resolvedPlanReviews, setResolvedPlanReviews] = useState<
+    Readonly<Record<string, PlanReviewDecision>>
+  >({});
 
   /** 会话切换/刷新恢复时对齐一次(不轮询) —— 事实源仍是 SSE 事件。 */
   const refresh = useCallback((sessionId: string | null) => {
     if (!sessionId) {
       setPending([]);
+      setPendingPlanReviews([]);
       return;
     }
 
@@ -64,24 +82,64 @@ export function useApprovals(
     [pending, allowAlwaysEnabled, decide]
   );
 
-  /** 由 useChat 的 onApproval 回调驱动(SSE approval_request / approval_resolved)。 */
-  const applyStreamEvent = useCallback(
-    (event: RunApprovalRequestEvent | RunApprovalResolvedEvent) => {
-      if (event.type === "approval_request") {
-        setPending((prev) => [
-          ...prev,
-          { callId: event.callId, tool: event.toolName, args: event.args, risk: event.risk }
-        ]);
-        return;
-      }
-
-      // T30:决策后从 pending 摘出、记入 resolved —— 卡片定格成「已允许/已拒绝 · 时间」,
-      // 不再凭空消失。decide() 的本地 filter 与这一帧并发无碍(幂等移除)。
-      setPending((prev) => prev.filter((item) => item.callId !== event.callId));
-      setResolved((prev) => ({ ...prev, [event.callId]: event.decision }));
+  /** T45b:plan review 决策。dismissed 没有前端入口。 */
+  const decidePlanReview = useCallback(
+    async (
+      callId: string,
+      outcome: PlanReviewClientOutcome,
+      payload: { feedback?: string; selectedLabel?: string } = {}
+    ) => {
+      await decidePlanReviewApi(callId, { outcome, ...payload });
+      setPendingPlanReviews((prev) => prev.filter((p) => p.callId !== callId));
     },
     []
   );
 
-  return { pending, resolved, decide, allowAlways, applyStreamEvent, refresh };
+  /** 由 useChat 的 onApproval 回调驱动。 */
+  const applyStreamEvent = useCallback((event: ApprovalStreamEvent) => {
+    if (event.type === "approval_request") {
+      setPending((prev) => [
+        ...prev,
+        { callId: event.callId, tool: event.toolName, args: event.args, risk: event.risk }
+      ]);
+      return;
+    }
+
+    if (event.type === "approval_resolved") {
+      setPending((prev) => prev.filter((item) => item.callId !== event.callId));
+      setResolved((prev) => ({ ...prev, [event.callId]: event.decision }));
+      return;
+    }
+
+    if (event.type === "plan_review_request") {
+      setPendingPlanReviews((prev) => [
+        ...prev.filter((item) => item.callId !== event.callId),
+        {
+          callId: event.callId,
+          planId: event.planId,
+          planPath: event.planPath,
+          planMarkdown: event.planMarkdown,
+          ...(event.options !== undefined ? { options: event.options } : {}),
+          revision: event.revision
+        }
+      ]);
+      return;
+    }
+
+    // plan_review_resolved:定格,不再凭空消失。
+    setPendingPlanReviews((prev) => prev.filter((item) => item.callId !== event.callId));
+    setResolvedPlanReviews((prev) => ({ ...prev, [event.callId]: event.decision }));
+  }, []);
+
+  return {
+    pending,
+    resolved,
+    pendingPlanReviews,
+    resolvedPlanReviews,
+    decide,
+    decidePlanReview,
+    allowAlways,
+    applyStreamEvent,
+    refresh
+  };
 }

@@ -86,6 +86,33 @@ export const decideApproval = async (
   });
 };
 
+/** T45b:plan review 平行通道的待决请求(SSE plan_review_request 帧形状)。 */
+export interface PendingPlanReview {
+  readonly callId: string;
+  readonly planId: string;
+  readonly planPath: string;
+  readonly planMarkdown: string;
+  readonly options?: readonly { label: string; description: string }[];
+  readonly revision: number;
+}
+
+export type PlanReviewClientOutcome = "approve" | "revise" | "reject" | "reject_and_exit";
+
+/** 提交 plan review 决策。dismissed 只能由系统产生,前端没有入口。 */
+export const decidePlanReview = async (
+  callId: string,
+  input: {
+    outcome: PlanReviewClientOutcome;
+    feedback?: string;
+    selectedLabel?: string;
+  }
+): Promise<void> => {
+  await apiFetch(`/api/v1/tool-approvals/${callId}/plan-review`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+};
+
 /**
  * T31:「始终允许」→ 后端选精确 policy key 落 allowAlwaysPolicies。
  * key 生成在后端(buildPolicyKeys 单一事实来源),前端只传 {tool, sessionId, args}。

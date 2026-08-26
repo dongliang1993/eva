@@ -6,6 +6,8 @@ import type {
   RunAgentStreamEvent,
   RunApprovalRequestEvent,
   RunApprovalResolvedEvent,
+  RunPlanReviewRequestEvent,
+  RunPlanReviewResolvedEvent,
   RunSubagentUpdateEvent,
   RunSubagentReportEvent
 } from "@eva/shared";
@@ -26,8 +28,14 @@ import {
 import type { ThreadMessage } from "../../../types/api";
 
 export interface UseChatHandlers {
-  /** 审批事件(T0.4 引入的 SSE 事件),由 useApprovals 驱动。 */
-  readonly onApproval?: (event: RunApprovalRequestEvent | RunApprovalResolvedEvent) => void;
+  /** 审批事件(T0.4 引入的 SSE 事件 + T45b plan review 帧),由 useApprovals 驱动。 */
+  readonly onApproval?: (
+    event:
+      | RunApprovalRequestEvent
+      | RunApprovalResolvedEvent
+      | RunPlanReviewRequestEvent
+      | RunPlanReviewResolvedEvent
+  ) => void;
   /** S7:子代理事件 —— 与主链隔离,由 useSubagents 累积(绝不并进主 builder)。 */
   readonly onSubagent?: (event: RunSubagentUpdateEvent) => void;
   /** S7:子代理主动交付结论 —— 卡片即时显示"已回报"。 */

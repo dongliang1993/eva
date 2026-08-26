@@ -9,21 +9,28 @@ import { AgentFactory } from "./agent-factory.js";
 import { ApprovalGateway } from "./approval-gateway.js";
 import { ApprovalPolicyStore } from "./approval-policy-store.js";
 import { McpRegistry } from "./mcp/mcp-registry.js";
+import { PlanWeaveService } from "./plan-weave/index.js";
 import { RunLedger } from "./runs/run-ledger.js";
 import { RunRegistry } from "./run-registry.js";
 import { SessionService } from "./session.js";
 import { WorkspaceStore } from "./workspaces/workspace-store.js";
 
-export const buildAppServices = (infra: AppInfrastructure): AppServices => ({
-  agents: new AgentFactory(infra),
-  session: new SessionService(
-    new DrizzleSessionRepository(infra.db),
-    new DrizzleMessageRepository(infra.db)
-  ),
-  approvals: new ApprovalGateway(new ApprovalRepository(infra.db)),
-  approvalPolicies: new ApprovalPolicyStore(infra.db, infra.config),
-  runLedger: new RunLedger(new DrizzleRunRepository(infra.db)),
-  runRegistry: new RunRegistry(),
-  workspaces: new WorkspaceStore(new DrizzleWorkspaceRepository(infra.db)),
-  mcp: new McpRegistry(new McpServerRepository(infra.db), infra.logger)
-});
+export const buildAppServices = (infra: AppInfrastructure): AppServices => {
+  const workspaces = new WorkspaceStore(new DrizzleWorkspaceRepository(infra.db));
+
+  return {
+    agents: new AgentFactory(infra),
+    session: new SessionService(
+      new DrizzleSessionRepository(infra.db),
+      new DrizzleMessageRepository(infra.db)
+    ),
+    approvals: new ApprovalGateway(new ApprovalRepository(infra.db)),
+    approvalPolicies: new ApprovalPolicyStore(infra.db, infra.config),
+    runLedger: new RunLedger(new DrizzleRunRepository(infra.db)),
+    runRegistry: new RunRegistry(),
+    workspaces,
+    // T46:任务图状态在 workspace 文件里,service 只认 workspaceId —— 无 DB 表。
+    planWeave: new PlanWeaveService(workspaces),
+    mcp: new McpRegistry(new McpServerRepository(infra.db), infra.logger)
+  };
+};

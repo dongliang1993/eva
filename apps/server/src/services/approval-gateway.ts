@@ -1,16 +1,21 @@
 import { classifyToolRisk } from "@eva/harness";
-import type { ToolRisk } from "@eva/shared";
+import type { PlanReviewDecision, ToolRisk } from "@eva/shared";
 
-import { ApprovalRepository, type ApprovalRequestRow } from "../db/repositories/approval-repository.js";
+import {
+  ApprovalRepository,
+  type ApprovalKind,
+  type ApprovalRequestRow
+} from "../db/repositories/approval-repository.js";
 
 interface PendingRequest {
   readonly runId: string;
   readonly sessionId: string;
   readonly tool: string;
+  readonly kind: ApprovalKind;
   readonly args: unknown;
   /** T14:ask 时即时算一次,SSE 与 listApprovals 两条路径共用这份画像。 */
   readonly risk: ToolRisk;
-  resolve: (allowed: boolean) => void;
+  resolve: (decision: boolean | PlanReviewDecision) => void;
 }
 
 /** 一次审批请求的归属与内容。 */
@@ -30,53 +35,65 @@ export interface PendingApprovalView {
   readonly risk: ToolRisk;
 }
 
+const planReviewStatusFor = (
+  outcome: PlanReviewDecision["outcome"]
+): "granted" | "denied" | "revise" | "reject_and_exit" | "dismissed" => {
+  switch (outcome) {
+    case "approve":
+      return "granted";
+    case "reject":
+      return "denied";
+    case "revise":
+      return "revise";
+    case "reject_and_exit":
+      return "reject_and_exit";
+    case "dismissed":
+      return "dismissed";
+  }
+};
+
 /**
  * 审批网关 —— 危险工具执行前的闸门。
  *
- * - `ask()` 把审批请求落库(pending),并返回一个 Promise;
- * - 同进程内用内存 Map 待决表桥接阻塞的 agent tool 与异步的用户决策。
- *
- * **审批永远等人,不超时。** 出口只有三个:
- *   ① `decide()` —— 用户点了允许/拒绝;
- *   ② `cancelByRun()` —— 用户点停止,或 run 收尾;
- *   ③ 进程重启 —— 内存 Map 随进程消失,DB 里的 pending 行由启动清扫
- *      (`ApprovalRepository.failStalePending`,见 deps.ts)收成 denied。
- *
- * 为什么删掉了 5 分钟自动拒绝:SSE 断连不再 abort run 之后,「刷新页面 → 卡片
- * 回来 → 慢慢看清楚再决定」是正常用法,倒计时会把这条路重新掐断。代价是
- * 卡在审批上的 run 一直是 running,该会话因此被 409 挡住新消息 —— 所以侧栏的
- * requires_action 圆点与 Stop 按钮从「体验」升级成「功能」。
- *
- * 信任模型(04 §5.2):本机进程是自己人,审批只防「AI 乱来」。
+ * 普通工具继续只认 boolean;T45b 的 plan review 走平行通道(askPlanReview)。
+ * **审批永远等人,不超时。** 出口只有三个:decide / cancelByRun / 进程重启清扫。
  */
-
 export class ApprovalGateway {
   private readonly pending = new Map<string, PendingRequest>();
 
   constructor(private readonly repo: ApprovalRepository) {}
 
-  /**
-   * 子代理的自动通过分支(docs 04 §8.6.1 分支 2)。
-   *
-   * 与 ask() 的唯一区别:不等用户 —— 落库即 granted,返回 true。
-   * 仍然落库:审批表是"危险工具做过什么"的唯一台账,自动通过也必须可追溯。
-   * 不进 pending Map:没有待决态,cancelByRun 自然碰不到它。
-   */
+  /** 子代理/短路的自动通过分支。落库即 granted,返回 true;不进 pending Map。 */
   autoApprove(callId: string, input: ApprovalAskInput, reason?: string): boolean {
     this.repo.create({ id: callId, ...input });
     this.repo.decide(callId, "granted", reason);
     return true;
   }
 
-  /** 发起一次审批请求,返回解析为「是否允许」的 Promise。 */
+  /** 发起一次普通工具审批请求,返回解析为「是否允许」的 Promise。 */
   ask(callId: string, input: ApprovalAskInput): Promise<boolean> {
-    this.repo.create({ id: callId, ...input });
+    this.repo.create({ id: callId, ...input, kind: "tool" });
 
     return new Promise<boolean>((resolve) => {
       this.pending.set(callId, {
         ...input,
+        kind: "tool",
         risk: classifyToolRisk(input.tool, (input.args ?? {}) as Record<string, unknown>),
-        resolve
+        resolve: (decision) => resolve(decision === true)
+      });
+    });
+  }
+
+  /** T45b:plan review 平行通道。返回结构化决策;普通 boolean 协议不认识这条路。 */
+  askPlanReview(callId: string, input: ApprovalAskInput): Promise<PlanReviewDecision> {
+    this.repo.create({ id: callId, ...input, kind: "plan_review" });
+
+    return new Promise<PlanReviewDecision>((resolve) => {
+      this.pending.set(callId, {
+        ...input,
+        kind: "plan_review",
+        risk: classifyToolRisk(input.tool, (input.args ?? {}) as Record<string, unknown>),
+        resolve: (decision) => resolve(decision as PlanReviewDecision)
       });
     });
   }
@@ -86,10 +103,10 @@ export class ApprovalGateway {
     return this.repo.getById(callId);
   }
 
-  /** 前端提交决策:允许或拒绝。该请求不存在(已决策/已取消/跨进程)时返回 false。 */
+  /** 普通工具决策。plan_review pending 不走这条,返回 false。 */
   decide(callId: string, allowed: boolean): boolean {
     const entry = this.pending.get(callId);
-    if (!entry) return false;
+    if (!entry || entry.kind !== "tool") return false;
 
     this.pending.delete(callId);
     this.repo.decide(callId, allowed ? "granted" : "denied");
@@ -97,12 +114,41 @@ export class ApprovalGateway {
     return true;
   }
 
+  /** plan review 决策。decision 不带 decidedAt 也可以,这里统一补。 */
+  decidePlanReview(
+    callId: string,
+    decision: Omit<PlanReviewDecision, "decidedAt"> & { decidedAt?: string }
+  ): boolean {
+    const entry = this.pending.get(callId);
+    if (!entry || entry.kind !== "plan_review") return false;
+    if (decision.outcome === "revise" && !(decision.feedback ?? "").trim()) return false;
+
+    if (decision.outcome === "approve" && decision.selectedLabel !== undefined) {
+      const options = (entry.args as { options?: readonly { label: string }[] } | undefined)
+        ?.options;
+      if (options && !options.some((option) => option.label === decision.selectedLabel)) {
+        return false;
+      }
+    }
+
+    const full: PlanReviewDecision = {
+      ...decision,
+      decidedAt: decision.decidedAt ?? new Date().toISOString()
+    } as PlanReviewDecision;
+
+    this.pending.delete(callId);
+    this.repo.decidePlanReview(
+      callId,
+      planReviewStatusFor(full.outcome),
+      JSON.stringify(full)
+    );
+    entry.resolve(full);
+    return true;
+  }
+
   /**
-   * 取消某次 run 下所有未决审批(abort / run 结束 / 进程收尾时调用)。
-   * docs 14 §4.4:「abort / run 结束 / destroy 时 cancelAll 统一 reject(不会永远吊着)」。
-   * 归属键是 runId 而不是 sessionId —— runId 在 run 的第一行就存在,
-   * 不像 sessionId 有一段「还不知道」的窗口(那个窗口是 P0.1 的根因)。
-   * @returns 被取消的数量
+   * 取消某次 run 下所有未决审批。按 kind 分流(契约 6):
+   * tool → denied + resolve(false);plan_review → dismissed + resolve({outcome:"dismissed"})。
    */
   cancelByRun(runId: string): number {
     let cancelled = 0;
@@ -112,18 +158,29 @@ export class ApprovalGateway {
         continue;
       }
       this.pending.delete(callId);
-      this.repo.decide(callId, "denied");
-      entry.resolve(false);
+
+      if (entry.kind === "plan_review") {
+        const decision: PlanReviewDecision = {
+          outcome: "dismissed",
+          decidedAt: new Date().toISOString()
+        };
+        this.repo.decidePlanReview(callId, "dismissed", JSON.stringify(decision));
+        entry.resolve(decision);
+      } else {
+        this.repo.decide(callId, "denied");
+        entry.resolve(false);
+      }
       cancelled += 1;
     }
 
     return cancelled;
   }
 
-  /** 当前未决的审批请求(供前端 SSE/轮询恢复)。 */
+  /** 当前未决的普通工具审批(供前端 SSE/轮询恢复;plan review 有自己的帧)。 */
   listPending(sessionId?: string): readonly PendingApprovalView[] {
     const out: PendingApprovalView[] = [];
     for (const [callId, entry] of this.pending) {
+      if (entry.kind !== "tool") continue;
       if (sessionId && entry.sessionId !== sessionId) continue;
       out.push({
         callId,

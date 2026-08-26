@@ -1,10 +1,11 @@
-import type { ApprovalDecision, EvaUIMessage } from "@eva/shared";
+import type { ApprovalDecision, EvaUIMessage, PlanReviewDecision } from "@eva/shared";
 
-import type { PendingApproval } from "../api";
+import type { PendingApproval, PendingPlanReview, PlanReviewClientOutcome } from "../api";
 import { useWorkspaces } from "../../workspaces/hooks/use-workspaces";
 import { isElectron } from "../../../shared/runtime";
 import { MessageList } from "./message-list";
 import { ApprovalCard } from "./approval-card";
+import { PlanReviewCard } from "./plan-review-card";
 import { ChatInput, type ChatInputRejection } from "./chat-input";
 import { WorkspaceNameProvider } from "./workspace-name-context";
 import { useStickToBottom } from "../hooks/use-stick-to-bottom";
@@ -26,6 +27,14 @@ interface ChatViewProps {
   readonly onApproveOnce?: (callId: string) => void;
   readonly onDeny?: (callId: string) => void;
   readonly onAllowAlways?: (callId: string) => void;
+  /** T45b:plan review 待决与定格态。 */
+  readonly pendingPlanReviews?: readonly PendingPlanReview[];
+  readonly resolvedPlanReviews?: Readonly<Record<string, PlanReviewDecision>>;
+  readonly onDecidePlanReview?: (
+    callId: string,
+    outcome: PlanReviewClientOutcome,
+    payload?: { feedback?: string; selectedLabel?: string }
+  ) => void;
   /** 上一句被 409 拒收:输入框回填 + 提示(见 ChatInput)。 */
   readonly rejection?: ChatInputRejection | null;
   readonly onRejectionSeen?: () => void;
@@ -47,6 +56,9 @@ export function ChatView({
   onApproveOnce,
   onDeny,
   onAllowAlways,
+  pendingPlanReviews,
+  resolvedPlanReviews,
+  onDecidePlanReview,
   rejection,
   onRejectionSeen
 }: ChatViewProps) {
@@ -88,6 +100,20 @@ export function ChatView({
             {...(resolvedApprovals?.[approval.callId]
               ? { resolved: resolvedApprovals[approval.callId] }
               : {})}
+          />
+        </div>
+      ))}
+
+      {pendingPlanReviews?.map((review) => (
+        <div key={review.callId} className="flex justify-start px-4">
+          <PlanReviewCard
+            review={review}
+            {...(resolvedPlanReviews?.[review.callId]
+              ? { resolved: resolvedPlanReviews[review.callId] }
+              : {})}
+            onDecide={(callId, outcome, payload) =>
+              onDecidePlanReview?.(callId, outcome, payload)
+            }
           />
         </div>
       ))}

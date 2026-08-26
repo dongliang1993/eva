@@ -9,6 +9,8 @@ import {
   createEditTool,
   createGrepTool,
   createListDirTool,
+  createEnterPlanModeTool,
+  createExitPlanModeTool,
   createOpenAiCompatibleModel,
   createReadFileTool,
   createReadSkillTool,
@@ -24,7 +26,10 @@ import {
   type AgentObserver,
   type AgentTool,
   type AutoSelectSkillsResult,
+  type PlanGateState,
+  type PlanGateStore,
   type PromptSection,
+  type RequestPlanReview,
   type RequestApproval,
   type Skill,
 } from "@eva/harness";
@@ -84,6 +89,14 @@ export interface AgentBuildOptions {
    * 传了(含空数组)就按选中集注 prompt;不传 = 兼容路径,列全部 infra.skills。
    */
   readonly selectedSkills?: readonly Skill[] | undefined;
+  /** T45a:run-scoped plan gate。仅在绑了 workspace 时由路由注入。 */
+  readonly planGate?:
+    | {
+        readonly state: PlanGateState;
+        readonly store: PlanGateStore;
+        readonly requestPlanReview?: RequestPlanReview | undefined;
+      }
+    | undefined;
 }
 
 export interface ResolvedModels {
@@ -158,11 +171,19 @@ export const buildBaseTools = (
     readonly skills: readonly Skill[];
     readonly workspace?: WorkspaceContext | undefined;
     readonly extraTools?: readonly AgentTool[] | undefined;
+    /** T45a:主 agent 专用;子代理不传(子代理仍按角色白名单收窄)。 */
+    readonly planGate?:
+      | {
+          readonly state: PlanGateState;
+          readonly store: PlanGateStore;
+          readonly requestPlanReview?: RequestPlanReview | undefined;
+        }
+      | undefined;
   },
   getToolModel: (binding: ModelBinding) => LanguageModel,
   toolBinding: ModelBinding,
 ): AgentTool[] => {
-  const { skills, workspace, extraTools } = options;
+  const { skills, workspace, extraTools, planGate } = options;
 
   const tools: AgentTool[] = [
     ...(skills.length > 0 ? [createReadSkillTool([...skills] as Skill[])] : []),
@@ -187,6 +208,18 @@ export const buildBaseTools = (
       createEditTool({ workRoot: workspace.root, overflowDir }),
       createBashTool({ workRoot: workspace.root, overflowDir }),
     );
+
+    // T45a:plan 工具与 fs 工具同一个注入条件 —— 无 workspace 就没有 plan gate。
+    if (planGate) {
+      tools.push(
+        createEnterPlanModeTool(planGate.store, planGate.state),
+        createExitPlanModeTool(
+          planGate.store,
+          planGate.state,
+          planGate.requestPlanReview,
+        ),
+      );
+    }
   }
 
   return tools;
@@ -288,6 +321,7 @@ export class AgentFactory {
         skills: this.infra.skills,
         ...defined("workspace", options.workspace),
         ...defined("extraTools", options.extraTools),
+        ...defined("planGate", options.planGate),
       },
       (binding) => this.getModel(binding),
       models.tool,
@@ -325,6 +359,7 @@ export class AgentFactory {
         ...defined("maxOutputTokens", models.chat.maxOutputTokens),
       },
       ...defined("requestApproval", options.requestApproval),
+      ...defined("planGateState", options.planGate?.state),
       // T18:schema 不匹配时用 tool 槽位模型修一次 —— 结构化小生成正是该槽位的用途。
       repairModel: this.getModel(models.tool),
       contextPolicy: {

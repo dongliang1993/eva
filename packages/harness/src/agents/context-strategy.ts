@@ -33,6 +33,11 @@ export interface ContextStrategyOptions<TOOLS extends ToolSet = ToolSet> {
   readonly getActiveTools?: () => readonly (keyof TOOLS & string)[] | undefined;
   /** T43:degraded/discovery 时追加的 system notice(跟在主 system prompt 后)。 */
   readonly extraInstructions?: SystemModelMessage[];
+  /**
+   * T45a:每步动态追加的 instructions(plan gate reminder)。与 extraInstructions 取并集;
+   * getter 每步调一次,plan gate 中途 enter/exit 才能被下一步看见。
+   */
+  readonly getExtraInstructions?: () => readonly SystemModelMessage[];
 }
 
 /**
@@ -77,7 +82,11 @@ export const createPrepareStep = <TOOLS extends ToolSet>(
   const activeTools = options.getActiveTools?.();
 
   return {
-    instructions: [...instructions, ...(options.extraInstructions ?? [])],
+    instructions: [
+      ...instructions,
+      ...(options.extraInstructions ?? []),
+      ...(options.getExtraInstructions?.() ?? []),
+    ],
     messages: rest,
     ...(activeTools !== undefined ? { activeTools } : {}),
   };

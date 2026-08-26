@@ -34,6 +34,7 @@
 | 21 | [v2 前端与桌面壳](./21-alma-v2-frontend-desktop.md) | 窗口家族扩张（livecoding/prompt-app-runner/扫雷）、preload 44 个 namespace、启动序列修订 | ✅ |
 | 22 | [S18 审批中心升级方案](./22-s18-approval-center.md) | S18 切片技术方案：thread 作用域 policy key、bash 安全直放、决策回写消息；含现状盘点与 r7 施工拆分（T27–T30） | ✅ |
 | 23 | [Eva 自动更新方案](./23-eva-auto-update.md) | Alma v0.0.986 更新链实证（差量预热/断点续传救援/手动触发 UX）× Cindy 自研链对照 → Eva 选型与 D1–D8 落地设计、发布 checklist、施工拆分 | ✅ |
+| 24 | [Eva Plan Gate × Plan Weave 方案](./24-eva-plan-gate-plan-weave.md) | Kimi Code plan mode（审批闸门/plan 文件/reminder）× Alma Plan Weave（workspace 文件任务图）→ Eva 两层拆分、数据模型、API、落地切片 | ✅ |
 
 ## 你问的 5 个方面 → 对应文档
 

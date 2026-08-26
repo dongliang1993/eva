@@ -314,6 +314,11 @@ export function ChatPage() {
               onApproveOnce={(callId) => approvals.decide(callId, true)}
               onDeny={(callId) => approvals.decide(callId, false)}
               onAllowAlways={(callId) => approvals.allowAlways(callId)}
+              pendingPlanReviews={approvals.pendingPlanReviews}
+              resolvedPlanReviews={approvals.resolvedPlanReviews}
+              onDecidePlanReview={(callId, outcome, payload) =>
+                approvals.decidePlanReview(callId, outcome, payload)
+              }
               rejection={rejection}
               onRejectionSeen={clearRejection}
             />
