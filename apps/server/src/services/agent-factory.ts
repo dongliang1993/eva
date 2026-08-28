@@ -78,6 +78,11 @@ export interface WorkspaceContext {
 export interface AgentBuildOptions {
   /** 本轮选定的模型("providerId:modelId")。必填 —— 没有全局默认,没模型就不该装 agent。 */
   readonly modelId: string;
+  /**
+   * T49:run-scoped observer,必填。主/子代理的事件归属由绑定关系承担
+   * (agent="main" | taskId),不再有 infra 进程级单例兜底 —— 没有隐式 current run。
+   */
+  readonly observer: AgentObserver;
   readonly requestApproval?: RequestApproval | undefined;
   readonly workspace?: WorkspaceContext | undefined;
   /** 进程级外部工具（MCP）；由路由从 registry 取好传进来。 */
@@ -372,7 +377,7 @@ export class AgentFactory {
         providerId: models.chat.providerId,
         modelId: models.chat.modelId,
       },
-      ...defined("observer", this.infra.observer),
+      observer: options.observer,
     });
 
     return {
@@ -419,6 +424,8 @@ export class AgentFactory {
      * 所以子代理必须沿用本轮主链的模型,不能自己另开一条解析路径。
      */
     readonly modelId: string;
+    /** T49:run-scoped observer,必填(前台 = 父 Run recorder 绑 taskId;后台 = 子 Run 的)。 */
+    readonly observer: AgentObserver;
   }): Agent {
     const models = this.resolveModels({ modelId: options.modelId });
     const baseTools = buildBaseTools(
@@ -456,7 +463,7 @@ export class AgentFactory {
       ...defined("requestApproval", options.requestApproval),
       // 子代理用的本来就是 tool 槽位(往往更弱),弱模型更需要修复器。
       repairModel: this.getModel(models.tool),
-      ...defined("observer", this.infra.observer),
+      observer: options.observer,
     });
   }
 }

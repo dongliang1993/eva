@@ -1,4 +1,5 @@
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const sessions = sqliteTable(
@@ -175,6 +176,18 @@ export const runStatuses = ["running", "completed", "aborted", "error"] as const
 
 export type RunStatus = (typeof runStatuses)[number];
 
+/** 失败归因(设计文档 §8)。aborted 由 status 表达,不进这个枚举。 */
+export const runFailureLayers = [
+  "routing",
+  "model",
+  "tool",
+  "context",
+  "orchestration",
+  "unknown"
+] as const;
+
+export type RunFailureLayer = (typeof runFailureLayers)[number];
+
 export const runs = sqliteTable(
   "runs",
   {
@@ -182,9 +195,21 @@ export const runs = sqliteTable(
     sessionId: text("session_id")
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
+    /** 后台子代理来源 Run;NULL 即主 Run(S27/T48)。删除父 Run 级联子 Run。 */
+    parentRunId: text("parent_run_id").references(
+      (): AnySQLiteColumn => runs.id,
+      { onDelete: "cascade" }
+    ),
+    /** 后台子代理对应的 background_tasks.id;类型与发起 Tool Call 由该行反查,不冗余。 */
+    backgroundTaskId: text("background_task_id"),
     status: text("status", { enum: runStatuses }).notNull().default("running"),
-    /** "providerId:modelId"。 */
+    /** 路由前请求的模型(请求 modelId / 会话记录),解析失败时只有它有值。 */
+    requestedModel: text("requested_model"),
+    /** 解析后的实际模型,"providerId:modelId";patchRouting 在解析成功后补。 */
     model: text("model"),
+    failureLayer: text("failure_layer", { enum: runFailureLayers }),
+    /** 这条 Run 当时的 observability.captureContent —— 设置是可变的,事实要定格。 */
+    captureLevel: text("capture_level"),
     userMessageId: text("user_message_id"),
     assistantMessageId: text("assistant_message_id"),
     finishReason: text("finish_reason"),
@@ -198,7 +223,62 @@ export const runs = sqliteTable(
   },
   (table) => [
     index("idx_runs_session_id").on(table.sessionId),
-    index("idx_runs_status").on(table.status)
+    index("idx_runs_status").on(table.status),
+    index("idx_runs_parent_run_id").on(table.parentRunId),
+    index("idx_runs_background_task_id").on(table.backgroundTaskId)
+  ]
+);
+
+export const runEventSeverities = ["info", "warn", "error"] as const;
+
+export type RunEventSeverity = (typeof runEventSeverities)[number];
+
+/**
+ * append-only 执行事实 ledger(S27/T47)。start/completed 配对,不 UPDATE 旧行;
+ * 崩溃收口靠启动清扫追加 abandoned 事件。时间一律 epoch ms —— 与 runs/messages
+ * 的 ISO text 只做 run_id 关联,不做跨表时间运算。
+ *
+ * seq 由 Run 级 recorder 独占单调分配(同一 Run 主 Agent 与前台子代理共用),
+ * UNIQUE(run_id, seq) 靠这个纪律成立。
+ */
+export const runEvents = sqliteTable(
+  "run_events",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    // 冗余列:会话轨迹每页都要先按 session 限定再排序,JOIN runs 再 ORDER BY 用不上索引。
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    /** "main" | taskId(前台子代理)。 */
+    agent: text("agent").notNull(),
+    kind: text("kind").notNull(),
+    turnIndex: integer("turn_index"),
+    stepIndex: integer("step_index"),
+    attempt: integer("attempt"),
+    toolCallId: text("tool_call_id"),
+    parentToolCallId: text("parent_tool_call_id"),
+    severity: text("severity", { enum: runEventSeverities })
+      .notNull()
+      .default("info"),
+    /** 已脱敏、已限长的 canonical JSON(键排序、无空白 —— hash 稳定性靠它)。 */
+    payload: text("payload").notNull(),
+    occurredAtMs: integer("occurred_at_ms").notNull(),
+    durationMs: integer("duration_ms")
+  },
+  (table) => [
+    uniqueIndex("uq_run_events_run_seq").on(table.runId, table.seq),
+    index("idx_run_events_run_tool_call").on(table.runId, table.toolCallId),
+    index("idx_run_events_run_time").on(table.runId, table.occurredAtMs),
+    index("idx_run_events_session_time").on(
+      table.sessionId,
+      table.occurredAtMs,
+      table.runId,
+      table.seq
+    )
   ]
 );
 
@@ -211,9 +291,9 @@ export const usageRecords = sqliteTable(
   "usage_records",
   {
     id: text("id").primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => runs.id, { onDelete: "cascade" }),
+    // T48:去掉 runs 外键 —— retention 会整 Run 删除(§7.1),usage 聚合独立存活。
+    // 关联仍在(run_id 值不变),只是生命周期不再绑死。
+    runId: text("run_id").notNull(),
     sessionId: text("session_id")
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),

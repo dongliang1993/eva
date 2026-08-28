@@ -1,17 +1,22 @@
 import { randomUUID } from "node:crypto";
 
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import type { StreamFinishReason, StreamTokenUsage } from "@eva/shared";
 
 import type { AppDatabase } from "../index.js";
-import { runs, type RunStatus } from "../schema.js";
+import { runs, type RunFailureLayer, type RunStatus } from "../schema.js";
 import { UsageRecordRepository } from "./usage-record-repository.js";
 
 export interface RunRecord {
   readonly id: string;
   readonly sessionId: string;
+  readonly parentRunId: string | null;
+  readonly backgroundTaskId: string | null;
   readonly status: RunStatus;
+  readonly requestedModel: string | null;
   readonly model: string | null;
+  readonly failureLayer: RunFailureLayer | null;
+  readonly captureLevel: string | null;
   readonly userMessageId: string | null;
   readonly assistantMessageId: string | null;
   readonly finishReason: string | null;
@@ -24,8 +29,14 @@ export interface RunRecord {
 export interface StartRunInput {
   readonly id: string;
   readonly sessionId: string;
-  readonly model: string;
-  readonly userMessageId: string;
+  /** T48 起可选:Run 提前到模型解析前创建,解析成功后 patchRouting 补上。 */
+  readonly model?: string;
+  /** 子 Run(后台子代理)没有用户消息锚点,可空。 */
+  readonly userMessageId?: string;
+  readonly requestedModel?: string;
+  readonly captureLevel?: string;
+  readonly parentRunId?: string;
+  readonly backgroundTaskId?: string;
 }
 
 export interface SettleRunInput {
@@ -34,6 +45,7 @@ export interface SettleRunInput {
   readonly assistantMessageId?: string;
   readonly usage?: StreamTokenUsage;
   readonly error?: string;
+  readonly failureLayer?: RunFailureLayer;
 }
 
 /** finishReason → run 终态。 */
@@ -51,8 +63,13 @@ export const runStatusFor = (reason: StreamFinishReason): Exclude<RunStatus, "ru
 const toRecord = (row: typeof runs.$inferSelect): RunRecord => ({
   id: row.id,
   sessionId: row.sessionId,
+  parentRunId: row.parentRunId,
+  backgroundTaskId: row.backgroundTaskId,
   status: row.status as RunStatus,
+  requestedModel: row.requestedModel,
   model: row.model,
+  failureLayer: row.failureLayer,
+  captureLevel: row.captureLevel,
   userMessageId: row.userMessageId,
   assistantMessageId: row.assistantMessageId,
   finishReason: row.finishReason,
@@ -71,9 +88,27 @@ export class DrizzleRunRepository {
       .values({
         id: input.id,
         sessionId: input.sessionId,
-        model: input.model,
-        userMessageId: input.userMessageId
+        ...(input.model !== undefined ? { model: input.model } : {}),
+        ...(input.userMessageId !== undefined ? { userMessageId: input.userMessageId } : {}),
+        ...(input.requestedModel !== undefined ? { requestedModel: input.requestedModel } : {}),
+        ...(input.captureLevel !== undefined ? { captureLevel: input.captureLevel } : {}),
+        ...(input.parentRunId !== undefined ? { parentRunId: input.parentRunId } : {}),
+        ...(input.backgroundTaskId !== undefined
+          ? { backgroundTaskId: input.backgroundTaskId }
+          : {})
       })
+      .run();
+  }
+
+  /**
+   * T48:模型解析成功后回填路由结果。requested/resolved 一次写完 ——
+   * 「patchRouting 只写一次」是验收项,这里没有部分更新路径。
+   */
+  patchRouting(runId: string, requestedModel: string, resolvedModel: string): void {
+    this.db
+      .update(runs)
+      .set({ requestedModel, model: resolvedModel })
+      .where(eq(runs.id, runId))
       .run();
   }
 
@@ -91,13 +126,16 @@ export class DrizzleRunRepository {
             ? { assistantMessageId: input.assistantMessageId }
             : {}),
           ...(input.usage !== undefined ? { usage: JSON.stringify(input.usage) } : {}),
-          ...(input.error !== undefined ? { error: input.error } : {})
+          ...(input.error !== undefined ? { error: input.error } : {}),
+          ...(input.failureLayer !== undefined ? { failureLayer: input.failureLayer } : {})
         })
         .where(eq(runs.id, runId))
         .run();
 
       if (input.usage !== undefined) {
         // model/sessionId 从 run 行读(坑 3):settle 时该行已有,调用方拿的不一定一致。
+        // T48 提前创建后这条更稳:行在 prepareRunInput 之后就存在了;没有 usage 的
+        // 早期失败(routing 炸了)根本不进这个分支。
         const runRow = tx
           .select({ model: runs.model, sessionId: runs.sessionId })
           .from(runs)
@@ -133,6 +171,16 @@ export class DrizzleRunRepository {
       .limit(limit)
       .all()
       .map(toRecord);
+  }
+
+  findById(runId: string): RunRecord | undefined {
+    return this.db
+      .select()
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1)
+      .all()
+      .map(toRecord)[0];
   }
 
   /** 该会话正在飞的 run(正常只会有 0 或 1 条)。 */
@@ -196,10 +244,21 @@ export class DrizzleRunRepository {
   /**
    * 进程启动时把上次没跑完的 run 收成 error。
    * 没有这一步,崩溃留下的 running 行会永远挂着,runs 表就不可信了。
-   * @returns 被收尾的数量
+   *
+   * T48 起返回被收尾的 run id(不只是数量) —— 启动清扫要接着给它们的 ledger
+   * 补 operation_abandoned 事件。
    */
-  failStale(): number {
-    const result = this.db
+  failStale(): string[] {
+    const stale = this.db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(eq(runs.status, "running"))
+      .all();
+    if (stale.length === 0) {
+      return [];
+    }
+
+    this.db
       .update(runs)
       .set({
         status: "error",
@@ -209,6 +268,38 @@ export class DrizzleRunRepository {
       .where(eq(runs.status, "running"))
       .run();
 
-    return result.changes;
+    return stale.map((row) => row.id);
+  }
+
+  /**
+   * retention(T48):删掉 endedAt/started_at 早于 cutoff 的终结态 Run。
+   * cutoff 是 SQLite datetime 表达式(与 started_at 的 datetime('now') 同基准同格式)。
+   * 子 Run 由 parent_run_id 自引用级联带走;run_events 由 run_id 级联带走。
+   * @returns 直接命中的行数(级联删除的子 Run 不计入)
+   */
+  deleteTerminalBefore(cutoffSql: ReturnType<typeof sql>): number {
+    return this.db
+      .delete(runs)
+      .where(and(ne(runs.status, "running"), lt(runs.startedAt, cutoffSql)))
+      .run().changes;
+  }
+
+  /** retention 容量档:最老的 completed Run 先行。 */
+  listOldestCompletedRunIds(limit: number): readonly string[] {
+    return this.db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(eq(runs.status, "completed"))
+      .orderBy(runs.startedAt)
+      .limit(limit)
+      .all()
+      .map((row) => row.id);
+  }
+
+  deleteByIds(ids: readonly string[]): number {
+    if (ids.length === 0) {
+      return 0;
+    }
+    return this.db.delete(runs).where(inArray(runs.id, [...ids])).run().changes;
   }
 }

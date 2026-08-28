@@ -41,7 +41,8 @@ describe("UiMessageBuilder", () => {
     const builder = new UiMessageBuilder("m1");
     pushAll(builder, [
       { type: "tool-call", toolCallId: "tc-1", toolName: "read_file", input: { path: "a.ts" } },
-      { type: "tool-result", toolCallId: "tc-1", toolName: "read_file", output: "x = 1", status: "success", durationMs: 5 }
+      // T51:三段计时进 toolMetadata;旧 durationMs 不再写入。
+      { type: "tool-result", toolCallId: "tc-1", toolName: "read_file", output: "x = 1", status: "success", toolExecMs: 5, approvalWaitMs: 12, queueWaitMs: 0 }
     ]);
 
     const msg = builder.build();
@@ -51,7 +52,10 @@ describe("UiMessageBuilder", () => {
     if (isDynamicToolPart(tool)) {
       expect(tool.state).toBe("output-available");
       expect(tool.output).toBe("x = 1");
-      expect(tool.toolMetadata?.durationMs).toBe(5);
+      expect(tool.toolMetadata?.toolExecMs).toBe(5);
+      expect(tool.toolMetadata?.approvalWaitMs).toBe(12);
+      expect(tool.toolMetadata?.queueWaitMs).toBe(0);
+      expect(tool.toolMetadata?.durationMs).toBeUndefined();
     }
   });
 

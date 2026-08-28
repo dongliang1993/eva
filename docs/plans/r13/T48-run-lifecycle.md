@@ -63,3 +63,13 @@ retention 必须整 Run 粒度删。**不许删「活 Run 里的旧事件」** �
 - 杀进程重启：在飞 Run 变 `error`，它 ledger 里未闭合的 `tool_call_started` / `model_call_started` 各多出一条 `operation_abandoned`，已配对的事件一条不动。
 - `retentionDays=0` 跑一次清扫：过期 Run 及其子 Run 的 `run_events` 全清、外键不留孤儿、`usage_records` 不受影响。
 - 库体积超限时从最老 completed Run 开始删，running Run 不被删。
+
+## 4. 实施备注
+
+- migration 0030 手写（0029 同因：drizzle snapshot 断档）。`parent_run_id` 是**自引用 FK cascade** —— 「子 Run 与父 Run 一起清理」结构保证，不靠应用层自觉。
+- **0030 重建了 `usage_records` 去掉 runs FK**（保留 sessions FK）：留着它 retention 删 Run 会把聚合台账级联清空，验收「usage_records 不受影响」和「外键不留孤儿」无法同时成立。关联语义不变（`run_id` 值还在），只是生命周期解耦。
+- 503 回滚（`AgentUnavailableError` + 本次请求新建会话）仍按原产品决策删会话，routing 失败的台账行随之级联消失；failure_layer=routing 的留痕针对**已有会话**。测试钉的是后者。
+- `failStale()` 返回值从 count 改成 run id 列表（启动清扫要接着补 abandoned）；`listBySession` 的「主 Run」过滤在本卡补上（`runs.parent_run_id IS NULL` 的 EXISTS，不影响 session_time 索引）。
+- recorder 的 seq 初始化改为**读现有 maxSeq 续接**（创建时一次索引读）：新 Run 从 0 开始不变；启动清扫给 stale Run 补事件时续在已有之后，不撞 UNIQUE。
+- 容量档用 in-use 字节 `(page_count - freelist_count) * page_size` 做闸门 —— freelist 不归零文件，拿文件大小当闸门会被自己的删除骗成死循环。
+- 后台子代理的独立 recorder 绑定（`toObserver(childRecorder, {agent})`）在 T49 随 observer 参数一起进 `buildSubagent`，本卡只建行与 settle。

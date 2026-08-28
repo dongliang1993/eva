@@ -67,7 +67,14 @@ export interface RunToolResultEvent {
   toolName: string;
   output: string;
   status: "success" | "error";
+  /** T51 起新事件不再赋值 —— 类型保留只为历史 UIMessage/abort 补发帧仍能解析。 */
   durationMs?: number;
+  /** T50/T51:真实执行时长(不含审批/排队等待)。 */
+  toolExecMs?: number;
+  /** T50/T51:审批等待。 */
+  approvalWaitMs?: number;
+  /** T50/T51:并发帽排队等待。 */
+  queueWaitMs?: number;
 }
 
 export interface RunStepStartEvent {

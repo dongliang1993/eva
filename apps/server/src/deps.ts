@@ -12,6 +12,9 @@ import { DrizzleRunRepository } from "./db/repositories/run-repository.js";
 import { failStaleTasks } from "./db/repositories/background-task-repository.js";
 import { ApprovalRepository } from "./db/repositories/approval-repository.js";
 import { createPinoObserver } from "./observability.js";
+import { sweepAbandonedOperations } from "./services/observability/abandoned-sweep.js";
+import { applyObservabilityRetention } from "./services/observability/retention.js";
+import { loadAppSettings } from "./services/settings/app-settings.js";
 import { clampContextWindow } from "./services/providers/context-clamp.js";
 import { findMonorepoRoot } from "./services/monorepo-root.js";
 import { syncMcpConfigFile } from "./services/mcp/mcp-config-file.js";
@@ -81,8 +84,8 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
 
   // 进程重启时把上次没跑完的 run 收成 error —— 否则崩溃留下的 running 行会永远挂着。
   const staleRuns = new DrizzleRunRepository(db).failStale();
-  if (staleRuns > 0) {
-    logger.warn({ staleRuns }, "marked in-flight runs as error after restart");
+  if (staleRuns.length > 0) {
+    logger.warn({ staleRuns: staleRuns.length }, "marked in-flight runs as error after restart");
   }
 
   // 同样的收尾给后台子代理任务:崩溃遗留的 running 任务实为"永远等不到",
@@ -98,6 +101,26 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   if (stalePending > 0) {
     logger.warn({ stalePending }, "denied pending approvals left over from previous process");
   }
+
+  // T48 启动清扫第二步:给 stale Run 的 ledger 里「有 started 没 completed」的操作
+  // 补 operation_abandoned(只追加,不改写)。observability 关着就不写新事件 ——
+  // 清扫是写入,得尊重同一个开关。
+  const observabilitySettings = loadAppSettings(db, config).observability;
+  if (observabilitySettings.enabled) {
+    const abandoned = sweepAbandonedOperations(
+      db,
+      logger,
+      observabilitySettings.captureContent,
+      staleRuns
+    );
+    if (abandoned > 0) {
+      logger.warn({ abandoned }, "appended operation_abandoned for unclosed operations");
+    }
+  }
+
+  // T48 启动清扫第三步:retention(按天 + 按容量,整 Run 粒度)。删除不是"记录",
+  // 不受 enabled 闸 —— 关掉观测也不该让旧 ledger 无限期留下去。
+  applyObservabilityRetention(db, observabilitySettings, logger);
 
   // apiKey 落库加密:key 文件读不出 → 明文降级(与 Alma 的 safeStorage 降级同款哲学,
   // docs 04 §8.3.2)—— 绝不让"key 文件损坏"变成"整个 provider 体系全灭"。

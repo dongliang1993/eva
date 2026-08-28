@@ -32,6 +32,10 @@ import {
 import { selectRunSkills } from "../services/skills/select-run-skills.js";
 import { SubagentRunner } from "../services/subagents/subagent-runner.js";
 import { ReportGateway } from "../services/subagents/report-gateway.js";
+import { loadAppSettings } from "../services/settings/app-settings.js";
+import { createObserverBridge, fanout } from "../services/observability/observer-bridge.js";
+import { createRunRecorder } from "../services/observability/run-recorder.js";
+import type { RunFailureLayer } from "../db/schema.js";
 import { runRequestSchema } from "../types/runs.js";
 import { RunEventStream } from "../transports/sse/event-stream.js";
 
@@ -45,6 +49,12 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     let sessionId = "";
     // 供 catch 回滚 503 时新建的会话。
     let runInput: RunInput | undefined;
+    // T48 失败归因:流式开始前失败的层。"routing" = provider/模型/skill 解析;
+    // "context" = prepareRunContext(compact/历史转换);undefined = 已进入流式(归因走事件层)。
+    let runPhase: "routing" | "context" | undefined;
+    // T49:run_failed / max-steps 事件带的失败层(agent.ts 发出,observer 桥回填),
+    // settle/fail 时写进 runs。声明在 try 外,catch 才能读到。
+    const failureLayerRef: { current?: RunFailureLayer } = {};
     // T45a:plan gate 的 run-scoped 状态。requestApproval 闭包与 agent 共用同一引用。
     let planGateState: PlanGateState | undefined;
     // 回报网关与 run 同寿:主 loop 收尾前 drain 一次,把后台子代理刚交付的结论
@@ -200,7 +210,53 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       // 阶段①:会话/工作区先落 —— agent 的工具集依赖工作区,工作区来自会话。
       runInput = await prepareRunInput(preparationDependencies, body, runId);
       sessionId = runInput.sessionId;
-      // 会话一确定就先绑上:runLedger.start 之后 DB 里已经有 running 行,前端
+
+      // T48:Run 提前到模型解析前创建 —— provider/模型/skill 解析失败也要有台账行
+      // (failure_layer=routing);模型成功后 patchRouting 补实际模型。
+      const observability = loadAppSettings(app.infra.db, app.infra.config).observability;
+      app.services.runLedger.start({
+        id: runId,
+        sessionId,
+        userMessageId: runInput.userMessageId,
+        requestedModel: runInput.modelId,
+        captureLevel: observability.captureContent
+      });
+      // 失败归因的阶段标记:流式开始前的失败才算 routing/context;stream 内失败
+      // 的细粒度归因走 T49 的事件层,不在 catch 里猜。
+      runPhase = "routing";
+
+      // T49:run-scoped recorder + observer 桥。runId 在 recorder、agent 在绑定,
+      // 没有隐式 current run(契约 3)。主 Agent 与前台子代理共用这个 recorder
+      // (UNIQUE(run_id, seq) 成立的理由);后台子代理另建自己 Run 的 recorder。
+      const recorder = createRunRecorder(
+        {
+          db: app.infra.db,
+          logger: app.log,
+          enabled: observability.enabled,
+          captureLevel: observability.captureContent
+        },
+        { runId, sessionId }
+      );
+      const observerBridge = createObserverBridge(recorder, {
+        onFailureLayer: (layer) => {
+          failureLayerRef.current = layer;
+        }
+      });
+      // Pino 是第二订阅者:ledger 写挂了 Pino 照常,反之亦然。
+      const observer = fanout(observerBridge.forAgent("main"), app.infra.observer);
+
+      recorder.record({
+        agent: "main",
+        kind: "run_started",
+        payload: {
+          requestedModel: runInput.modelId,
+          ...(runInput.workspace !== undefined
+            ? { workspaceId: runInput.workspace.id }
+            : {})
+        }
+      });
+
+      // 会话一确定就先绑上:DB 里已经有 running 行,前端
       // 可能在 messageRecorder 建好之前就来 attach —— 那时 run_start 不能给空 sessionId。
       hub.bind({ sessionId, snapshot: () => undefined });
 
@@ -225,6 +281,14 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         sessionId,
         modelId: runInput.modelId,
         humanText: runInput.humanText
+      });
+      recorder.record({
+        agent: "main",
+        kind: "skills_selected",
+        payload: {
+          selected: skillSelection.selectedSkills.map((skill) => skill.name),
+          usedFallback: skillSelection.usedFallback
+        }
       });
 
       // T45a:绑了 workspace 才装 plan gate。state 初值来自 DB 里该 session 的 active plan,
@@ -261,6 +325,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
       const resolved = app.services.agents.build({
         modelId: runInput.modelId,
+        observer,
         extraTools: [
           ...app.services.mcp.listTools(),
           // T46:plan weave 工具与 fs 工具同一个注入条件 —— 无 workspace 则无 plan_*。
@@ -281,16 +346,27 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         ...defined("planGate", planGate),
         ...defined("memoryFilesSection", memoryFilesSection)
       });
+      // T48:路由结果回填 —— 从这一刻起 requested/resolved 都有值。
+      app.services.runLedger.patchRouting(
+        runId,
+        runInput.modelId,
+        resolved.mainModel.qualifiedModelId
+      );
+      recorder.record({
+        agent: "main",
+        kind: "routing_resolved",
+        payload: {
+          requestedModel: runInput.modelId,
+          resolvedModel: resolved.mainModel.qualifiedModelId
+        }
+      });
+      runPhase = "context";
 
       // 阶段③:模型这轮看见什么(需要 mainModel 的窗口信息)。
       const runContext = await prepareRunContext(preparationDependencies, runInput, resolved);
 
-      app.services.runLedger.start({
-        id: runId,
-        sessionId,
-        model: resolved.mainModel.qualifiedModelId,
-        userMessageId: runContext.userMessageId
-      });
+      // 进入流式:之后的失败由 T49 的事件层归因,catch 不再盖 routing/context 的章。
+      runPhase = undefined;
 
       stream.open();
       // 自己这条连接就是源头,不需要重放;run_start 仍旧显式发一次。
@@ -308,6 +384,27 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
           db: app.infra.db,
           runId,
           model: resolved.mainModel.qualifiedModelId,
+          captureLevel: observability.captureContent,
+          observer: app.infra.observer,
+          // T49:前台子代理绑父 Run 的 bridge(agent=taskId,seq 与主 Agent 同序列);
+          // 后台子代理有自己 Run 的 recorder(T48 §2.3),seq 从 0 重新计。
+          observerForTask: (taskId) =>
+            fanout(observerBridge.forAgent(taskId), app.infra.observer),
+          createChildObserver: (childRunId, taskId) =>
+            fanout(
+              createObserverBridge(
+                createRunRecorder(
+                  {
+                    db: app.infra.db,
+                    logger: app.log,
+                    enabled: observability.enabled,
+                    captureLevel: observability.captureContent
+                  },
+                  { runId: childRunId, sessionId }
+                )
+              ).forAgent(taskId),
+              app.infra.observer
+            ),
           ...(runInput.workspace !== undefined ? { workspace: runInput.workspace } : {}),
           extraTools: app.services.mcp.listTools(),
           abortSignal: controller.signal,
@@ -377,7 +474,10 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         finishReason: recorded.finishReason,
         assistantMessageId: recorded.assistantMessageId,
         ...(recorded.usage !== undefined ? { usage: recorded.usage } : {}),
-        ...(recorded.streamError !== undefined ? { error: recorded.streamError } : {})
+        ...(recorded.streamError !== undefined ? { error: recorded.streamError } : {}),
+        ...(failureLayerRef.current !== undefined
+          ? { failureLayer: failureLayerRef.current }
+          : {})
       });
 
       emit({ type: "end", finishReason: recorded.finishReason });
@@ -397,7 +497,15 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       }
 
       if (sessionId) {
-        app.services.runLedger.fail(runId, toErrorMessage(error));
+        app.services.runLedger.fail(
+          runId,
+          toErrorMessage(error),
+          runPhase !== undefined
+            ? { failureLayer: runPhase }
+            : failureLayerRef.current !== undefined
+              ? { failureLayer: failureLayerRef.current }
+              : {}
+        );
       }
 
       if (!reply.raw.headersSent) {

@@ -42,6 +42,33 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/**
+ * T51:三段计时徽章 —— 等待与执行分开呈现,不相加成一个数。
+ * 只在 toolExecMs 存在时渲染;旧消息只有含等待的旧 durationMs,一律隐藏
+ * (判据是「有没有新字段」,不按消息时间戳猜版本)。
+ */
+function TimingBadge({ toolCall }: { readonly toolCall: ToolCallInfo }) {
+  if (toolCall.toolExecMs === undefined) return null;
+
+  const waits: string[] = [];
+  if ((toolCall.approvalWaitMs ?? 0) > 0) {
+    waits.push(`等待 ${formatDuration(toolCall.approvalWaitMs ?? 0)}`);
+  }
+  if ((toolCall.queueWaitMs ?? 0) > 0) {
+    waits.push(`排队 ${formatDuration(toolCall.queueWaitMs ?? 0)}`);
+  }
+
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      {waits.length > 0 && <span>{waits.join(" · ")}</span>}
+      <span className="flex items-center gap-1">
+        <Clock size={12} />
+        {formatDuration(toolCall.toolExecMs)}
+      </span>
+    </span>
+  );
+}
+
 function formatBytes(str: string): string {
   const bytes = new Blob([str]).size;
   if (bytes < 1024) return `${bytes} B total`;
@@ -98,11 +125,8 @@ function ToolCallBlockImpl({ toolCall }: ToolCallBlockProps) {
       }
       trailing={
         approvalBadge ??
-        (toolCall.durationMs !== undefined && !isError ? (
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock size={12} />
-            {formatDuration(toolCall.durationMs)}
-          </span>
+        (toolCall.toolExecMs !== undefined && !isError ? (
+          <TimingBadge toolCall={toolCall} />
         ) : isRunning ? (
           <span className="text-xs text-warning animate-pulse">running</span>
         ) : null)
@@ -299,11 +323,8 @@ function BashToolCall({ toolCall }: ToolCallBlockProps) {
       {...(isError ? { leadingDot: <ErrorDot /> } : {})}
       title={isError ? `Bash · Error: ${subtitle}` : `Bash · ${subtitle}`}
       trailing={
-        toolCall.durationMs !== undefined && !isError ? (
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock size={12} />
-            {formatDuration(toolCall.durationMs)}
-          </span>
+        toolCall.toolExecMs !== undefined && !isError ? (
+          <TimingBadge toolCall={toolCall} />
         ) : isRunning ? (
           <span className="text-xs text-warning animate-pulse">running</span>
         ) : null

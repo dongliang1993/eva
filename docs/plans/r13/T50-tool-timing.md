@@ -49,3 +49,11 @@ state 与 `agent.ts:294` 的 `clock` 是两张表，职责不同，不要合并�
 - 工具内部抛异常：仍发 `tool_call_completed(status=error)`，`tool_exec_ms` 是到抛出为止的时长。
 - abort 抢在 `execute` 之前完成：`tool_exec_ms` 有值且 payload 标 `aborted: true`。
 - MCP 工具（走 `build-json-schema-tool`）与 fs 工具（走 `build-tool`）都有 `tool_exec_ms`，没有哪一类是黑洞。
+
+## 4. 实施备注
+
+**exec 打点的落点从 `buildTool` 内部改成了统一 wrapper（`with-exec-timing.ts`）。** 卡面写的是 `build-tool.ts:99` 内打，但 timing state 是 run-scoped 的，而 `buildTool` 跑在工具工厂里（agent-factory 的 `buildBaseTools`），要把 state 注进去得改 ~15 个工具工厂的签名，或者在模块级放「当前 state」单例（契约 3 明令禁止）。统一 wrapper 在 `createAgent` 一处装配（`planGate → approval → cap → execTiming → tool`），覆盖所有过 `createAgent` 的工具 —— 这正是卡面「不能由每个 Tool 自己实现，第一个漏的就成了黑洞」的本意。测量差异只有 zod parse + race 装配的微秒级开销；「包住 race 整体、abort 抢先记 execAborted」的语义完整保留（靠 `TOOL_CALL_ABORTED_OUTPUT` 哨兵 + signal 判定）。
+
+**已知例外**:`additionalTools`(memory/plan/subagent/report 工具）在 `stream()` 期注入、不经过 `createAgent` 包装，三段全 0。它们无审批无排队，exec 也都是服务端快操作；轨迹里显示 0 在 v1 可接受，卡验收的六条不受这组影响。
+
+**其余决策照卡面**:state 与 `clock` 两张表不合并；`take()` 一次性取走、未 record 过的 toolCallId 也返回全 0 快照（plan gate 挡掉的调用因此天然三段全 0);`buildTool` 内部 catch 让「工具抛异常」走正常 record 路径，`tool_exec_ms` 是到抛出为止的时长。

@@ -22,7 +22,9 @@ import {
   Semaphore,
   withConcurrencyCap,
 } from "../tools/concurrency-cap.js";
+import { createToolTimingState, type ToolTimingState } from "../tools/tool-timing.js";
 import { withApproval } from "../tools/with-approval.js";
+import { withExecTiming } from "../tools/with-exec-timing.js";
 import { buildAgentSystemPrompt } from "../prompts/prompt-builder.js";
 import {
   ZERO_TOKEN_USAGE,
@@ -160,6 +162,8 @@ interface AgentOptions {
   toolDiscovery?: ToolDiscoveryController;
   /** T45a:run-scoped plan gate 状态。传了就在最外层包 withPlanGate + 每步注 reminder。 */
   planGateState?: PlanGateState;
+  /** T50:三段计时汇聚。createAgent 装配时与三个 wrapper 共享同一实例。 */
+  toolTiming?: ToolTimingState;
 }
 
 /**
@@ -175,6 +179,7 @@ class Agent implements AgentInterface {
   private readonly observer: AgentObserver | undefined;
   private readonly contextPolicy: ContextWindowPolicy;
   private readonly toolDiscovery: ToolDiscoveryController;
+  private readonly toolTiming: ToolTimingState;
 
   constructor(private readonly options: AgentOptions) {
     this.toolsByName = new Map(
@@ -185,6 +190,7 @@ class Agent implements AgentInterface {
     this.observer = options.observer;
     this.contextPolicy = resolveContextWindowPolicy(options.contextPolicy);
     this.toolDiscovery = options.toolDiscovery ?? new ToolDiscoveryController();
+    this.toolTiming = options.toolTiming ?? createToolTimingState();
   }
 
   private emit(event: AgentTelemetryEvent): void {
@@ -295,7 +301,11 @@ class Agent implements AgentInterface {
     const toolCalls: AgentToolCallResult[] = [];
 
     let messages = this.buildMessages(input);
-    const prefixMessageCount = messages.length;
+    // 注意:续写/notice 续跑会把 messages 换成 responseMessages + 续写消息
+    // (不含最初的输入),那一刻起 prefix 语义失效,必须归 0 —— 否则 reactive
+    // compact 会把 tool-call 留在"prefix"、把它的 tool result 压进 summary,
+    // 造出孤儿 tool-call(SDK convertToLanguageModelPrompt 直接拒绝)。
+    let prefixMessageCount = messages.length;
     let stepsUsed = 0;
     let recoveries = 0;
     let noticeRounds = 0;
@@ -306,7 +316,24 @@ class Agent implements AgentInterface {
     // T36: 上一步真实 inputTokens,prepareStep 的 compact 判定用它(真值优先,首步 undefined 退估算)。
     let lastStepInputTokens: number | undefined;
 
+    // S27/T49:Turn 与 attempt 追踪。Turn = 一次用户输入到终态 —— 一个 Run 里
+    // 恒为 turn 0(notice 续跑发生在终态之前,属于同一个 Turn,只是多一些 Step;
+    // 边界由 loop_transition(subagent_notice) 表达)。
+    // attempt = 同一 Step 因 reactive compact 重跑的次数(step 级 Map,跨 restart 圈存活)。
+    const turnStartTime = runStart;
+    const attemptByStep = new Map<number, number>();
+    let currentStepAttempt = 1;
+    let firstTokenEmitted = false;
+    // 正在流式传输的 step 下标:finish-step part 可能在 onStepEnd 之后才到,
+    // 那时 stepsUsed 已经 +1,attribution 不能用 stepsUsed,要用这个。
+    let streamingStepIndex = 0;
+    // 失败 step 的下标(有 streamError 时 = 当前 step)。SDK 对失败 step 也会迟发
+    // onStepEnd —— 那次回调必须跳过(不占步数、不发 step_completed),否则 reactive
+    // 重跑会拿到新下标而不是「同 step,attempt+1」(T49 的 attempt 语义)。
+    let failedStepIndex: number | undefined;
+
     this.emit({ type: "agent_run_start" });
+    this.emit({ type: "turn_started", turnIndex: 0 });
 
     // 外层 restart:只有 max-output 续写与 reactive compact 会走到第二圈。
     for (;;) {
@@ -319,9 +346,22 @@ class Agent implements AgentInterface {
           totalTokens,
           runStart,
           stepsUsed,
+          { index: 0, startTime: turnStartTime },
         );
         return;
       }
+
+      // ai@7 校验在 prepareStep 之前,messages 里任何 system 角色都会直接抛
+      // (context-strategy.ts:53 的注释)。两个来源会带 system 进来:
+      // run-preparation 的会话摘要(leading system)与 reactive compact 的
+      // reminder(中段 system)—— 统一上提到 instructions,messages 保持干净。
+      const hoistedSystemMessages = messages.filter(
+        (message): message is SystemModelMessage => message.role === "system",
+      );
+      const streamMessages =
+        hoistedSystemMessages.length > 0
+          ? messages.filter((message) => message.role !== "system")
+          : messages;
 
       const prepareStep = createPrepareStep({
         policy: this.contextPolicy,
@@ -340,14 +380,42 @@ class Agent implements AgentInterface {
           planGateInstructions(
             this.options.planGateState?.current() ?? { active: false },
           ),
-        ...(exposure.degraded
-          ? { extraInstructions: [TOOL_DISCOVERY_NOTICE] }
-          : {}),
+        extraInstructions: [
+          ...hoistedSystemMessages,
+          ...(exposure.degraded ? [TOOL_DISCOVERY_NOTICE] : []),
+        ],
+      });
+
+      // S27:请求快照 —— 模型这轮实际看到的面(system prompt + 工具 + 调用设置)。
+      // 每圈都发,同 Run 去重是 server 侧的事(request_snapshot_ref,§4.3)。
+      // LanguageModel 联合里含字符串形式(GlobalProviderModelId),provider/modelId
+      // 只在实例成员上 —— 运行时收窄,字符串形式落成 unknown。
+      const modelSpec = this.options.model as {
+        readonly provider?: string;
+        readonly modelId?: string;
+      };
+      this.emit({
+        type: "request_snapshot",
+        provider: modelSpec.provider ?? "unknown",
+        modelId: modelSpec.modelId ?? "unknown",
+        callSettings: {
+          ...(this.options.callSettings?.temperature !== undefined
+            ? { temperature: this.options.callSettings.temperature }
+            : {}),
+          ...(this.options.callSettings?.maxOutputTokens !== undefined
+            ? { maxOutputTokens: this.options.callSettings.maxOutputTokens }
+            : {}),
+        },
+        systemPrompt: this.systemMessage.content,
+        tools: [...resolvedTools.values()].map((tool) => ({
+          name: tool.name,
+          description: tool.description ?? "",
+        })),
       });
 
       const result = streamText({
         model: this.options.model,
-        messages,
+        messages: streamMessages,
         tools: toolSet,
         ...(exposure.activeTools !== undefined
           ? {
@@ -383,9 +451,23 @@ class Agent implements AgentInterface {
           : {}),
         onStepStart: () => {
           stepStartTime = Date.now();
-          this.emit({ type: "llm_call_start", step: stepsUsed });
+          // S27:同一 Step 因 reactive compact 重跑时 attempt 递增(新 streamText 会
+          // 对同一个 stepsUsed 再触发一次 onStepStart)。
+          const attempt = (attemptByStep.get(stepsUsed) ?? 0) + 1;
+          attemptByStep.set(stepsUsed, attempt);
+          currentStepAttempt = attempt;
+          streamingStepIndex = stepsUsed;
+          firstTokenEmitted = false;
+          this.emit({ type: "step_started", step: stepsUsed, attempt });
+          this.emit({ type: "llm_call_start", step: stepsUsed, attempt });
         },
         onStepEnd: ({ usage, toolCalls: stepToolCalls }) => {
+          // 失败 step 的迟到 onStepEnd:不占步数、不累计用量、不发 llm_call_end ——
+          // 失败事实由 model_call_failed 表达,reactive 重跑将复用这个下标。
+          if (failedStepIndex === stepsUsed) {
+            failedStepIndex = undefined;
+            return;
+          }
           const stepIndex = stepsUsed;
           stepsUsed += 1;
           const stepUsage = readTokenUsage(usage);
@@ -427,14 +509,41 @@ class Agent implements AgentInterface {
             continue;
           }
 
+          // S27:TTFT —— 该 Step 第一条正文类 delta(text/reasoning/tool 输入/call)。
+          if (
+            !firstTokenEmitted &&
+            (part.type === "text-delta" ||
+              part.type === "reasoning-delta" ||
+              part.type === "tool-input-start" ||
+              part.type === "tool-call")
+          ) {
+            firstTokenEmitted = true;
+            this.emit({
+              type: "model_first_token",
+              step: streamingStepIndex,
+              attempt: currentStepAttempt,
+              durationMs: Date.now() - stepStartTime,
+            });
+          }
+
+          // S27:模型流读完(finish-step part),不含后续工具执行;mapStreamPart 对它返回 {}。
+          if (part.type === "finish-step") {
+            this.emit({
+              type: "model_call_completed",
+              step: streamingStepIndex,
+              attempt: currentStepAttempt,
+            });
+          }
+
           if (part.type === "text-delta") {
             text += part.text;
           }
 
-          const mapped = mapStreamPart(part, clock);
+          const mapped = mapStreamPart(part, clock, this.toolTiming);
 
           if (mapped.error !== undefined) {
             streamError = mapped.error;
+            failedStepIndex = stepsUsed;
             break;
           }
           if (mapped.aborted === true) {
@@ -451,17 +560,31 @@ class Agent implements AgentInterface {
               toolCallId: mapped.toolCall.toolCallId ?? "",
               status: mapped.toolCall.status,
               durationMs: mapped.toolCall.durationMs ?? 0,
+              output: mapped.toolCall.output,
+              ...(mapped.toolCall.toolExecMs !== undefined
+                ? { toolExecMs: mapped.toolCall.toolExecMs }
+                : {}),
+              ...(mapped.toolCall.approvalWaitMs !== undefined
+                ? { approvalWaitMs: mapped.toolCall.approvalWaitMs }
+                : {}),
+              ...(mapped.toolCall.queueWaitMs !== undefined
+                ? { queueWaitMs: mapped.toolCall.queueWaitMs }
+                : {}),
+              ...(mapped.toolCall.execAborted !== undefined
+                ? { execAborted: mapped.toolCall.execAborted }
+                : {}),
             });
           }
 
           if (mapped.event !== undefined) {
-            // tool-call 事件补一个 tool_call_initiated 观测点(mapStreamPart 不打观测)。
+            // tool-call 事件补一个 tool_call_started 观测点(mapStreamPart 不打观测)。
             if (mapped.event.type === "tool-call") {
               this.emit({
-                type: "tool_call_initiated",
+                type: "tool_call_started",
                 step: stepsUsed,
                 toolName: mapped.event.toolName,
                 toolCallId: mapped.event.toolCallId,
+                input: mapped.event.input,
               });
             }
             yield mapped.event;
@@ -472,12 +595,16 @@ class Agent implements AgentInterface {
           aborted = true;
         } else {
           streamError = error;
+          failedStepIndex = stepsUsed;
         }
       }
 
       // ---- reactive compact:上下文溢出类错误,全程只重试一次 ----
       if (streamError !== undefined) {
-        if (isReactiveCompactCandidateError(streamError)) {
+        const errorMessage =
+          streamError instanceof Error ? streamError.message : "Unknown error";
+        const compactCandidate = isReactiveCompactCandidateError(streamError);
+        if (compactCandidate) {
           // T38: 真实超限是「该模型 contextWindow 虚高」的实锤 —— emit 钳制事件让 server
           // 永久钳小它的 contextWindow(下次 resolve 生效)。用真值(上一步 usage)优先,
           // 没有就估算。与是否还能 reactive 重试无关,钳制是为下次 run。
@@ -492,10 +619,10 @@ class Agent implements AgentInterface {
             });
           }
         }
-        if (
-          !hasCompactedReactively &&
-          isReactiveCompactCandidateError(streamError)
-        ) {
+        // 先定结局再发事件:willRetry 必须反映真实的下一步,不是意图。
+        let retried = false;
+        let appliedCompaction: RuntimeCompactResult | undefined;
+        if (!hasCompactedReactively && compactCandidate) {
           const compaction = applyReactiveLoopCompactWithStats(
             messages,
             prefixMessageCount,
@@ -503,16 +630,39 @@ class Agent implements AgentInterface {
           if (compaction.changed) {
             messages = compaction.messages;
             hasCompactedReactively = true;
-            this.emitCompaction(
-              stepsUsed,
-              "reactive_compact_retry",
-              compaction,
-            );
-            this.emitTransition(stepsUsed, "reactive_compact_retry");
-            continue;
+            retried = true;
+            appliedCompaction = compaction;
           }
         }
+        this.emit({
+          type: "model_call_failed",
+          step: stepsUsed,
+          attempt: currentStepAttempt,
+          error: errorMessage,
+          willRetry: retried,
+        });
+        if (retried && appliedCompaction) {
+          this.emitCompaction(
+            stepsUsed,
+            "reactive_compact_retry",
+            appliedCompaction,
+          );
+          this.emitTransition(stepsUsed, "reactive_compact_retry");
+          continue;
+        }
         // 错误终态:不 yield finish —— run() 抛出,由 stream() 转 error 事件(与重构前一致)。
+        // S27:终态也要在台账留痕 —— 这条路径 finish() 走不到,run_failed 在这里发。
+        this.emit({
+          type: "agent_run_failed",
+          error: errorMessage,
+          failureLayer: compactCandidate ? "context" : "model",
+        });
+        this.emit({
+          type: "turn_completed",
+          turnIndex: 0,
+          durationMs: Date.now() - turnStartTime,
+          status: "error",
+        });
         throw streamError;
       }
 
@@ -534,14 +684,16 @@ class Agent implements AgentInterface {
             durationMs,
           };
           toolCalls.push(canceled);
+          // T51:ledger 事件是 tool_call_abandoned —— 只带未分解的墙钟 waitedMs,
+          // 不伪造三段计时(clock 不追踪 wrapper phase,能测到的只有这一段)。
           this.emit({
-            type: "tool_call_completed",
+            type: "tool_call_abandoned",
             step: stepsUsed,
             toolName: inFlight.toolName,
             toolCallId,
-            status: "error",
-            durationMs,
+            waitedMs: durationMs,
           });
+          // 补发帧形状不变 —— 它是把卡片拉出 running 态的唯一手段。
           yield {
             type: "tool-result",
             toolCallId,
@@ -559,6 +711,7 @@ class Agent implements AgentInterface {
           totalTokens,
           runStart,
           stepsUsed,
+          { index: 0, startTime: turnStartTime },
         );
         return;
       }
@@ -577,6 +730,8 @@ class Agent implements AgentInterface {
             content: MAX_OUTPUT_CONTINUATION_MESSAGE,
           } as ModelMessage,
         ];
+        // 工作集已不含最初的输入,静态 prefix 失效(见上方 prefixMessageCount 注释)。
+        prefixMessageCount = 0;
         recoveries += 1;
         this.emitTransition(
           stepsUsed,
@@ -611,11 +766,16 @@ class Agent implements AgentInterface {
               content: notices.map((n) => n.text).join("\n\n"),
             } as ModelMessage,
           ];
+          // 与 max-output 续写同理:工作集已不含最初的输入,静态 prefix 失效。
+          prefixMessageCount = 0;
           // 与 max-output 续写的关键差异:那里是"同一条消息继续写"所以累加 continuedText,
           // 这里是两条独立 assistant 消息 —— 本轮正文已随上一条 assistant 收口落库,
           // 所以 continuedText 必须保持空,否则续跑那条会把前一条的正文重复一遍。
           // (text 是每圈局部变量,下一圈自然从 "" 开始,无需在此清。)
           continuedText = "";
+          // notice 续跑不开新 Turn(Turn = 一次用户输入到终态,续跑发生在终态之前,
+          // 属于同一个 Turn)—— 它只是多一些 Step。续跑的边界事实由
+          // loop_transition(subagent_notice) 表达。
           noticeRounds += 1;
           this.emitTransition(stepsUsed, "subagent_notice", noticeRounds);
           continue;
@@ -636,6 +796,7 @@ class Agent implements AgentInterface {
         totalTokens,
         runStart,
         stepsUsed,
+        { index: 0, startTime: turnStartTime },
       );
       return;
     }
@@ -648,18 +809,36 @@ class Agent implements AgentInterface {
     usage: TokenUsage,
     runStart: number,
     stepsUsed: number,
+    turn: { readonly index: number; readonly startTime: number },
   ): Extract<AgentStreamEvent, { type: "finish" }> {
+    const resolvedText = finalText(text, finishReason === "max-steps", this.maxSteps);
+    // S27:assistant_message 在 finish 汇总处发 —— 终态文本与工具调用数在这里才齐。
+    this.emit({
+      type: "assistant_message",
+      text: resolvedText,
+      toolCallCount: toolCalls.length,
+    });
+    this.emit({
+      type: "turn_completed",
+      turnIndex: turn.index,
+      durationMs: Date.now() - turn.startTime,
+      status: finishReason === "aborted" ? "aborted" : "completed",
+    });
     this.emit({
       type: "agent_run_end",
       totalDurationMs: Date.now() - runStart,
       stepCount: stepsUsed,
       totalTokenUsage: usage,
       toolCallCount: toolCalls.length,
+      // max-steps 撞顶是 orchestration 层失败(设计文档 §8)—— 不是模型也不是工具的错。
+      ...(finishReason === "max-steps"
+        ? { failureLayer: "orchestration" as const }
+        : {}),
     });
 
     return {
       type: "finish",
-      text: finalText(text, finishReason === "max-steps", this.maxSteps),
+      text: resolvedText,
       toolCalls: toolCalls.map(toStreamToolCallSummary),
       finishReason,
       ...(usage.totalTokens > 0 ? { usage: toStreamTokenUsage(usage) } : {}),
@@ -695,11 +874,16 @@ export const createAgent = (options: CreateAgentOptions): AgentInterface => {
     ...(rest.tools ?? []),
     createToolSearchTool(toolDiscovery),
   ];
-  const capTools = withDiscoveryTools.map((t) =>
-    withConcurrencyCap(t, limiter),
+  // T50:三段计时汇聚在一个 run-scoped state 里,三个 wrapper 共享:
+  // exec 计时包在最内层(execution: planGate → approval → cap → execTiming → tool),
+  // 审批等待与排队等待才不会混进真实执行时长。
+  const toolTiming = createToolTimingState();
+  const timedTools = withDiscoveryTools.map((t) => withExecTiming(t, toolTiming));
+  const capTools = timedTools.map((t) =>
+    withConcurrencyCap(t, limiter, toolTiming),
   );
   const approvalTools = requestApproval
-    ? capTools.map((t) => withApproval(t, requestApproval))
+    ? capTools.map((t) => withApproval(t, requestApproval, rest.observer, toolTiming))
     : capTools;
   // T45a:planGate 包到最外层 —— 执行序 planGate → approval → cap,
   // 被拒的写不会先进审批弹窗。
@@ -710,6 +894,7 @@ export const createAgent = (options: CreateAgentOptions): AgentInterface => {
   return new Agent({
     model: rest.model,
     toolDiscovery,
+    toolTiming,
     ...(rest.planGateState !== undefined
       ? { planGateState: rest.planGateState }
       : {}),

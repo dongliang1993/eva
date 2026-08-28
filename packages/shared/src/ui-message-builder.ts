@@ -164,6 +164,14 @@ export class UiMessageBuilder {
       return;
     }
 
+    // T51:三段计时进 toolMetadata;旧 durationMs 不再写入(新事件本来也不再赋值)。
+    const toolMetadata: Record<string, number> = {
+      ...(event.toolExecMs !== undefined ? { toolExecMs: event.toolExecMs } : {}),
+      ...(event.approvalWaitMs !== undefined ? { approvalWaitMs: event.approvalWaitMs } : {}),
+      ...(event.queueWaitMs !== undefined ? { queueWaitMs: event.queueWaitMs } : {})
+    };
+    const timing = Object.keys(toolMetadata).length > 0 ? { toolMetadata } : {};
+
     const settled: EvaDynamicToolPart = event.status === "error"
       ? {
         type: "dynamic-tool",
@@ -172,9 +180,7 @@ export class UiMessageBuilder {
         state: "output-error",
         input: current.input,
         errorText: event.output,
-        ...(event.durationMs !== undefined
-          ? { toolMetadata: { durationMs: event.durationMs } }
-          : {})
+        ...timing
       }
       : {
         type: "dynamic-tool",
@@ -183,9 +189,7 @@ export class UiMessageBuilder {
         state: "output-available",
         input: current.input,
         output: event.output,
-        ...(event.durationMs !== undefined
-          ? { toolMetadata: { durationMs: event.durationMs } }
-          : {})
+        ...timing
       };
 
     this.parts[index] = settled;

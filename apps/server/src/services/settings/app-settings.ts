@@ -4,7 +4,7 @@ import type { AppConfig } from "../../config.js";
 import type { AppDatabase } from "../../db/index.js";
 import { settings } from "../../db/schema.js";
 
-const SETTINGS_BLOCK_KEYS = ["models", "chat", "memory", "security"] as const;
+const SETTINGS_BLOCK_KEYS = ["models", "chat", "memory", "security", "observability"] as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -47,6 +47,12 @@ const createDefaultSettings = (): AppSettings => ({
   security: {
     logLevel: "info",
     allowAlwaysPolicies: []
+  },
+  observability: {
+    enabled: true,
+    captureContent: "redacted",
+    retentionDays: 30,
+    maxDatabaseBytes: 1_073_741_824
   }
 });
 
@@ -96,6 +102,8 @@ export const loadAppSettings = (
         current.memory = { ...current.memory, ...parsed } as AppSettings["memory"];
       } else if (key === "security") {
         current.security = { ...current.security, ...parsed } as AppSettings["security"];
+      } else if (key === "observability") {
+        current.observability = { ...current.observability, ...parsed } as AppSettings["observability"];
       }
       continue;
     }
@@ -113,12 +121,16 @@ export const replaceAppSettings = (
   config: AppConfig,
   next: AppSettings
 ): AppSettings => {
+  // 无 UI 的块(如 observability)允许调用方不传 —— 传什么写什么会把它们重置成默认值,
+  // 保留现值才是"没让改"。
+  const current = loadAppSettings(db, config);
+
   db.delete(settings).run();
 
   for (const key of SETTINGS_BLOCK_KEYS) {
     db.insert(settings).values({
       key,
-      value: JSON.stringify(next[key])
+      value: JSON.stringify(next[key] ?? current[key])
     }).run();
   }
 

@@ -18,6 +18,9 @@ import type { AppInfrastructure } from "../apps/server/src/types/common.js";
 
 let db: AppDatabase;
 
+/** T49 起 observer 必填;这组用例只测模型解析/缓存,不看事件。 */
+const noopObserver = (): void => {};
+
 const setDefaultModel = (
   config: AppConfig,
   modelId: string,
@@ -78,11 +81,11 @@ describe("AgentFactory", () => {
     const factory = new AgentFactory(makeInfra());
 
     expect(
-      factory.build({ modelId: "openai:gpt-4o" })
+      factory.build({ modelId: "openai:gpt-4o", observer: noopObserver })
         .mainModel.qualifiedModelId
     ).toBe("openai:gpt-4o");
     expect(
-      factory.build({ modelId: "anthropic:claude-sonnet-4-6" })
+      factory.build({ modelId: "anthropic:claude-sonnet-4-6", observer: noopObserver })
         .mainModel.qualifiedModelId
     ).toBe("anthropic:claude-sonnet-4-6");
   });
@@ -92,8 +95,8 @@ describe("AgentFactory", () => {
     setDefaultModel(config, "openai:gpt-4o");
     const factory = new AgentFactory(makeInfra());
 
-    factory.build({ modelId: "openai:gpt-4o" });
-    factory.build({ modelId: "openai:gpt-4o" });
+    factory.build({ modelId: "openai:gpt-4o", observer: noopObserver });
+    factory.build({ modelId: "openai:gpt-4o", observer: noopObserver });
 
     expect(factory.modelCacheSize).toBe(1);
   });
@@ -103,13 +106,13 @@ describe("AgentFactory", () => {
     setDefaultModel(config, "openai:gpt-4o");
     const factory = new AgentFactory(makeInfra());
 
-    factory.build({ modelId: "openai:gpt-4o" });
+    factory.build({ modelId: "openai:gpt-4o", observer: noopObserver });
     expect(factory.modelCacheSize).toBe(1);
 
     factory.invalidate();
     expect(factory.modelCacheSize).toBe(0);
 
-    factory.build({ modelId: "openai:gpt-4o" });
+    factory.build({ modelId: "openai:gpt-4o", observer: noopObserver });
     expect(factory.modelCacheSize).toBe(1);
   });
 
@@ -124,7 +127,7 @@ describe("AgentFactory", () => {
         skills: []
       });
 
-      expect(() => factory.build({ modelId: "openai:gpt-4o" })).toThrow(AgentUnavailableError);
+      expect(() => factory.build({ modelId: "openai:gpt-4o", observer: noopObserver })).toThrow(AgentUnavailableError);
     } finally {
       closeDb(dbEmpty);
     }
@@ -135,14 +138,14 @@ describe("AgentFactory", () => {
     setDefaultModel(config, "openai:gpt-4o");
     const factory = new AgentFactory(makeInfra());
 
-    expect(factory.build({ modelId: "openai:gpt-4o" }).mainModel.apiKey).toBe("openai-key");
+    expect(factory.build({ modelId: "openai:gpt-4o", observer: noopObserver }).mainModel.apiKey).toBe("openai-key");
 
     updateProvider(db, "openai", {
       apiKey: "rotated-key"
     });
     factory.invalidate();
 
-    expect(factory.build({ modelId: "openai:gpt-4o" }).mainModel.apiKey).toBe("rotated-key");
+    expect(factory.build({ modelId: "openai:gpt-4o", observer: noopObserver }).mainModel.apiKey).toBe("rotated-key");
   });
 });
 
@@ -162,7 +165,7 @@ describe("AgentFactory 不依赖装配期单例", () => {
 
       // 构造本身绝不抛 —— 这是对「解析从装配期移到请求期」的回归。
       expect(factory).toBeInstanceOf(AgentFactory);
-      expect(() => factory.build({ modelId: "openai:gpt-4o" })).toThrow(AgentUnavailableError);
+      expect(() => factory.build({ modelId: "openai:gpt-4o", observer: noopObserver })).toThrow(AgentUnavailableError);
     } finally {
       closeDb(bare);
     }

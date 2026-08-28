@@ -125,3 +125,19 @@ export const createRunRecorder = (deps, { runId, sessionId }): RunRecorder => �
 - 脱敏器抛异常时该字段变成占位符，其余字段照常入库。
 - 同一份对象两次 canonical + hash 结果相同；键序不同的等价对象 hash 也相同。
 - 基准报告给出两档 payload 的 p50/p95/p99。
+
+## 4. 基准报告（2026-08-26，`apps/server/scripts/run-events-bench.ts`，本机 Apple Silicon，WAL + synchronous=NORMAL）
+
+| 负载 | n | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|
+| metadata-only | 3000 | 0.110 ms | 0.167 ms | 0.382 ms | 1.812 ms |
+| 最大 payload（2×20 KiB 字段，触发截断） | 1000 | 0.333 ms | 0.448 ms | 6.506 ms | 12.040 ms |
+
+**结论：不引入批处理/队列。** p50 亚毫秒、p99 个位数毫秒，同步写不会成为流式体验的瓶颈（对照：流式 token 间隔本身就在毫秒级）。维持契约 5 的「同步追加，不建队列」。脚本不在 CI 阻塞路径，复跑：`pnpm exec tsx apps/server/scripts/run-events-bench.ts`。
+
+### 实施备注
+
+- migration 0029 为手写（0023 起 drizzle snapshot 断档，`drizzle-kit generate` 不可用），沿用 0027/0028 的格式 + journal 追加，测试里用真实 DDL 重建表钉住可用性。
+- `listBySession` 的「主 Run（`parent_run_id IS NULL`）」过滤等 T48 的列落地后补上（T47 时该列不存在，全部 Run 皆主 Run，过滤器是恒真）。
+- `observability` 设置块无 UI：zod 里 optional，`replaceAppSettings` 对未回传的块保留现值而不是重置默认。
+- 脱敏键名归一化后**精确匹配**（子串匹配会把 `inputTokens` 这类用量字段误杀），复合变体（`accessToken` 等）与 PEM/JWT 一样不进第一版。

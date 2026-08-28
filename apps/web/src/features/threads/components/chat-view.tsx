@@ -9,6 +9,8 @@ import { PlanReviewCard } from "./plan-review-card";
 import { ChatInput, type ChatInputRejection } from "./chat-input";
 import { WorkspaceNameProvider } from "./workspace-name-context";
 import { useStickToBottom } from "../hooks/use-stick-to-bottom";
+import { useState } from "react";
+import { TrajectoryView } from "../trajectory/trajectory-view";
 
 interface ChatViewProps {
   readonly messages: readonly EvaUIMessage[];
@@ -64,6 +66,19 @@ export function ChatView({
 }: ChatViewProps) {
   const { containerRef, isAtBottom, scrollToBottom } = useStickToBottom(streamingMessage);
 
+  // 「对话 / 轨迹」切换(T53):聊天流不卸载 —— 切走只是隐藏,回来时消息/滚动位置原样。
+  const [view, setView] = useState<"chat" | "trajectory">("chat");
+  // 轨迹页首次打开后保持挂载(再切回来不重拉数据)。
+  const [trajectoryOpened, setTrajectoryOpened] = useState(false);
+
+  // 会话切换回到对话视图;轨迹的打开标记也一起重置。
+  const [lastSessionId, setLastSessionId] = useState<string | null>(sessionId);
+  if (sessionId !== lastSessionId) {
+    setLastSessionId(sessionId);
+    setView("chat");
+    setTrajectoryOpened(false);
+  }
+
   // bash 命令行的主机标签(work-mi 这种)用工作区名 —— 它就是"命令在哪跑"。
   const { workspaces } = useWorkspaces();
   const workspaceName =
@@ -83,55 +98,88 @@ export function ChatView({
             <div className="titlebar-drag h-full" />
           </div>
         ) : null}
-        <MessageList
-        messages={messages}
-        streamingMessage={streamingMessage}
-        containerRef={containerRef}
-        isAtBottom={isAtBottom}
-        scrollToBottom={scrollToBottom}
-      />
 
-      {pendingApprovals?.map((approval) => (
-        <div key={approval.callId} className="flex justify-start px-4">
-          <ApprovalCard
-            approval={approval}
-            onDecide={(callId, allowed) => (allowed ? onApproveOnce?.(callId) : onDeny?.(callId))}
-            onAllowAlways={(callId) => onAllowAlways?.(callId)}
-            {...(resolvedApprovals?.[approval.callId]
-              ? { resolved: resolvedApprovals[approval.callId] }
-              : {})}
-          />
+        {/* 「对话 / 轨迹」切换(T53)。聊天流不卸载,切走只是 hidden —— 回来时
+            消息、builder、滚动位置全部原样;轨迹页首开后再切走也保持挂载。 */}
+        {sessionId ? (
+          <div className="flex shrink-0 items-center gap-1 border-b border-border px-4 py-1.5">
+            {(["chat", "trajectory"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={`rounded-md px-3 py-1 text-xs transition-colors ${
+                  view === tab
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:bg-accent/50"
+                }`}
+                onClick={() => {
+                  setView(tab);
+                  if (tab === "trajectory") setTrajectoryOpened(true);
+                }}
+              >
+                {tab === "chat" ? "对话" : "轨迹"}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className={view === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+          <MessageList
+          messages={messages}
+          streamingMessage={streamingMessage}
+          containerRef={containerRef}
+          isAtBottom={isAtBottom}
+          scrollToBottom={scrollToBottom}
+        />
+
+        {pendingApprovals?.map((approval) => (
+          <div key={approval.callId} className="flex justify-start px-4">
+            <ApprovalCard
+              approval={approval}
+              onDecide={(callId, allowed) => (allowed ? onApproveOnce?.(callId) : onDeny?.(callId))}
+              onAllowAlways={(callId) => onAllowAlways?.(callId)}
+              {...(resolvedApprovals?.[approval.callId]
+                ? { resolved: resolvedApprovals[approval.callId] }
+                : {})}
+            />
+          </div>
+        ))}
+
+        {pendingPlanReviews?.map((review) => (
+          <div key={review.callId} className="flex justify-start px-4">
+            <PlanReviewCard
+              review={review}
+              {...(resolvedPlanReviews?.[review.callId]
+                ? { resolved: resolvedPlanReviews[review.callId] }
+                : {})}
+              onDecide={(callId, outcome, payload) =>
+                onDecidePlanReview?.(callId, outcome, payload)
+              }
+            />
+          </div>
+        ))}
+
+        <ChatInput
+          onSend={onSend}
+          onStop={onStop}
+          disabled={isStreaming}
+          isStreaming={isStreaming}
+          selectedModel={selectedModel}
+          onSelectModel={onSelectModel}
+          workspaceId={workspaceId}
+          onSelectWorkspace={onSelectWorkspace}
+          rejection={rejection ?? null}
+          sessionId={sessionId}
+          {...(onRejectionSeen ? { onRejectionSeen } : {})}
+        />
         </div>
-      ))}
 
-      {pendingPlanReviews?.map((review) => (
-        <div key={review.callId} className="flex justify-start px-4">
-          <PlanReviewCard
-            review={review}
-            {...(resolvedPlanReviews?.[review.callId]
-              ? { resolved: resolvedPlanReviews[review.callId] }
-              : {})}
-            onDecide={(callId, outcome, payload) =>
-              onDecidePlanReview?.(callId, outcome, payload)
-            }
-          />
-        </div>
-      ))}
-
-      <ChatInput
-        onSend={onSend}
-        onStop={onStop}
-        disabled={isStreaming}
-        isStreaming={isStreaming}
-        selectedModel={selectedModel}
-        onSelectModel={onSelectModel}
-        workspaceId={workspaceId}
-        onSelectWorkspace={onSelectWorkspace}
-        rejection={rejection ?? null}
-        sessionId={sessionId}
-        {...(onRejectionSeen ? { onRejectionSeen } : {})}
-      />
-    </div>
+        {trajectoryOpened && sessionId ? (
+          <div className={view === "trajectory" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+            <TrajectoryView sessionId={sessionId} />
+          </div>
+        ) : null}
+      </div>
     </WorkspaceNameProvider>
   );
 }

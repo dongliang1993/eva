@@ -30,7 +30,14 @@ const appSettingsSchema = z.object({
   security: z.object({
     logLevel: z.enum(["error", "warn", "info", "debug"]),
     allowAlwaysPolicies: z.array(z.string())
-  })
+  }),
+  // 无设置页 UI,允许调用方不回传;缺省时 replaceAppSettings 保留现值。
+  observability: z.object({
+    enabled: z.boolean(),
+    captureContent: z.enum(["off", "redacted", "full"]),
+    retentionDays: z.number().int().min(0),
+    maxDatabaseBytes: z.number().int().positive()
+  }).optional()
 });
 
 export const registerSettingsRoutes = (app: FastifyInstance): void => {

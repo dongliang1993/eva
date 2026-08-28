@@ -14,6 +14,7 @@ import { registerSettingsRoutes } from "./settings.js";
 import { registerSkillRoutes } from "./skills.js";
 import { registerStaticRoutes } from "./static.js";
 import { registerThreadRoutes } from "./threads.js";
+import { registerTrajectoryRoutes } from "./trajectory.js";
 import { registerUsageRoutes } from "./usage.js";
 import { registerWorkspaceRoutes } from "./workspaces.js";
 
@@ -31,6 +32,7 @@ export const registerRoutes = async (app: FastifyInstance): Promise<void> => {
   registerSettingsRoutes(app);
   registerSkillRoutes(app);
   registerThreadRoutes(app);
+  registerTrajectoryRoutes(app);
   registerUsageRoutes(app);
   registerWorkspaceRoutes(app);
 

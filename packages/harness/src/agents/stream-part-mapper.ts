@@ -3,6 +3,7 @@ import type { TextStreamPart, ToolSet } from "ai";
 import type { AgentToolCallResult } from "./types.js";
 import type { AgentStreamEvent } from "./types.js";
 import { TOOL_ERROR_PREFIX } from "../tools/index.js";
+import type { ToolTimingState } from "../tools/tool-timing.js";
 
 /**
  * 工具调用的在飞台账:tool-call 时登记(toolName + 打点),tool-result 时取差并销账。
@@ -37,12 +38,6 @@ const readToolStatus = (output: unknown): "success" | "error" =>
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : "Unknown error";
 
-const takeDuration = (clock: ToolCallClock, toolCallId: string): number => {
-  const inFlight = clock.get(toolCallId);
-  clock.delete(toolCallId);
-  return inFlight !== undefined ? Date.now() - inFlight.startedAt : 0;
-};
-
 /**
  * SDK stream part → Eva 事件。
  *
@@ -51,7 +46,9 @@ const takeDuration = (clock: ToolCallClock, toolCallId: string): number => {
  */
 export const mapStreamPart = <TOOLS extends ToolSet>(
   part: TextStreamPart<TOOLS>,
-  clock: ToolCallClock
+  clock: ToolCallClock,
+  /** T50:三段计时汇聚,tool-result 时 take 取走快照(一次性)。 */
+  toolTiming?: ToolTimingState
 ): MappedPart => {
   switch (part.type) {
     case "text-delta":
@@ -88,7 +85,9 @@ export const mapStreamPart = <TOOLS extends ToolSet>(
     case "tool-result": {
       const output = toOutputText(part.output);
       const status = readToolStatus(part.output);
-      const durationMs = takeDuration(clock, part.toolCallId);
+      // T51:clock 只在飞销账,不再产出 durationMs —— 对外时间是 T50 的三段计时。
+      clock.delete(part.toolCallId);
+      const timing = toolTiming?.take(part.toolCallId);
 
       return {
         event: {
@@ -97,7 +96,13 @@ export const mapStreamPart = <TOOLS extends ToolSet>(
           toolName: part.toolName,
           output,
           status,
-          ...(durationMs !== undefined ? { durationMs } : {})
+          ...(timing !== undefined
+            ? {
+                toolExecMs: timing.execMs,
+                approvalWaitMs: timing.approvalWaitMs,
+                queueWaitMs: timing.queueWaitMs
+              }
+            : {})
         },
         toolCall: {
           toolName: part.toolName,
@@ -105,7 +110,14 @@ export const mapStreamPart = <TOOLS extends ToolSet>(
           args: (part.input as Record<string, unknown>) ?? {},
           output,
           status,
-          durationMs
+          ...(timing !== undefined
+            ? {
+                toolExecMs: timing.execMs,
+                approvalWaitMs: timing.approvalWaitMs,
+                queueWaitMs: timing.queueWaitMs,
+                execAborted: timing.execAborted
+              }
+            : {})
         }
       };
     }
@@ -113,7 +125,8 @@ export const mapStreamPart = <TOOLS extends ToolSet>(
     case "tool-error": {
       // 工具执行抛出但未被 buildTool 包成异常的情况(ai 层错误)。
       const output = toErrorMessage(part.error);
-      const durationMs = takeDuration(clock, part.toolCallId);
+      clock.delete(part.toolCallId);
+      const timing = toolTiming?.take(part.toolCallId);
 
       return {
         event: {
@@ -122,7 +135,13 @@ export const mapStreamPart = <TOOLS extends ToolSet>(
           toolName: part.toolName,
           output,
           status: "error",
-          ...(durationMs !== undefined ? { durationMs } : {})
+          ...(timing !== undefined
+            ? {
+                toolExecMs: timing.execMs,
+                approvalWaitMs: timing.approvalWaitMs,
+                queueWaitMs: timing.queueWaitMs
+              }
+            : {})
         },
         toolCall: {
           toolName: part.toolName,
@@ -130,7 +149,14 @@ export const mapStreamPart = <TOOLS extends ToolSet>(
           args: (part.input as Record<string, unknown>) ?? {},
           output,
           status: "error",
-          durationMs
+          ...(timing !== undefined
+            ? {
+                toolExecMs: timing.execMs,
+                approvalWaitMs: timing.approvalWaitMs,
+                queueWaitMs: timing.queueWaitMs,
+                execAborted: timing.execAborted
+              }
+            : {})
         }
       };
     }

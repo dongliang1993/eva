@@ -53,3 +53,16 @@
 - 搜索命中高亮正确；未加载页不参与搜索且 UI 明示这个边界。
 - 下载的 JSONL 能被 `jq` 逐行解析，排序与接口返回一致。
 - 全程无凭据泄漏：默认设置下检查器面板里搜不到 `SECRET-TOKEN-123` / Bearer token / API key。
+
+## 4. 实施备注
+
+- 结构：`trajectory-view.tsx` = SessionTrajectory / RunTrajectory 双视图（子 Run 跳转时父视图 `hidden` 不卸载，选中行与滚动位置原样）;`Ledger` 组件双方复用（虚拟化 + prepend 稳定 + focusKey 跳转）。Overview 段点击、搜索命中、子 Run 返回都走同一个 `jumpToKey`。
+- Overview 只有「真实 duration 比例」一种模式（卡面 §2.1 的三条：Model 分段、Tools 三段不相加、gap 留白 —— 真实比例天然满足留白）;§9.2 的等宽/压缩 idle/wall-clock 四模式留了数据口，没做切换器。
+- Tool 检查器的「调用当时 snapshot」:`snapshot.ts` 在同 Run 内按 seq 找最近 snapshot、顺 `refSeq` 取正文；快照在未加载页时明示「继续上滚加载后可见」，不伪造。Tool schema 本卡展示的是 snapshot 里的 name+description 列表（zod schema 的 JSON 化没进 v1,§4.3 的 artifact_versions 才是终态）。
+- 搜索只搜已加载页（`placeholder="搜索已加载页"` + title 明说）;JSONL 下载走 `withLoopbackToken` 直连 fetch(blob),不进 apiFetch 的 JSON 通道。
+- 凭据泄漏那条验收由 T47 的写入期脱敏测试兜底（检查器渲染的就是落库 payload,SECRET/Bearer/sk- 在写入时已死）。
+
+## 5. S27 收口备注（T47–T54 全绿时写）
+
+- S27 切片全绿 = T47–T54 全绿 + `pnpm typecheck && pnpm test` 全绿（91 文件 / 731 测试）。
+- 设计文档 §10(feedback/eval/版本比较/Replay/artifact_versions）不在本切片，未动。

@@ -48,6 +48,14 @@ export interface AgentToolCallResult {
   output: string;
   status: "success" | "error";
   durationMs?: number;
+  /** T50:真实执行时长(三段计时;无审批无排队时两个等待字段为 0 —— 0 是「没等」)。 */
+  toolExecMs?: number;
+  /** T50:审批等待。 */
+  approvalWaitMs?: number;
+  /** T50:并发帽排队等待。 */
+  queueWaitMs?: number;
+  /** T50:执行被 abort 截断(race 兜底抢先)。 */
+  execAborted?: boolean;
 }
 
 export interface AgentRunResult {

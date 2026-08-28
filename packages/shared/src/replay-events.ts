@@ -50,9 +50,15 @@ export const replayEventsFor = (
             toolName: part.toolName,
             output: toolPartOutput(part),
             status: part.state === "output-error" ? "error" : "success",
-            // toolMetadata 是宽松的 JSONValue 记录,窄回 number 再传。
-            ...(typeof part.toolMetadata?.durationMs === "number"
-              ? { durationMs: part.toolMetadata.durationMs }
+            // T51:回放三段计时新字段;旧 durationMs 不回灌成新字段。
+            ...(typeof part.toolMetadata?.toolExecMs === "number"
+              ? { toolExecMs: part.toolMetadata.toolExecMs }
+              : {}),
+            ...(typeof part.toolMetadata?.approvalWaitMs === "number"
+              ? { approvalWaitMs: part.toolMetadata.approvalWaitMs }
+              : {}),
+            ...(typeof part.toolMetadata?.queueWaitMs === "number"
+              ? { queueWaitMs: part.toolMetadata.queueWaitMs }
               : {})
           });
         }

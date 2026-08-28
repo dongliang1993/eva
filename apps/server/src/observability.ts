@@ -18,6 +18,28 @@ export const createPinoObserver = (
       case "agent_run_start":
         logger.info({ event: "agent_run_start" }, "agent run started");
         break;
+      case "agent_run_failed":
+        logger.error(
+          {
+            event: "agent_run_failed",
+            failureLayer: event.failureLayer,
+            error: event.error
+          },
+          "agent run failed"
+        );
+        break;
+      case "model_call_failed":
+        logger.warn(
+          {
+            event: "model_call_failed",
+            step: event.step,
+            attempt: event.attempt,
+            willRetry: event.willRetry,
+            error: event.error
+          },
+          event.willRetry ? "model call failed; retrying after reactive compact" : "model call failed"
+        );
+        break;
       case "agent_run_end":
         logger.info(
           {

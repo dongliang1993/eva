@@ -23,7 +23,13 @@ export interface ToolCallInfo {
   readonly args: Record<string, unknown>;
   readonly output?: string;
   readonly status?: "success" | "error";
-  readonly durationMs?: number;
+  /** T51:真实执行时长(三段计时)。徽章只在它存在时显示 —— 旧消息只有
+   *  含等待的旧 durationMs,一律隐藏徽章,不按消息时间戳猜版本。 */
+  readonly toolExecMs?: number;
+  /** T51:审批等待(非零时与执行分开呈现,不相加)。 */
+  readonly approvalWaitMs?: number;
+  /** T51:并发帽排队等待。 */
+  readonly queueWaitMs?: number;
   /** T30:审批决策(刷新恢复路径的事实源,来自 part.toolMetadata)。 */
   readonly approvalDecision?: ApprovalDecision;
 }
@@ -78,6 +84,8 @@ export const toolPartToInfo = (part: EvaDynamicToolPart): ToolCallInfo => {
       ? (rawDecision as ApprovalDecision)
       : undefined;
 
+  // T51:只读三段计时新字段。旧 durationMs 含等待,不回灌成新字段
+  // (回灌就是把错数字洗成看起来对的);旧消息因此三个字段全空,徽章隐藏。
   return {
     toolName: part.toolName,
     toolCallId: part.toolCallId,
@@ -88,8 +96,14 @@ export const toolPartToInfo = (part: EvaDynamicToolPart): ToolCallInfo => {
         status: part.state === "output-error" ? ("error" as const) : ("success" as const)
       }
       : {}),
-    ...(typeof part.toolMetadata?.durationMs === "number"
-      ? { durationMs: part.toolMetadata.durationMs }
+    ...(typeof part.toolMetadata?.toolExecMs === "number"
+      ? { toolExecMs: part.toolMetadata.toolExecMs }
+      : {}),
+    ...(typeof part.toolMetadata?.approvalWaitMs === "number"
+      ? { approvalWaitMs: part.toolMetadata.approvalWaitMs }
+      : {}),
+    ...(typeof part.toolMetadata?.queueWaitMs === "number"
+      ? { queueWaitMs: part.toolMetadata.queueWaitMs }
       : {}),
     ...(approvalDecision ? { approvalDecision } : {})
   };

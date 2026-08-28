@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 
 import { buildInfrastructure } from "./deps.js";
+import { registerLoopbackTokenHook } from "./loopback.js";
 import { registerRoutes } from "./routes/index.js";
 import { buildAppServices } from "./services/index.js";
 
@@ -32,24 +33,7 @@ export const buildApp = async () => {
   const loopbackToken = process.env.EVA_LOOPBACK_TOKEN;
 
   if (loopbackToken) {
-    app.addHook("onRequest", async (request, reply) => {
-      const url = request.url.split("?")[0] ?? request.url;
-      const method = request.method.toUpperCase();
-
-      const isWhitelisted =
-        url === "/v1/health" ||
-        (method === "GET" && url === "/api/v1/threads") ||
-        // 静态资源 + SPA:GET/HEAD 且不命中 /api/ 操作面
-        ((method === "GET" || method === "HEAD") && !url.startsWith("/api/"));
-
-      if (isWhitelisted) {
-        return;
-      }
-
-      if (request.headers["x-eva-token"] !== loopbackToken) {
-        await reply.code(401).send({ error: "Unauthorized: missing or invalid loopback token" });
-      }
-    });
+    registerLoopbackTokenHook(app, loopbackToken);
   }
 
   // 请求体/查询参数校验失败是客户端错误，不是服务端故障。

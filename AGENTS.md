@@ -149,6 +149,16 @@ Workspace 级文件型任务图（与 Plan Gate 的 `.eva/plan-gate/` 目录刻�
 - 工具**入参不带任何路径**（workspaceId/runId 在 runs.ts 绑进 gateway，无 workspace 不注入），这是「不设 `needsApproval`」站得住的理由；只有 `plan_status` 是 `readOnly`（误标会被 T24 只读并发帽放行，绕过 mutex 的串行意图）。
 - 首版只有 REST，无 WS 广播、无 UI 面板（plan 是 workspace 级，per-run SSE 帧会漏给别的会话）。
 
+## Observability (S27)
+
+「这个 Run 到底发生了什么」是一等事实，不靠 Pino 反推：
+
+- **`run_events`** 是 append-only canonical ledger（`apps/server/src/db/schema.ts`，时间一律 epoch ms）。`seq` 由 **run-scoped recorder** 独占单调分配（`services/observability/run-recorder.ts`）：同一 Run 主 Agent 与前台子代理共用一个实例（`UNIQUE(run_id, seq)` 成立的唯一理由）；后台子代理有自己 Run 的 recorder，seq 从 0。`record` 绝不抛回 Agent loop；payload 在 recorder 内定型（脱敏 → 截断 16 KiB → canonical JSON）。崩溃未闭合操作由启动清扫补 `operation_abandoned`，retention 按 `observability.retentionDays` / `maxDatabaseBytes` 整 Run 粒度删（`usage_records` 独立存活 —— 0030 起它没有 runs FK）。
+- **事件路径**：harness `AgentTelemetryEvent` → server `createObserverBridge(recorder).forAgent(agent)`（`agent: "main" | taskId`，**没有隐式 current run**，runId 属于绑定不属于事件）→ `fanout` 合并 Pino 第二订阅者。`AgentBuildOptions.observer` / `buildSubagent.observer` 必填。
+- **三段计时**:`withApproval`（审批等待）/ `withConcurrencyCap`（排队等待）/ `withExecTiming`（真实执行）汇入 run-scoped `ToolTimingState`，mapper 在 tool-result 时取快照；SSE `tool-result` 帧带 `toolExecMs/approvalWaitMs/queueWaitMs`，旧 `durationMs` 不再赋值（历史消息徽章隐藏）。abort 补发落 `tool_call_abandoned`（`duration_ms` 未分解墙钟，不伪造三段）。
+- **读取面**:`GET /threads/:id/trajectory`（主 Run 事件 + subRuns 摘要，三元组游标）、`GET /runs/:id/trajectory`（seq 游标，两种语义不合并）、`GET /threads/:id/session-log`(JSONL 导出，byte 稳定）。**都不进 loopback token 白名单**(`loopback.ts` 精确相等判定，改前缀匹配前先想清在放行什么）。
+- **轨迹页**:`apps/web/src/features/threads/trajectory/`（会话内「对话 / 轨迹」tab，聊天流不卸载）。`derive-trajectory.ts` 纯投影（展示行不落库）+ `display-list.ts` 折叠 + 虚拟化台账（prepend 按 totalSize 差值补 scrollTop)+ 三泳道 Overview + 类型化 Inspector(snapshot 顺 `refSeq` 取调用当时那份，不是当前定义）。
+
 ## Memory (T16)
 
 Memory is split across two stores by scale and access pattern (the "file as database" philosophy, docs 14 §11):

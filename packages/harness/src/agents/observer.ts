@@ -42,11 +42,73 @@ export type AgentTelemetryEvent =
       readonly stepCount: number;
       readonly totalTokenUsage: TokenUsage;
       readonly toolCallCount: number;
+      /** S27:max-steps 撞顶是 orchestration 层失败;正常 stop 不带。 */
+      readonly failureLayer?: "orchestration";
+    }
+  | {
+      /** S27:run 抛错终态(finish 不会走到的路径)—— error 帧之外台账也要留一条。 */
+      readonly type: "agent_run_failed";
+      readonly error: string;
+      readonly failureLayer: "model" | "context" | "unknown";
+    }
+  | {
+      /** S27:一次用户输入到终态算一个 Turn;notice 续跑开新 Turn。 */
+      readonly type: "turn_started";
+      readonly turnIndex: number;
+    }
+  | {
+      readonly type: "turn_completed";
+      readonly turnIndex: number;
+      readonly durationMs: number;
+      readonly status: "completed" | "aborted" | "error";
+    }
+  | {
+      /** S27:onStepStart。attempt:同一 Step 因 reactive compact 重跑时递增。 */
+      readonly type: "step_started";
+      readonly step: number;
+      readonly attempt: number;
     }
   | {
       readonly type: "llm_call_start";
       readonly step: number;
+      readonly attempt?: number;
       readonly model?: string;
+    }
+  | {
+      /** S27:该 Step 第一条 text/reasoning/tool-call delta —— TTFT 的测量点。 */
+      readonly type: "model_first_token";
+      readonly step: number;
+      readonly attempt: number;
+      readonly durationMs: number;
+    }
+  | {
+      /** S27:模型流读完(finish-step part),不含后续工具执行。 */
+      readonly type: "model_call_completed";
+      readonly step: number;
+      readonly attempt: number;
+    }
+  | {
+      /** S27:模型调用失败。willRetry=true 表示 reactive compact 后重跑(不是终态)。 */
+      readonly type: "model_call_failed";
+      readonly step: number;
+      readonly attempt: number;
+      readonly error: string;
+      readonly willRetry: boolean;
+    }
+  | {
+      /** S27:run 收口时的最终 assistant 文本与工具调用数(finish 汇总处)。 */
+      readonly type: "assistant_message";
+      readonly text: string;
+      readonly toolCallCount: number;
+    }
+  | {
+      /** S27:模型本轮实际看到的请求面(system prompt + 工具 + 调用设置)。去重在 server 侧。 */
+      readonly type: "request_snapshot";
+      readonly provider: string;
+      readonly modelId: string;
+      readonly callSettings: Record<string, unknown>;
+      readonly systemPrompt: string;
+      readonly tools: readonly { readonly name: string; readonly description: string }[];
     }
   | {
       readonly type: "llm_call_end";
@@ -56,10 +118,12 @@ export type AgentTelemetryEvent =
       readonly hasToolCalls: boolean;
     }
   | {
-      readonly type: "tool_call_initiated";
+      readonly type: "tool_call_started";
       readonly step: number;
       readonly toolName: string;
       readonly toolCallId: string;
+      /** 入参(检查器的 Payload 面板靠它;落库前 server 侧统一脱敏限长)。 */
+      readonly input?: Record<string, unknown>;
     }
   | {
       readonly type: "tool_call_completed";
@@ -67,7 +131,41 @@ export type AgentTelemetryEvent =
       readonly toolName: string;
       readonly toolCallId: string;
       readonly status: "success" | "error";
-      readonly durationMs: number;
+      /** T50 起逐步退役:三段计时(toolExecMs 等)取代这个含糊值。 */
+      readonly durationMs?: number;
+      /** T50:真实执行时长(buildTool/buildJsonSchemaTool 打点)。 */
+      readonly toolExecMs?: number;
+      /** T50:审批等待(withApproval 打点)。 */
+      readonly approvalWaitMs?: number;
+      /** T50:并发帽排队等待(withConcurrencyCap 打点)。 */
+      readonly queueWaitMs?: number;
+      /** T50:执行被 abort 截断(race 兜底抢先)。 */
+      readonly execAborted?: boolean;
+      /** 输出文本(检查器的 Result 面板靠它;落库前 server 侧统一脱敏限长)。 */
+      readonly output?: string;
+    }
+  | {
+      /**
+       * T51:run abort 时对在飞调用的补发 —— 只带未分解的墙钟 waitedMs
+       * (clock 不追踪 wrapper phase),不伪造三段计时,decomposed=false。
+       */
+      readonly type: "tool_call_abandoned";
+      readonly step: number;
+      readonly toolName: string;
+      readonly toolCallId: string;
+      readonly waitedMs: number;
+    }
+  | {
+      /** S27:进入审批闸(withApproval 调 requestApproval 前)。 */
+      readonly type: "approval_asked";
+      readonly toolName: string;
+      readonly toolCallId: string;
+    }
+  | {
+      readonly type: "approval_decided";
+      readonly toolName: string;
+      readonly toolCallId: string;
+      readonly approved: boolean;
     }
   | {
       /** T18:repairToolCall 修复成功(失败不发 —— 那会有 error 事件收尾)。 */

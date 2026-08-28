@@ -1,4 +1,5 @@
 import type { AgentTool } from "./build-tool.js";
+import type { ToolTimingState } from "./tool-timing.js";
 
 /** 只读工具的默认并发帽(Claude Code 同款默认)。 */
 export const DEFAULT_READ_ONLY_CONCURRENCY = 10;
@@ -43,6 +44,7 @@ export class Semaphore {
 export const withConcurrencyCap = (
   agentTool: AgentTool,
   limiter: Semaphore,
+  timing?: ToolTimingState
 ): AgentTool => {
   if (agentTool.readOnly !== true) {
     return agentTool;
@@ -60,7 +62,13 @@ export const withConcurrencyCap = (
     tool: {
       ...inner,
       execute: async (input: unknown, options?: unknown) => {
+        // T50:排队等待单独成段 —— 无竞争时是 0,不是 undefined。
+        const queueStart = Date.now();
         const release = await limiter.acquire();
+        const toolCallId = (options as { toolCallId?: string } | undefined)?.toolCallId;
+        if (toolCallId !== undefined) {
+          timing?.record(toolCallId, "queue", Date.now() - queueStart);
+        }
         try {
           return await innerExecute(input as never, options as never);
         } finally {

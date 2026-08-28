@@ -53,3 +53,12 @@ system | user | context | assistant | tool | subtool | compacted | approval | er
 - 只翻了第一页（锚点未加载）时，后台子 Run 不显示、无控制台报错；继续上滚到锚点出现后它挂上去。
 - `deriveTrajectory` 有单测：同一份事件数组两次调用输出深相等；乱序输入按 seq 排序后结果一致。
 - 事件里出现未知 kind（未来版本）时投影不崩，降级成一行 raw。
+
+## 4. 实施备注
+
+- 三件套都刻意做成纯函数：`derive-trajectory.ts`（投影）、`display-list.ts`(Turn/Assistant 折叠计算）、`use-trajectory.ts`（游标累积）。展示行不落库，删掉随时从 ledger 重算（契约 1)。
+- prepend 稳定用「totalSize 差值补 scrollTop」:loadOlder 前记一次 totalSize，新页渲染后 `scrollTop += delta`;row key 稳定（`getItemKey` 给虚拟化）保证选中态不跳。首屏从尾部打开。
+- 切换实现：`chat-view.tsx` 内部 tab —— 聊天内容只 `hidden` 不卸载（MessageList/builder/滚动位置原样），轨迹页首开后保持挂载。
+- **顺手补了 T49 的一个缺口**:`tool_call_started/completed` 的 observer 事件此前只有 `toolName`,ledger 里没有工具入参/输出，T54 检查器的 Payload/Result 面板会无米下锅。已补：`tool_call_started` 带 `input`、`tool_call_completed` 带 `output`（脱敏限长走 recorder 既有管道）。
+- 与卡面的两处小偏差：① `run_started` 投影成 `user` 行（Run 边界；用户原文在 messages 表，不在 ledger,inspector 显示 Run 元信息）;② `request_snapshot_ref` 不占行，ref 解析留给 T54 检查器。
+- **Turn 呈现纠偏（用户评审）**:turn 与 run 1:1 是常态后，分隔线按 **Run 分组**渲染（不再画「全是 Turn 0」的 turn 分隔）—— 每个 Run 分组第一行左边距带「Turn N」角标（DSH 风格,N = 会话内 Run 序号）,Run 之间插分割线，双击分割线折叠整 Run(`buildDisplayList` 仍是纯函数，折叠不销毁数据）。将来 Run 内真出现多 turn（常驻 inbox / steering）时再把 turn 级分隔加回来。

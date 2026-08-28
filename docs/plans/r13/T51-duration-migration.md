@@ -63,3 +63,10 @@ mapper（`stream-part-mapper.ts:91`、`:116`）改成从 T50 的 timing state �
 - 工具执行中点 Stop：卡片立刻离开 running 态，落库 part 不是 `input-available`；ledger 里是 `tool_call_abandoned` + `duration_ms`，且没有 `tool_exec_ms`。
 - `grep -rn "toolMetadata.durationMs" apps packages --include="*.ts" --include="*.tsx"` 只剩「隐藏旧徽章」那一处判断。
 - `ThinkingBadge` 行为一字不变。
+
+## 4. 实施备注
+
+- `grep toolMetadata.durationMs` 实测 **0 处命中**（验收允许的上限是一处）：隐藏旧徽章的判据是「有没有新字段」，不再需要读旧值；连「隐藏判断」那处一并省掉了。grep 钉线测试在 `tests/duration-migration.test.ts`。
+- `ToolCallInfo.durationMs` 字段整个删除（不是保留不赋值）—— 类型上不留「可能含着等待的旧值」的坑；`ThinkingBadge` 走的是 `message.metadata.thinkingDurationMs`，不受影响。
+- abort 补发帧形状一字未改（`tool-result` + `status=error` + `durationMs`），但 observer 事件从 `tool_call_completed(status=error)` 换成 `tool_call_abandoned{waitedMs}`,ledger 落 `duration_ms` + `payload.decomposed=false`,`toolExecMs` 三个新字段一概不伪造。
+- `toolPartToInfo` 是实时/重放两条路径的共同收敛点，新字段只在这一处读；`replay-events` 同样只回灌新字段。

@@ -121,6 +121,13 @@ export interface AppSettings {
     /** thread 作用域 policy key 列表(T27)。命中即免审批,形态见 harness buildPolicyKeys。 */
     allowAlwaysPolicies: readonly string[];
   };
+  /** S27:run_events ledger 的抓取与保留。无 UI,由默认值兜底;captureContent 凭据规则在 full 下也生效。 */
+  observability: {
+    enabled: boolean;
+    captureContent: "off" | "redacted" | "full";
+    retentionDays: number;
+    maxDatabaseBytes: number;
+  };
 }
 
 export interface HealthStatus {
@@ -291,3 +298,61 @@ export * from "./ui-message.js";
 export * from "./ui-message-builder.js";
 export * from "./replay-events.js";
 export * from "./mcp.js";
+
+// ---------------------------------------------------------------------------
+// S27/T52:轨迹与导出 API 的 DTO
+// ---------------------------------------------------------------------------
+
+/** run_events 行的 API 形态(payload 已解析为对象;写入时已脱敏)。 */
+export interface RunEventDto {
+  readonly id: string;
+  readonly runId: string;
+  readonly sessionId: string;
+  readonly seq: number;
+  /** "main" | taskId(前台子代理)。 */
+  readonly agent: string;
+  readonly kind: string;
+  readonly turnIndex: number | null;
+  readonly stepIndex: number | null;
+  readonly attempt: number | null;
+  readonly toolCallId: string | null;
+  readonly parentToolCallId: string | null;
+  readonly severity: "info" | "warn" | "error";
+  readonly payload: unknown;
+  readonly occurredAtMs: number;
+  readonly durationMs: number | null;
+}
+
+/** 会话级游标三元组 —— occurredAtMs 定序,后两项只做同毫秒 tiebreaker。 */
+export interface SessionTrajectoryCursor {
+  readonly beforeOccurredAtMs: number;
+  readonly beforeRunId: string;
+  readonly beforeSeq: number;
+}
+
+/** 后台子 Run 摘要(来自 runs + background_tasks + 事件统计,不分页)。 */
+export interface SubRunSummaryDto {
+  readonly runId: string;
+  readonly parentRunId: string;
+  readonly backgroundTaskId: string | null;
+  readonly subagentType: string | null;
+  readonly parentToolCallId: string | null;
+  readonly status: RunStatus;
+  readonly eventCount: number;
+  readonly firstOccurredAtMs: number | null;
+  readonly lastOccurredAtMs: number | null;
+}
+
+/** GET /api/v1/threads/:sessionId/trajectory —— events 只含主 Run,按三元组倒序。 */
+export interface SessionTrajectoryResponse {
+  readonly events: readonly RunEventDto[];
+  readonly subRuns: readonly SubRunSummaryDto[];
+  /** 还有更旧页时给下一页游标;没有则 null。 */
+  readonly nextCursor: SessionTrajectoryCursor | null;
+}
+
+/** GET /api/v1/runs/:runId/trajectory —— 单 Run 用 seq 翻页(单 Run 内严格递增唯一)。 */
+export interface RunTrajectoryResponse {
+  readonly events: readonly RunEventDto[];
+  readonly nextBeforeSeq: number | null;
+}

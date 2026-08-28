@@ -57,3 +57,11 @@ GET /api/v1/runs/:runId/trajectory?beforeSeq=&limit=
 - 单 Run 接口用 `beforeSeq` 翻页正确；给它传 `beforeOccurredAtMs` 被忽略或 400，不静默半支持。
 - session-log 的 JSONL 行数 = 该 Session 所有 Run（含子 Run）事件总数 + 1；排序稳定，两次导出 byte 相同。
 - 启用 loopback token 后无 token 访问三个接口全部 401；`GET /api/v1/threads` 仍然放行。
+
+## 4. 实施备注
+
+- `app.ts` 的 inline token hook 抽成了 `loopback.ts`(`isLoopbackWhitelisted` 纯函数 + `registerLoopbackTokenHook`)—— 白名单判定与接线都能被路由级测试钉住（无 token 401 × 3 + `/api/v1/threads` 放行，测试里挂的是真 hook + 真路由）。
+- repository 新增两个读面：`listAllBySession`（导出专用，**含**子 Run —— 导出不是分页视图，没有锚点孤儿问题）与 `summarizeSubRuns`(LEFT JOIN `background_tasks` 反查 `subagent_type`/`parent_tool_call_id`，不冗余存储）。
+- 会话游标三元组用 `superRefine` 强制「三个一起给」；单 Run 接口见到 `beforeOccurredAtMs`/`beforeRunId` 直接 400（选了 400 而不是静默忽略，半支持最害人）。
+- session-log 的字节稳定性靠两条：事件行键序固定（字面量插入序）、全程无导出时刻字段；payload 是写入期 canonical JSON,parse 再 stringify 键序不变。
+- **格式二次修订（用户评审）**:header 补 `createdAt`（会话创建时间，epoch ms —— 是落库事实不是导出时间，不破坏 byte 稳定）；事件行对齐 DSH `{type, seq, time, data}` 形状 —— 信封只留身份与排序键（`run_id`/`seq`/`occurred_at_ms`),`agent`/`kind`/`turn_index`/`step_index`/`attempt`/`tool_call_id`/`parent_tool_call_id`/`severity`/`duration_ms`/`payload` 全部收进 `data`。注意我们仍保持 `type: "event"` 常量 + `data.kind`（没像 DSH 那样把 kind 提升为 `type`)—— 因为同一文件里要混放 session header，恒定 type 让分流解析一行就够了。

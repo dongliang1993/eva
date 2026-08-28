@@ -71,3 +71,23 @@ const observer = toObserver(recorder, { agent: "main" });
 - 同一 Step 触发 reactive compact retry 后重跑：两次尝试是两组事件，`attempt` 分别为 1 和 2。
 - Pino 输出与落库互不影响：手工让 recorder.append 抛错，Pino 日志照常、run 照常跑完。
 - `grep -rn "currentRun" apps/server/src` 零命中。
+
+## 4. 实施备注（含三个顺带修掉的存量 bug）
+
+**设计取舍**：§2.1 的「每个事件加 `agent` 字段」没有落在 harness 事件联合上 —— agent 与 runId 同属绑定关系（卡自己也是这么说的），落在 `RunEventInput.agent`（recorder 入参）。harness 事件保持身份无感，`createObserverBridge(recorder).forAgent(agent)` 一处绑定。`fanout` 合并 Pino 第二订阅者，任一订阅者抛错互不影响（agent.ts `emit` 自身还有第三层 try）。
+
+**Turn 语义纠偏（落地后用户评审发现）**：初版把 notice 续跑标成 `turnIndex++`（开新 Turn)，与本卡自己的定义矛盾 —— 「一次用户输入到终态算一个 Turn」，续跑发生在终态之前，属于同一个 Turn（只是多一些 Step，边界由 `loop_transition(subagent_notice)` 表达）。已改回：`turnIndex` 在一个 Run 内恒为 0。对照 DSH(`agent-loop/agent.ts`)：它没有 run,turn = 一次唤醒到排空，唤醒消息分 `next-step`（并进当前 turn 的下一 step）与 `next-turn`（开新 turn）两档 —— Eva 的「注入即续跑一圈」是请求级 Run 内的续跑，按卡面定义不开新 Turn。
+
+**bug 1：ai@7 不允许 `messages` 里出现任何 system 角色，两个存量路径因此必炸。**
+- `run-preparation.ts:223` 把会话摘要放成 leading system 消息 → **被 compact 过的会话每次 run 都以 InvalidPromptError 终**（已用路由级复现钉死）。
+- reactive compact 的 reminder system 消息插在中段 → retry 那一圈 streamText 直接抛。
+- 修复：`agent.ts` 在每次 streamText 前把 `messages` 里的 system 消息统一上提到 `createPrepareStep` 的 `extraInstructions`（这正是 context-strategy.ts:53 注释写明的本意，只是校验发生在 prepareStep 之前，hoist 必须提前到 agent.ts）。
+
+**bug 2：`prefixMessageCount` 在续写/notice 续跑后漂移 → 孤儿 tool-call。** 续跑分支把 `messages` 换成 `responseMessages + 续写消息`（不含最初输入），静态 prefix 语义失效；reactive compact 按旧 prefix 切，把 tool-call 留在「prefix」、其 tool result 压进 summary，`AI_MissingToolResultsError`。修复：两个续跑分支里 `prefixMessageCount = 0`。
+
+**bug 3：SDK 对失败 step 也迟发 `onStepEnd`（且在下一轮 streamText 处理中才到）。** 不修的话失败 step 白占步数、retry 拿到新下标，卡验收的「同 Step，attempt 1→2」不成立。修复：`failedStepIndex` 标记 + `onStepEnd` 跳过迟到的失败回调（不占步数、不发 `llm_call_end`、不累计用量）。副作用：失败模型调用不再消耗 maxSteps 预算（更合理，但属行为变化，记录在此）。
+
+**测试基建结论**：
+- `MockLanguageModelV4` 的 `finishReason: "length"` 会被归一成 `"other"`，max-output 续写端到端在 mock 下不可达（与 lead-agent-loop.test.ts:250 的既有结论一致）；reactive retry 端到端改走 notice 续跑圈触发。
+- `finish-step` part 可能在 `onStepEnd` 之后才到 —— `model_call_completed`/`model_first_token` 的 step 归属用 `streamingStepIndex`（onStepStart 定格），不能用 `stepsUsed`。
+- route 级测试桩要 honor `options.observer`（`createAgent({observer: opts.observer})`），否则 harness 事件到不了 ledger。

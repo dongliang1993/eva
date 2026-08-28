@@ -1,6 +1,8 @@
 import type { AgentTool } from "./build-tool.js";
 import { isSafeReadOnlyCommand } from "./safe-readonly.js";
+import type { AgentObserver } from "../agents/observer.js";
 import type { RequestApproval } from "../agents/types.js";
+import type { ToolTimingState } from "./tool-timing.js";
 
 export const APPROVAL_DENIED_PREFIX = "[Approval Denied]";
 
@@ -15,10 +17,15 @@ const deniedMessage = (toolName: string): string =>
  * 缝 assistant(tool-call) + tool(approval-response) 消息序列,缝错会重复正文甚至
  * 死循环;而且每次审批要多付一次完整模型调用。包装法只有一次模型调用,
  * abort 时能被 cancelByRun 统一 reject。
+ *
+ * S27:传了 observer 就在问与答两个点发 approval_asked / approval_decided ——
+ * 事件的身份(run/agent)由 observer 的绑定关系承担,这里不发也能跑。
  */
 export const withApproval = (
   agentTool: AgentTool,
-  requestApproval: RequestApproval
+  requestApproval: RequestApproval,
+  observer?: AgentObserver,
+  timing?: ToolTimingState
 ): AgentTool => {
   if (agentTool.needsApproval !== true) {
     return agentTool;
@@ -45,10 +52,21 @@ export const withApproval = (
           }
         }
 
+        const toolCallId: string = options.toolCallId;
+        observer?.({ type: "approval_asked", toolName: agentTool.name, toolCallId });
+        // T50:审批等待单独成段 —— 它动辄秒级/分钟级,混进工具耗时就什么性能结论都得不出。
+        const approvalStart = Date.now();
         const approved = await requestApproval({
           toolName: agentTool.name,
-          toolCallId: options.toolCallId,
+          toolCallId,
           args: (input as Record<string, unknown>) ?? {}
+        });
+        timing?.record(toolCallId, "approval", Date.now() - approvalStart);
+        observer?.({
+          type: "approval_decided",
+          toolName: agentTool.name,
+          toolCallId,
+          approved
         });
 
         if (!approved) {
