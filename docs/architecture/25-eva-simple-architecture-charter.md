@@ -1963,6 +1963,18 @@ request
   没有它们就没有「行为不变」的判据**；
 - 记录基线：当前 `pnpm test` 用例数与耗时、`typecheck` 通过状态、各产物构建时间。
 
+**基线实测（2026-08-30，Wave 0 结束时，M 系列 Mac / Node 26）** —— 后面每个 Wave 的
+「行为不变」都以这一行为参照，尤其是用例数：改造过程中用例数只允许**增加**，
+减少一定意味着某条断言被删掉了：
+
+| 项 | 数值 |
+|---|---|
+| `pnpm test` | 92 个文件 / **735 个用例**，5.3 s（collect 21 s 并行摊到 5 s，耗时大头是 vite transform 不是断言） |
+| `pnpm typecheck` | 通过，3.3 s |
+| `pnpm --filter @eva/server build` | 1.1 s（tsup，实际编译 32 ms） |
+| `pnpm web:build` | 2.5 s（vite） |
+| `pnpm lint:arch` | 0 error / 91 warning（存量：`routes-no-infra-handle` 71 处 + `routes-no-db` 20 处） |
+
 **同批做掉的两项纯移动（各自独立 commit，零逻辑改动）：**
 
 - `tests/` 按 §7.22 的结构 `git mv`，并给 `vitest.config.ts` 分组；
@@ -1970,6 +1982,22 @@ request
 
 退出条件：`pnpm lint:arch` 在 CI 里能拦住一次故意写错的 import；七条主链路径都有测试；
 `tests/` 与产物目录已就位。
+
+> **Wave 0 已结束（2026-08-30）。** 四条退出条件逐条实测：
+>
+> 1. **拦得住** —— 往 `packages/harness/src/` 塞一个 `import { drizzle } from "drizzle-orm"` 探针，
+>    `pnpm lint:arch` 报 1 error 并退出 1；CI 的「架构边界」步骤跑的就是这条命令。
+> 2. **七条路径都有测试** —— send / retry / abort / 断连重连 / 审批 pending / 503 回滚 / agent error
+>    分别落在 `tests/server/runs/run-lifecycle.test.ts`、`regenerate.test.ts`、`run-detach.test.ts`
+>    与 `tests/server/approvals/approval-abort.test.ts`。
+> 3. **`tests/` 已就位**（commit `2e48aa0`，纯移动）。
+> 4. **产物目录已就位** —— `.build/server-deploy`，且 `check:release` 多了一条「产物里不许有 .ts」
+>    的守卫（§7.23）。
+>
+> 一处与原计划的偏差记在这里：Wave 0.5 动作 2 原文要求 `docs/architecture/README.md`
+> 指向 `docs/current/`。那个目录是 Wave 6 才建的，现在指过去是一条死链 ——
+> 而「文档写了但东西不存在」正是根因 D 本身。改为指向 AGENTS.md（今天真实的事实源），
+> 并注明 `docs/current/` 是它的去处。
 
 ### Wave 0.5：文档止血（半天，可与 Wave 0 并行）
 
