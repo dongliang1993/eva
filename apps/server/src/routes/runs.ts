@@ -1,22 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import {
-  createPlanGateState,
-  createPlanWeaveTools,
-  createSubagentTool,
-  type PlanGateState,
-  type RequestPlanReview
-} from "@eva/harness";
 import type { FastifyInstance } from "fastify";
 import type { RunStreamEvent } from "@eva/shared";
 import { toErrorMessage } from "@eva/shared";
 
-import { AgentUnavailableError, defined } from "../services/agent-factory.js";
-import { DrizzlePlanRepository } from "../db/repositories/plan-repository.js";
-import { createPlanGateStore, planGateRelPath } from "../services/plan-gate/index.js";
-import { createPlanWeaveGateway } from "../services/plan-weave/index.js";
-import { evaDataDir } from "../paths.js";
-import { loadMemoryFilesSection, todayString } from "../services/memory/index.js";
+import { AgentUnavailableError } from "../services/agent-factory.js";
 import { AssistantMessageRecorder } from "../services/runs/assistant-message-recorder.js";
 import { RunApprovalChannel } from "../services/runs/run-approval-channel.js";
 import {
@@ -26,12 +14,12 @@ import {
   type RunInput,
   type RunPreparationDependencies
 } from "../services/runs/run-preparation.js";
-import { selectRunSkills } from "../services/skills/select-run-skills.js";
-import { SubagentRunner } from "../services/subagents/subagent-runner.js";
-import { ReportGateway } from "../services/subagents/report-gateway.js";
+import {
+  RunRuntimeBuilder,
+  type RunRuntimeScope
+} from "../services/runs/run-runtime-builder.js";
+import type { ReportGateway } from "../services/subagents/report-gateway.js";
 import { loadAppSettings } from "../services/settings/app-settings.js";
-import { createObserverBridge, fanout } from "../services/observability/observer-bridge.js";
-import { createRunRecorder } from "../services/observability/run-recorder.js";
 import type { RunFailureLayer } from "../db/schema.js";
 import { runRequestSchema } from "../types/runs.js";
 import { RunEventStream } from "../transports/sse/event-stream.js";
@@ -65,6 +53,15 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       session: app.services.session,
       workspaces: app.services.workspaces
     };
+    const builder = new RunRuntimeBuilder({
+      db: app.infra.db,
+      logger: app.log,
+      skills: app.infra.skills,
+      agents: app.services.agents,
+      mcp: app.services.mcp,
+      planWeave: app.services.planWeave,
+      baseObserver: app.infra.observer
+    });
 
     try {
       const body = runRequestSchema.parse(request.body ?? {});
@@ -85,37 +82,36 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
       // T48:Run 提前到模型解析前创建 —— provider/模型/skill 解析失败也要有台账行
       // (failure_layer=routing);模型成功后 patchRouting 补实际模型。
-      const observability = loadAppSettings(app.infra.db, app.infra.config).observability;
+      const observabilitySettings =
+        loadAppSettings(app.infra.db, app.infra.config).observability;
       app.services.runLedger.start({
         id: runId,
         sessionId,
         userMessageId: runInput.userMessageId,
         requestedModel: runInput.modelId,
-        captureLevel: observability.captureContent
+        captureLevel: observabilitySettings.captureContent
       });
       // 失败归因的阶段标记:流式开始前的失败才算 routing/context;stream 内失败
       // 的细粒度归因走 T49 的事件层,不在 catch 里猜。
       runPhase = "routing";
 
-      // T49:run-scoped recorder + observer 桥。runId 在 recorder、agent 在绑定,
-      // 没有隐式 current run(契约 3)。主 Agent 与前台子代理共用这个 recorder
-      // (UNIQUE(run_id, seq) 成立的理由);后台子代理另建自己 Run 的 recorder。
-      const recorder = createRunRecorder(
-        {
-          db: app.infra.db,
-          logger: app.log,
-          enabled: observability.enabled,
-          captureLevel: observability.captureContent
-        },
-        { runId, sessionId }
-      );
-      const observerBridge = createObserverBridge(recorder, {
+      // 本轮的事实打成一包交给 builder —— 它只接线,不决定顺序。
+      const runtimeScope: RunRuntimeScope = {
+        runId,
+        sessionId,
+        input: runInput,
+        approvals: approvalChannel,
+        captureLevel: observabilitySettings.captureContent,
+        observabilityEnabled: observabilitySettings.enabled,
+        abortSignal: controller.signal,
+        emit
+      };
+      const observability = builder.createObservability(runtimeScope, {
         onFailureLayer: (layer) => {
           failureLayerRef.current = layer;
         }
       });
-      // Pino 是第二订阅者:ledger 写挂了 Pino 照常,反之亦然。
-      const observer = fanout(observerBridge.forAgent("main"), app.infra.observer);
+      const { recorder } = observability;
 
       recorder.record({
         agent: "main",
@@ -132,94 +128,9 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       // 可能在 messageRecorder 建好之前就来 attach —— 那时 run_start 不能给空 sessionId。
       hub.bind({ sessionId, snapshot: () => undefined });
 
-      // MCP 连接在这里懒触发(首个 run 付一次成本,之后是空调用)。连不上的 server
-      // 只在 registry 里记 error,工具缺席即可 —— MCP 不可用绝不让对话失败。
-      await app.services.mcp.ensureConnected();
+      // 阶段②:这轮 agent 能用什么 —— skill / 记忆 / plan gate / MCP / plan weave / 模型。
+      const { resolved, skillSelection } = await builder.buildAgent(runtimeScope, observability);
 
-      // 模型在阶段①就定好了(send = body.modelId,retry = body 或会话记录),
-      // 这里直接用 —— 没有兜底链,拿不到模型在 prepareRunInput 里就已经报错。
-      //
-      // memoryFilesSection 不依赖模型也不依赖工作区(~/.eva 全局),但它要喂给
-      // resolve(agent 的 prompt section),而 prepareRunContext 又吃 resolved.mainModel
-      // 的窗口信息 —— 所以 section 在 resolve 之前备好,别和模型相关准备混在一起。
-      const memoryFilesSection = await loadMemoryFilesSection(evaDataDir(), todayString());
-
-      // T44:skill auto-selection 在装 agent 前完成 —— 它决定 prompt 列哪些
-      // metadata,也决定本轮显式 activeToolNames(always ∪ thread 累积 ∪ 新选)。
-      const skillSelection = await selectRunSkills({
-        db: app.infra.db,
-        skills: app.infra.skills,
-        agents: app.services.agents,
-        sessionId,
-        modelId: runInput.modelId,
-        humanText: runInput.humanText
-      });
-      recorder.record({
-        agent: "main",
-        kind: "skills_selected",
-        payload: {
-          selected: skillSelection.selectedSkills.map((skill) => skill.name),
-          usedFallback: skillSelection.usedFallback
-        }
-      });
-
-      // T45a:绑了 workspace 才装 plan gate。state 初值来自 DB 里该 session 的 active plan,
-      // 之后由 enter/exit 工具在同一份引用上改 —— 不是 build 期快照。
-      let planGate:
-        | {
-            state: PlanGateState;
-            store: ReturnType<typeof createPlanGateStore>;
-            requestPlanReview: RequestPlanReview;
-          }
-        | undefined;
-      if (runInput.workspace) {
-        const activePlan = new DrizzlePlanRepository(app.infra.db).findActive(sessionId);
-        const planGateState = createPlanGateState(
-          activePlan
-            ? {
-                active: true,
-                planId: activePlan.id,
-                planPath: activePlan.path,
-                planRelPath: planGateRelPath(activePlan.id)
-              }
-            : { active: false }
-        );
-        // 同一个引用交给两边:agent 的 enter/exit 工具在上面改,审批通道读它判「plan 文件写直放」。
-        approvalChannel.bindPlanGate(planGateState);
-        planGate = {
-          state: planGateState,
-          store: createPlanGateStore({
-            db: app.infra.db,
-            sessionId,
-            workspace: runInput.workspace
-          }),
-          requestPlanReview: approvalChannel.requestPlanReview
-        };
-      }
-
-      const resolved = app.services.agents.build({
-        modelId: runInput.modelId,
-        observer,
-        extraTools: [
-          ...app.services.mcp.listTools(),
-          // T46:plan weave 工具与 fs 工具同一个注入条件 —— 无 workspace 则无 plan_*。
-          // gateway 把 workspaceId/runId 绑死在 server 侧,工具入参不带任何路径(契约 8)。
-          ...(runInput.workspace
-            ? createPlanWeaveTools(
-                createPlanWeaveGateway(
-                  app.services.planWeave,
-                  runInput.workspace.id,
-                  runId
-                )
-              )
-            : [])
-        ],
-        requestApproval: approvalChannel.requestApproval,
-        selectedSkills: skillSelection.selectedSkills,
-        ...defined("workspace", runInput.workspace),
-        ...defined("planGate", planGate),
-        ...defined("memoryFilesSection", memoryFilesSection)
-      });
       // T48:路由结果回填 —— 从这一刻起 requested/resolved 都有值。
       app.services.runLedger.patchRouting(
         runId,
@@ -247,65 +158,9 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       void hub.attach(stream, { replay: false });
       emit({ type: "run_start", runId, sessionId });
 
-      // 阶段④:S7 子代理运行时 —— subagent 基元注入主 agent,回报走 push(无 join 工具)。
-      // sink 做两件事:① emit 推 SSE(前端子代理卡片拿流式过程);② recorder 攒
-      // 事件,子代理 finish 时落库(parentToolCallId 隔离卖力,见 subagent-recorder)。
-      // abortSignal 传给后台子代理:T15 §2.7 —— 用户点停止,子代理一起停,不留孤儿。
-      const subagentRunner = new SubagentRunner(
-        app.services.agents,
-        {
-          sessionId,
-          db: app.infra.db,
-          runId,
-          model: resolved.mainModel.qualifiedModelId,
-          captureLevel: observability.captureContent,
-          observer: app.infra.observer,
-          // T49:前台子代理绑父 Run 的 bridge(agent=taskId,seq 与主 Agent 同序列);
-          // 后台子代理有自己 Run 的 recorder(T48 §2.3),seq 从 0 重新计。
-          observerForTask: (taskId) =>
-            fanout(observerBridge.forAgent(taskId), app.infra.observer),
-          createChildObserver: (childRunId, taskId) =>
-            fanout(
-              createObserverBridge(
-                createRunRecorder(
-                  {
-                    db: app.infra.db,
-                    logger: app.log,
-                    enabled: observability.enabled,
-                    captureLevel: observability.captureContent
-                  },
-                  { runId: childRunId, sessionId }
-                )
-              ).forAgent(taskId),
-              app.infra.observer
-            ),
-          ...(runInput.workspace !== undefined ? { workspace: runInput.workspace } : {}),
-          extraTools: app.services.mcp.listTools(),
-          abortSignal: controller.signal,
-          requestApproval: approvalChannel.subagentRequestApproval,
-          onSubagentEvent: (event) => {
-            emit({ type: "subagent_update", ...event });
-          },
-          onNotice: (notice) => {
-            reportGateway?.push(notice);
-            // 卡片要能即时显示"已回报",不必等主 loop 注入。
-            if (notice.kind === "reported") {
-              emit({
-                type: "subagent_report",
-                taskId: notice.taskId,
-                parentToolCallId: notice.parentToolCallId,
-                description: notice.description,
-                output: notice.output ?? ""
-              });
-            }
-          }
-        }
-      );
-
-      reportGateway = new ReportGateway(() => subagentRunner.hasLiveTasks());
-      const subagentTools = createSubagentTool({
-        runFork: subagentRunner.runFork
-      });
+      // 阶段④:子代理运行时。必须在 stream.open() 之后 —— 子代理的 SSE 帧要有连接可推。
+      const subagents = builder.buildSubagents(runtimeScope, resolved, observability.bridge);
+      reportGateway = subagents.reportGateway;
 
       // 断连只是少了一个观众:run 继续跑,pending 审批继续等人。
       // 想真的停下来只有一条路:POST /runs/:runId/abort。
@@ -330,8 +185,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       for await (const event of resolved.agent.stream({
         messages: runContext.modelMessages,
         abortSignal: controller.signal,
-        drainNotices: (opts) => reportGateway!.drain(opts),
-        additionalTools: [...runContext.additionalTools, ...subagentTools],
+        drainNotices: (opts) => subagents.reportGateway.drain(opts),
+        additionalTools: [...runContext.additionalTools, ...subagents.tools],
         // T44:skill allowed-tools 只作 preferred —— <=40 全集本来就可用,>40 并入首步 active。
         preferredToolNames: skillSelection.preferredToolNames,
         ...(runContext.context !== undefined ? { context: runContext.context } : {})
