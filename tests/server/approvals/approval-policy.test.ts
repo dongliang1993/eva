@@ -18,6 +18,12 @@ const config = { LOG_LEVEL: "info", PORT: 8082, HOST: "127.0.0.1", DB_PATH: "" }
  * 放行链序:T14 白名单 → policy 短路 → ask(弹卡片)。短路命中 = 不发 approval_request、
  * 不进 pending Map、台账照记 granted + reason=policy:<key>。
  */
+/** 放行链的源码 —— 两条「钉接线」的测试共用,读一次就够。 */
+const approvalChannelSource = readFileSync(
+  new URL("../../../apps/server/src/services/runs/run-approval-channel.ts", import.meta.url),
+  "utf8"
+);
+
 describe("T28 policy 短路", () => {
   let db: AppDatabase;
 
@@ -112,18 +118,38 @@ describe("T28 policy 短路", () => {
     expect(store.match("bash", "s-1", { command: "pnpm build" })).toBe("bash:thread:s-1:all");
   });
 
-  it("runs.ts 的短路在 emit approval_request 之前(钉接线,防回归)", () => {
+  it("policy 短路在 emit approval_request 之前(钉接线,防回归)", () => {
     // 短路放进 ask() 内部会让「没问过人」的卡片在前端闪一帧(T28 §1.2)。
-    // 这里直接钉 runs.ts 的源码形态:match 必须出现在 approval_request 帧之前。
-    const source = readFileSync(
-      new URL("../../../apps/server/src/routes/runs.ts", import.meta.url),
-      "utf8"
-    );
-    const matchAt = source.indexOf("approvalPolicies.match(");
-    const emitAt = source.indexOf('type: "approval_request"');
+    // 这里直接钉源码形态:match 必须出现在 approval_request 帧之前。
+    //
+    // Wave 1 起放行链搬到 run-approval-channel.ts(原先在 routes/runs.ts)。
+    const matchAt = approvalChannelSource.indexOf("approvalPolicies.match(");
+    const emitAt = approvalChannelSource.indexOf('type: "approval_request"');
     expect(matchAt).toBeGreaterThan(-1);
     expect(emitAt).toBeGreaterThan(-1);
     expect(matchAt).toBeLessThan(emitAt);
+  });
+
+  it("四级放行链的顺序是 bash只读 → plan文件 → policy → 弹窗(§7.2)", () => {
+    // 这四级的**顺序本身**是产品行为,不是实现细节。举一个具体的错法:把 policy
+    // 提到 plan 文件之前,用户点过一次「始终允许 write」之后,plan 文件写会记在
+    // write:thread:<id>:all 这个 key 上 —— 该会话此后所有写全免弹窗,而不只是 plan 文件。
+    //
+    // Wave 1 把四级收进同一个文件,顺序第一次变得可以一眼验证 —— 于是把它钉下来。
+    const at = (needle: string): number => {
+      const index = approvalChannelSource.indexOf(needle);
+      expect(index, `找不到放行链的这一级: ${needle}`).toBeGreaterThan(-1);
+      return index;
+    };
+
+    const readonlyBash = at("isSafeReadOnlyCommand(");
+    const planFile = at("matchesPlanGatePath(");
+    const policy = at("approvalPolicies.match(");
+    const ask = at("approvals.ask(");
+
+    expect(readonlyBash).toBeLessThan(planFile);
+    expect(planFile).toBeLessThan(policy);
+    expect(policy).toBeLessThan(ask);
   });
 });
 

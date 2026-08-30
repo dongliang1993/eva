@@ -112,16 +112,22 @@ describe("T30 决策回写消息 part", () => {
     expect(toolPart.toolMetadata?.approvalDecision).toBeUndefined();
   });
 
-  it("runs.ts 的 approval_resolved 帧带 decision 且与台账同源(RED-2,钉接线)", () => {
+  it("approval_resolved 帧带 decision 且与台账同源(RED-2,钉接线)", () => {
     // 摘掉 decision payload 或换成「拍脑袋 new Date()」都会让前端定格态与台账漂移。
     // 钉死两件事:① 帧里查的是 approvals.getRequest(台账),不是现造时间;
     // ② decision 字段真实存在于 emit payload。
+    //
+    // Wave 1 起接线搬到 run-approval-channel.ts(原先在 routes/runs.ts)。断言本身没动,
+    // 只换了读哪个文件 —— 这条钉的是接线形态,接线搬家它就得跟着搬。
     const source = readFileSync(
-      new URL("../../../apps/server/src/routes/runs.ts", import.meta.url),
+      new URL(
+        "../../../apps/server/src/services/runs/run-approval-channel.ts",
+        import.meta.url
+      ),
       "utf8"
     );
     const resolvedFrame = source.slice(source.indexOf('type: "approval_resolved"'));
-    expect(resolvedFrame).toContain("decision: lookupApprovalDecision(toolCallId)");
-    expect(source).toContain("app.services.approvals.getRequest(callId)");
+    expect(resolvedFrame).toContain("decision: this.lookupApprovalDecision(toolCallId)");
+    expect(source).toContain("approvals.getRequest(callId)");
   });
 });

@@ -1,18 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  classifyToolRisk,
   createPlanGateState,
   createPlanWeaveTools,
   createSubagentTool,
-  isSafeReadOnlyCommand,
-  matchesPlanGatePath,
   type PlanGateState,
-  type RequestApproval,
   type RequestPlanReview
 } from "@eva/harness";
 import type { FastifyInstance } from "fastify";
-import type { ApprovalDecision, PlanReviewDecision, RunStreamEvent } from "@eva/shared";
+import type { RunStreamEvent } from "@eva/shared";
 import { toErrorMessage } from "@eva/shared";
 
 import { AgentUnavailableError, defined } from "../services/agent-factory.js";
@@ -22,6 +18,7 @@ import { createPlanWeaveGateway } from "../services/plan-weave/index.js";
 import { evaDataDir } from "../paths.js";
 import { loadMemoryFilesSection, todayString } from "../services/memory/index.js";
 import { AssistantMessageRecorder } from "../services/runs/assistant-message-recorder.js";
+import { RunApprovalChannel } from "../services/runs/run-approval-channel.js";
 import {
   prepareRunInput,
   prepareRunContext,
@@ -55,8 +52,6 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     // T49:run_failed / max-steps 事件带的失败层(agent.ts 发出,observer 桥回填),
     // settle/fail 时写进 runs。声明在 try 外,catch 才能读到。
     const failureLayerRef: { current?: RunFailureLayer } = {};
-    // T45a:plan gate 的 run-scoped 状态。requestApproval 闭包与 agent 共用同一引用。
-    let planGateState: PlanGateState | undefined;
     // 回报网关与 run 同寿:主 loop 收尾前 drain 一次,把后台子代理刚交付的结论
     // 注入本轮对话(S7 push)。声明在 try 外,finally 才能 dispose。
     let reportGateway: ReportGateway | undefined;
@@ -71,145 +66,22 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       workspaces: app.services.workspaces
     };
 
-    // T30:审批决策的唯一查询口 —— finish 落库回写与 approval_resolved 帧共用。
-    // 事实源是 approval_requests 行,不是 SSE 事件(§坑 3:回放路径不带 decision)。
-    const lookupApprovalDecision = (callId: string): ApprovalDecision | undefined => {
-      const row = app.services.approvals.getRequest(callId);
-      if (!row || (row.status !== "granted" && row.status !== "denied") || !row.decidedAt) {
-        return undefined;
-      }
-      return { action: row.status, decidedAt: row.decidedAt };
-    };
-
-    // T45b:plan review 定格/刷新重建的事实源 —— approval_requests.kind + decision JSON。
-    const lookupPlanReviewDecision = (callId: string): PlanReviewDecision | undefined => {
-      const row = app.services.approvals.getRequest(callId);
-      if (!row || row.kind !== "plan_review" || !row.decidedAt || !row.decision) {
-        return undefined;
-      }
-      try {
-        return JSON.parse(row.decision) as PlanReviewDecision;
-      } catch {
-        return undefined;
-      }
-    };
-
-    const requestApproval: RequestApproval = async ({ toolCallId, toolName, args }) => {
-      // T29:bash 只读命令直放落台账。harness 的 withApproval 已短路(requestApproval
-      // 根本不被调),所以「没弹窗但执行了」要在这里补一笔 —— 与 harness 共用同一个
-      // isSafeReadOnlyCommand,判定不漂移(r7 §3 契约 2)。
-      if (
-        toolName === "bash" &&
-        isSafeReadOnlyCommand(String((args as Record<string, unknown>)?.command ?? ""))
-      ) {
-        app.services.approvals.autoApprove(
-          toolCallId,
-          { runId, sessionId, tool: toolName, args },
-          "readonly-safe"
-        );
-        return true;
-      }
-
-      // T45a:plan 文件写免弹窗。判定与 withPlanGate 共用 matchesPlanGatePath 和同一份
-      // planGateState —— planPath 单一事实源,不各自解析。漏掉这条的后果:用户被弹烦了点
-      // 「始终允许」,write 的 policy key 是 write:thread:<id>:all,该会话此后所有写全免。
-      const planSnap = planGateState?.current();
-      if (
-        planSnap?.active === true &&
-        (toolName === "write" || toolName === "edit") &&
-        typeof (args as Record<string, unknown>)?.path === "string" &&
-        matchesPlanGatePath((args as Record<string, unknown>).path as string, planSnap)
-      ) {
-        app.services.approvals.autoApprove(
-          toolCallId,
-          { runId, sessionId, tool: toolName, args },
-          "plan-file"
-        );
-        return true;
-      }
-
-      const risk = classifyToolRisk(toolName, args);
-
-      // T28:policy 记忆短路(Alma 放行链第 2 级)。必须在 emit approval_request 之前 ——
-      // 放进 ask 内部会让「没问过人」的卡片在前端闪一帧。命中 = 台账 granted + 直放。
-      const policyHit = app.services.approvalPolicies.match(toolName, sessionId, args);
-      if (policyHit) {
-        app.services.approvals.autoApprove(
-          toolCallId,
-          { runId, sessionId, tool: toolName, args },
-          `policy:${policyHit}`
-        );
-        return true;
-      }
-
-      emit({ type: "approval_request", callId: toolCallId, toolName, args, risk });
-      const approved = await app.services.approvals.ask(toolCallId, {
-        runId,
-        sessionId,
-        tool: toolName,
-        args
-      });
-      // T30:ask 返回时行已 decided —— 从台账查回 decision 附进帧,前端定格态用。
-      emit({
-        type: "approval_resolved",
-        callId: toolCallId,
-        approved,
-        decision: lookupApprovalDecision(toolCallId) ?? {
-          action: approved ? "granted" : "denied",
-          decidedAt: new Date().toISOString()
-        }
-      });
-
-      return approved;
-    };
-
-    // 子代理分支(T17,docs 04 §8.6.1):后台子代理没人能点弹窗 —— 进闸门、
-    // 自动通过、落台账。不发 approval_request:后台的 SSE 帧混进主流会让前端
-    // 冒出 runId 相同但 toolCallId 陌生的审批卡片。
-    const subagentRequestApproval: RequestApproval = async ({ toolCallId, toolName, args }) =>
-      app.services.approvals.autoApprove(toolCallId, {
-        runId,
-        sessionId,
-        tool: toolName,
-        args
-      });
-
-    // T45b:exit_plan_mode 的平行审批通道。普通工具的 RequestApproval boolean 链路不动。
-    const requestPlanReview: RequestPlanReview = async ({
-      toolCallId,
-      planId,
-      planPath,
-      content,
-      revision,
-      options
-    }) => {
-      emit({
-        type: "plan_review_request",
-        callId: toolCallId,
-        planId,
-        planPath,
-        planMarkdown: content,
-        ...(options !== undefined ? { options } : {}),
-        revision
-      });
-
-      const decision = await app.services.approvals.askPlanReview(toolCallId, {
-        runId,
-        sessionId,
-        tool: "exit_plan_mode",
-        args: { planId, planPath, revision, ...(options !== undefined ? { options } : {}) }
-      });
-
-      emit({ type: "plan_review_resolved", callId: toolCallId, decision });
-      return decision;
-    };
-
     try {
       const body = runRequestSchema.parse(request.body ?? {});
 
       // 阶段①:会话/工作区先落 —— agent 的工具集依赖工作区,工作区来自会话。
       runInput = await prepareRunInput(preparationDependencies, body, runId);
       sessionId = runInput.sessionId;
+
+      // 审批闸门:四级放行链、子代理自动通过、plan review 平行通道都在里面。
+      // 建在阶段①之后 —— 它要 sessionId(policy key 与台账归属都按会话算)。
+      const approvalChannel = new RunApprovalChannel({
+        approvals: app.services.approvals,
+        approvalPolicies: app.services.approvalPolicies,
+        runId,
+        sessionId,
+        emit
+      });
 
       // T48:Run 提前到模型解析前创建 —— provider/模型/skill 解析失败也要有台账行
       // (failure_layer=routing);模型成功后 patchRouting 补实际模型。
@@ -302,7 +174,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         | undefined;
       if (runInput.workspace) {
         const activePlan = new DrizzlePlanRepository(app.infra.db).findActive(sessionId);
-        planGateState = createPlanGateState(
+        const planGateState = createPlanGateState(
           activePlan
             ? {
                 active: true,
@@ -312,6 +184,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
               }
             : { active: false }
         );
+        // 同一个引用交给两边:agent 的 enter/exit 工具在上面改,审批通道读它判「plan 文件写直放」。
+        approvalChannel.bindPlanGate(planGateState);
         planGate = {
           state: planGateState,
           store: createPlanGateStore({
@@ -319,7 +193,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
             sessionId,
             workspace: runInput.workspace
           }),
-          requestPlanReview
+          requestPlanReview: approvalChannel.requestPlanReview
         };
       }
 
@@ -340,7 +214,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
               )
             : [])
         ],
-        requestApproval,
+        requestApproval: approvalChannel.requestApproval,
         selectedSkills: skillSelection.selectedSkills,
         ...defined("workspace", runInput.workspace),
         ...defined("planGate", planGate),
@@ -408,7 +282,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
           ...(runInput.workspace !== undefined ? { workspace: runInput.workspace } : {}),
           extraTools: app.services.mcp.listTools(),
           abortSignal: controller.signal,
-          requestApproval: subagentRequestApproval,
+          requestApproval: approvalChannel.subagentRequestApproval,
           onSubagentEvent: (event) => {
             emit({ type: "subagent_update", ...event });
           },
@@ -445,8 +319,8 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         runId,
         model: resolved.mainModel.qualifiedModelId,
         initialPosition: runInput.assistantPosition,
-        lookupDecision: lookupApprovalDecision,
-        lookupPlanReviewDecision
+        lookupDecision: approvalChannel.lookupApprovalDecision,
+        lookupPlanReviewDecision: approvalChannel.lookupPlanReviewDecision
       });
 
       // 补上快照来源(sessionId 在阶段①就绑过了)。builder 在 notice-injected 边界会
