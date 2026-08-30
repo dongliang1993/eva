@@ -544,7 +544,11 @@ modules/runs/
 
 ### 5.0 今天的主链长什么样（先看现状，再看目标）
 
-「发送一条消息」这条主链目前要跨 **7 个文件**才能读完，按真实调用顺序：
+> **本节的「现状」表已被 Wave 1 推翻（2026-08-30）。** 下表描述的是 Wave 1 之前的形态，
+> 保留它是因为后面「问题全部集中在第 1 个」那段分析是整个 §7.2 的出发点。
+> Wave 1 之后的实际形态见本节末尾的落地表。
+
+「发送一条消息」这条主链在 Wave 1 之前要跨 **7 个文件**才能读完，按真实调用顺序：
 
 | # | 文件 | 它在这条链上干什么 |
 |---|---|---|
@@ -569,6 +573,35 @@ modules/runs/
 | 3 | `modules/runs/run-runtime-builder.ts` | 显式装配 Skill / Memory / Plan / MCP / Subagent |
 | 4 | `packages/harness/.../agent.ts` | 只剩 façade 与主循环骨架 |
 | 5 | `modules/runs/run-finalizer.ts` | settle / fail / rollback / end / cleanup 的唯一出口 |
+
+#### Wave 1 落地后的实际形态（2026-08-30）
+
+拆分已完成，但**落点不是 `modules/runs/`** —— 新文件先落在 `services/runs/`，
+`modules/` 的目录搬迁是 Wave 4 的事（§12.0 规约 2：纯移动 commit 与逻辑 commit 分开）。
+`routes/runs.ts` 从 575 行降到 101 行：
+
+| 文件 | 行数 | 它在这条链上干什么 |
+|---|---|---|
+| `routes/runs.ts` | 101 | 三条端点；SSE 连接；`RunOutcome` → 409 / 503 / 400；注册表 404 语义。**没有业务顺序** |
+| `services/runs/run-coordinator.ts` | 351 | 五阶段顺序 + 13 行流式循环 + 内联 `RunScope`。**只有顺序**，没有装配也没有终态 |
+| `services/runs/run-runtime-builder.ts` | 300 | 「这轮 agent 能用什么」：skill / 记忆 / plan gate / MCP / plan weave / 子代理 / 观测三件套 |
+| `services/runs/run-approval-channel.ts` | 195 | 四级放行链 + 子代理自动通过 + plan review 平行通道 + 两个 `lookup*Decision` |
+| `services/runs/run-finalizer.ts` | 124 | 终态的唯一出口：`settle` / `fail` / `closeWithError`，外加 `release` |
+
+**主链在 5 个文件内读完**（退出条件的原文）：`run-routes` → `run-coordinator` →
+`run-runtime-builder` → `agent.ts` → `run-finalizer`。`run-preparation` / `run-ledger` /
+`run-hub` / `assistant-message-recorder` 仍在链上，但它们是被调用的能力，不是要按顺序读的编排。
+
+两处与本节目标表的偏差，都记在这里免得下一个人以为是漏做：
+
+1. **`RunScope` 有 `dispose` 吗？没有。** §7.2 的 P2 动作 8 提到「为 `RunScope.dispose`
+   添加幂等测试」，但落地时资源释放归了 `RunFinalizer.release()`。让 `RunScope` 也有一个
+   `dispose` 会立刻制造第二条清理路径 —— 而这一整节存在的理由就是「终态只有一个出口」。
+   要补的幂等测试应该针对 `release()`。
+2. **schema parse 在 coordinator，不在 route。** 原因是 `runRegistry.register(runId)`
+   发生在看 body **之前**，所以校验失败也必须走同一套 `finally` 清理。把 parse 提到 route
+   会留下一个没人 `unregister` 的 runId。想把它挪回 route，得先把 `register` 推到 parse 之后 ——
+   那是行为改变（畸形 body 不再短暂占用一个 runId），本轮不做。
 
 ### 5.1 目标主链
 
