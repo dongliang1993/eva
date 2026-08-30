@@ -334,6 +334,12 @@ Route 禁止：
 不要为每个只有一个实现的纯业务类创建 `IXxxService`。接口的价值是隔离变化、支持替换和测试，
 不是提高抽象数量。
 
+**但要区分「Port」与「能力收窄接口」—— 后者不受本条约束。** 为同一个实现声明多个受限视图
+（`RunOpeningLedger` / `RunSettlingLedger`、`SessionReader` / `SessionWriter`）
+不是为了替换实现，而是为了让调用方**拿不到它不该有的方法**，把不变量交给编译器而不是 Review。
+判别方法：**Port 的两侧是不同实现；能力收窄的两侧是同一实现的方法子集。**
+后者鼓励使用 —— 它是本方案里最便宜的一种强制手段：零新增工具、编译期生效。
+
 ### C7：控制流用直接调用，旁路投影用事件
 
 必须立刻成功、失败会改变主流程的行为使用显式调用：
@@ -787,9 +793,49 @@ modules/runs/
 - **`RunScope` 不单独成文件。** 它约 50 行、只有 coordinator 一个使用者，写在
   `run-coordinator.ts` 里与使用者同处。涨过 80 行或出现第二个使用者时再拆。
 
-**`run-finalizer.ts` 保留独立文件，理由不是行数而是它能被脚本守住**：定一条规则
-「只有 `run-finalizer.ts` 可以 import `run-ledger` 的 `settle` / `fail`」，
-就再没人能在某个 `catch` 里偷偷开第二个终态出口。放进 coordinator，这条规则无法表达。
+**`run-finalizer.ts` 保留独立文件（已决，2026-08-30）。** 理由不是行数（只约 70 行），
+而是「Run 的终态只有一个出口」这条不变量需要一个物理落点 —— 放进 coordinator，
+下一个人就会在某个 `catch` 里直接写 `runLedger.fail(...)`，开出第二个终态出口。
+
+#### 怎么守住这条不变量：用编译器，不用 lint
+
+现状实测：`settle` / `fail` 今天只有 `routes/runs.ts` 两处调用（473、500 行）；
+`start` / `patchRouting` 也只在同一个文件。Wave 1 之后的期望归属是
+**`start` / `patchRouting` → coordinator（Open 阶段），`settle` / `fail` → finalizer**。
+
+用 lint 守这件事是弱的：§10.0 的脚本只扫 import，扫不出「import 了 `RunLedger` 之后调了
+`.settle()`」；改成扫 `.settle(` 这种符号级文本匹配，别人把变量名从 `runLedger` 改成 `ledger`
+就漏了。**把 `RunLedger` 的类型按能力切两半，让 TypeScript 直接拒绝**：
+
+```ts
+// modules/runs/run-ledger.ts
+/** Open 阶段能做的:建行、回填路由。 */
+export interface RunOpeningLedger {
+  start(input: StartRunOptions): void;
+  patchRouting(runId: string, requested: string, resolved: string): void;
+}
+
+/** 终态。只有 RunFinalizer 拿得到这个类型。 */
+export interface RunSettlingLedger {
+  settle(runId: string, options: SettleRunOptions): void;
+  fail(runId: string, error: string, options?: { failureLayer?: RunFailureLayer }): void;
+}
+
+export class RunLedger implements RunOpeningLedger, RunSettlingLedger { /* 不变 */ }
+```
+
+- `RunCoordinator` 的构造参数声明为 `RunOpeningLedger` —— 它**看不见** `settle` / `fail`；
+- `RunFinalizer` 的构造参数声明为 `RunSettlingLedger`；
+- 组合根注入同一个 `RunLedger` 实例（C8），两个窄类型只是它的两个视图。
+
+这样不需要新增任何工具，编译期就拦住了，而且比 lint 更早、更准。唯一的漏洞是
+「有人在 coordinator 里直接 import `RunLedger` 具体类」—— 这恰好是一条**纯 import 规则**，
+§10.0 的脚本天生擅长：`只有组合根与 run-finalizer.ts 可以 import RunLedger 具体类`。
+
+> **这不是 Port，不要拿 C6 反驳它。** C6 禁止的是「为只有一个实现的类造 `IXxxService`
+> 以便将来替换」。这里两个接口不是为了替换，而是**能力收窄**：同一个实现的两个受限视图，
+> 目的是让调用方拿不到它不该有的方法。§7.3 提出的 `SessionReader` / `SessionWriter`
+> 是同一个模式。判别方法很简单：Port 的两侧是**不同实现**，能力收窄的两侧是**同一实现的子集**。
 
 #### 改造动作
 
@@ -834,7 +880,7 @@ Usage、Compact、Search 作为独立模块通过 Session Query API 读取，不
 1. **P1**：把 Thread Route 拆成命令用例和查询用例，不按 HTTP 端点堆在一个文件；
 2. **P1**：将 active leaf、retry、version branch 不变量集中到 Message Tree 领域代码；
 3. **P1**：禁止 Run Preparation 自行创建 Session/Message Repository，改依赖 Session API；
-4. **P2**：定义 `SessionReader` 与 `SessionWriter`，Query 不获得写能力；
+4. **P2**：定义 `SessionReader` 与 `SessionWriter`，Query 不获得写能力 —— 这是 C6 说的「能力收窄接口」而非 Port（同一实现的两个方法子集），与 `RunOpeningLedger` / `RunSettlingLedger` 同一个模式，鼓励使用；
 5. **P2**：将 `session-status.ts` 保持为纯投影并补状态优先级测试；
 6. **P2**：为 Message JSON、search text、branch metadata 明确事实与派生关系；
 7. **P3**：根据查询量考虑独立 `ThreadViewRepository`，但不让它成为第二份写模型。
@@ -1928,7 +1974,10 @@ request
    `end` 帧 + `cancelByRun`。开始碰 `catch`/`finally`，靠 Wave 0 的测试兜底；
 4. 把剩下的 220 行劈成 `run-coordinator.ts`（五阶段骨架 + 13 行流式循环 + 内联 `RunScope`）与
    `run-routes.ts`（schema / SSE / 409 SessionBusy、503 AgentUnavailable、400 其他）;
-5. 加 lint 规则：只有 `run-finalizer.ts` 能 import `run-ledger` 的 `settle` / `fail`。
+5. 按能力把 `RunLedger` 切成 `RunOpeningLedger` / `RunSettlingLedger` 两个窄接口
+   （§7.2「怎么守住这条不变量」），coordinator 拿前者、finalizer 拿后者，
+   由编译器保证终态唯一出口；再加一条纯 import 规则兜底：
+   只有组合根与 `run-finalizer.ts` 可以 import `RunLedger` 具体类。
 
 **不提取 `run-executor.ts`（13 行 for-loop）、不提取 `run-opener.ts`（`prepareRunInput` 改名）、
 `RunScope` 不单独成文件** —— 理由见 §7.2。
