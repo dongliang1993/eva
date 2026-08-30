@@ -12,6 +12,7 @@ import {
   type AppDatabase
 } from "../apps/server/src/db/index.js";
 import { DrizzleRunRepository, runStatusFor } from "../apps/server/src/db/repositories/run-repository.js";
+import { runs } from "../apps/server/src/db/schema.js";
 import { ApprovalRepository } from "../apps/server/src/db/repositories/approval-repository.js";
 import { DrizzleMessageRepository } from "../apps/server/src/db/repositories/message-repository.js";
 import { DrizzleSessionRepository } from "../apps/server/src/db/repositories/session-repository.js";
@@ -135,6 +136,37 @@ const streamRun = async (body: unknown): Promise<{ events: Array<{ type: string;
 
 const runsRepo = (): DrizzleRunRepository => new DrizzleRunRepository(db);
 
+/**
+ * 换一台「装不出 agent」的 app —— 模拟新装用户没配 provider。
+ * 两个 503 用例共用:一个测已有会话(台账留下),一个测新建会话(回滚删掉)。
+ */
+const startAppWithUnavailableAgent = async (): Promise<void> => {
+  await app.close();
+  app = Fastify();
+  app.decorate("infra", {
+    config: loadConfig({ env: {}, cwd: "/tmp" }),
+    db,
+    skills: []
+  });
+  app.decorate("services", {
+    agents: {
+      build: () => {
+        throw new AgentUnavailableError("no provider configured");
+      }
+    },
+    session: new SessionService(
+      new DrizzleSessionRepository(db),
+      new DrizzleMessageRepository(db)
+    ),
+    approvals: new ApprovalGateway(new ApprovalRepository(db)),
+    runLedger: new RunLedger(new DrizzleRunRepository(db)),
+    runRegistry: new RunRegistry(),
+    mcp: { ensureConnected: async () => {}, listTools: () => [] }
+  });
+  registerRunRoutes(app);
+  await app.ready();
+};
+
 describe("run 台账", () => {
   it("正常完成 → runs 一行 completed,带 assistant_message_id 与路由双字段", async () => {
     const { events } = await streamRun({ text: "hi", modelId: "openai:test" });
@@ -164,30 +196,7 @@ describe("run 台账", () => {
   });
 
   it("T48:模型解析失败 → run 行 status=error、failure_layer=routing、requested_model 有值 model 为空", async () => {
-    await app.close();
-    app = Fastify();
-    app.decorate("infra", {
-      config: loadConfig({ env: {}, cwd: "/tmp" }),
-      db,
-      skills: []
-    });
-    app.decorate("services", {
-      agents: {
-        build: () => {
-          throw new AgentUnavailableError("no provider configured");
-        }
-      },
-      session: new SessionService(
-        new DrizzleSessionRepository(db),
-        new DrizzleMessageRepository(db)
-      ),
-      approvals: new ApprovalGateway(new ApprovalRepository(db)),
-      runLedger: new RunLedger(new DrizzleRunRepository(db)),
-      runRegistry: new RunRegistry(),
-      mcp: { ensureConnected: async () => {}, listTools: () => [] }
-    });
-    registerRunRoutes(app);
-    await app.ready();
+    await startAppWithUnavailableAgent();
 
     // 已有会话:503 回滚只删本次请求新建的会话(产品决策),老会话的台账要留下。
     new DrizzleSessionRepository(db).create({ id: "s-existing" });
@@ -200,6 +209,26 @@ describe("run 台账", () => {
     expect(run!.failureLayer).toBe("routing");
     expect(run!.requestedModel).toBe("openai:missing");
     expect(run!.model).toBeNull();
+  });
+
+  it("T48 回滚:模型不可用且会话是本次请求新建的 → 503 且不留下空会话", async () => {
+    await startAppWithUnavailableAgent();
+
+    const sessionRepo = new DrizzleSessionRepository(db);
+    expect(sessionRepo.listAll(50)).toHaveLength(0);
+
+    // 新装用户没配 provider 就点发送:不带 sessionId,服务端会先建会话再解析模型。
+    const { status } = await streamRun({ text: "hi", modelId: "openai:missing" });
+    expect(status).toBe(503);
+
+    // 产品决策(routes/runs.ts 的 AgentUnavailableError 分支):回滚只删本次新建的会话 ——
+    // 否则没配好 API key 的新装用户每点一次发送就攒一条空会话。
+    // 这条断言存在的意义:Wave 1 把收尾逻辑搬进 RunFinalizer 时,这个回滚极易被漏掉。
+    expect(sessionRepo.listAll(50)).toHaveLength(0);
+
+    // runs.session_id 是 ON DELETE CASCADE —— 会话没了,那条 routing 失败的台账行随之消失。
+    // 刻意如此:会话都不存在了,留一条指向它的 run 行只会让台账里出现悬空引用。
+    expect(db.select().from(runs).all()).toHaveLength(0);
   });
 
   it("模型报错 → status error,error 字段非空", async () => {
