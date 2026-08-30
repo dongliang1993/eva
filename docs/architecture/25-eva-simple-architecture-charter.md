@@ -1511,34 +1511,55 @@ docs/
 
 #### 目标职责
 
-测试目录结构镜像被测代码的模块结构，一眼能看出「谁测谁」。同时按 §11 的四类测试分层，
-让「快测试」和「要起 SQLite / Fastify 的慢测试」可以分开跑。
+测试目录结构**镜像被测代码的模块结构**，一眼能看出「谁测谁」：
+`tests/<area>/<module>/` 对应 `packages|apps/<area>/src/.../<module>/`。
+
+> **本节已于 Wave 0 落地（commit `2e48aa0`）**，且落地过程推翻了初稿的两条设计。
+> 下面写的是落地后的事实与撤回理由，不是待办。
 
 ```text
 tests/
-  helpers/
-  unit/                       # §11.1 纯规则:无 DB、无网络、无 Fastify
-    harness/
-    server/
-    web/
-  contract/                   # §11.2 Port 契约:同一套断言跑 in-memory 与 Drizzle 两种实现
-  usecase/                    # §11.3 应用用例:fake ports
-  lifecycle/                  # §11.4 生命周期集成:真实 SQLite + fake model
-  projection/                 # §11.5 前端投影
+  helpers/                    # 跨测试共用的桩与夹具
+  harness/{agent,tools,context,skills,subagents,models,approval}/
+  server/{runs,sessions,approvals,providers,settings,memory,compact,
+          workspaces,plan-gate,plan-weave,subagents,mcp,observability,
+          usage,skills,routes-smoke}/
+  web/{streaming,trajectory}/
+  shared/
+  desktop/
 ```
 
-#### 改造动作
+`plan-gate/` 与 `plan-weave/` 刻意是两个目录 —— 合成一个 `plans/` 会让读者把它们
+看成一个系统，正是 §7.10 警告的事。
 
-1. **P1**：整体 `git mv` 到上述结构，**只移动不改内容**，单独一个 commit，让 `git log --follow` 可用；
-   移动后 `pnpm test` 必须一次通过 —— 若不通过，说明有测试依赖了相对路径，那本身是要修的问题；
-2. **P1**：`vitest.config.ts` 增加 `unit` / `lifecycle` 两个 project 或 workspace 分组，
-   使「改一行纯函数」不必等 SQLite 用例；
-3. **P2**：每个模块目录下加一行 `README.md` 或在模块自身 README 的 `## Tests` 段落里指明测试位置，
-   双向可达；
-4. **P2**：约定「测试只能从被测模块的公开入口导入」，例外必须在文件头注释写明理由 ——
-   测试是边界的最后一个漏洞，堵不住它，§10 的规则会被测试大面积绕过；
-5. **P3**：给 `lifecycle/` 建立共享 fixture（建库、fake model、fake provider），
-   目前这部分逻辑在多个测试里各写一遍。
+#### 撤回的两条初稿设计（落地实测推翻）
+
+1. **不按「unit / contract / usecase / lifecycle / projection」分桶。**
+   实测 `contract/` 与 `usecase/` 成员为零：仓库里还没有双实现 Port 契约测试
+   （按修正后的 §11.2，数据库侧一律用真 SQLite，本来就不该有），也没有 fake-port
+   用例测试。为将来的测试类型预建空目录，是 §4.2 明令避免的「为了架构图好看，
+   实际阅读要穿过大量目录」。真出现这类测试时再建。
+2. **不做 vitest 速度分组。** 初稿的理由是「改一行纯函数不必等 SQLite 用例」——
+   实测这个问题在 Eva 上不存在：735 个用例跑完约 5 秒，耗时大头是 vite collect
+   （约 23 秒）而不是用例执行，in-memory SQLite 本来就快。按速度分桶买不到任何东西，
+   却会破坏「按模块镜像」这个真正有用的性质。
+
+这两条是一个通用教训，值得记在这里：**分桶维度要服务一个已被证实存在的问题。**
+「将来可能需要」与「听起来更规范」都不是理由。
+
+#### 剩余改造动作
+
+1. **P2**：在每个模块自身 README 的 `## Tests` 段落里指明测试位置，与 `tests/README.md`
+   构成双向可达（`tests/README.md` 已写好放置规则）；
+2. **P2**：约定「测试只能从被测模块的公开入口导入」，例外必须在文件头注释写明理由 ——
+   实测 35 个测试文件直接 `new DrizzleXxxRepository`。测试是边界的最后一个漏洞，
+   堵不住它，§10 的规则会被测试大面积绕过。这条随 Wave 4 各模块公开入口就位后逐个收；
+3. **P2**：把纯粹的「源码里不许出现 X」类守卫测试（`always-allow-retire`、
+   `duration-migration` 的零命中断言）搬进 `scripts/check-architecture.mjs` ——
+   那里才是架构规则的家。现有几个暂留，因为它们同时还断言了真实行为；
+4. **P3**：给 `server/runs/` 的生命周期测试建立共享 fixture（建库、fake model、
+   fake provider），目前这部分逻辑在多个测试里各写一遍
+   （Wave 0 已顺手抽了 `startAppWithUnavailableAgent()` 一个）。
 
 ### 7.23 构建产物与陈旧代码副本
 
