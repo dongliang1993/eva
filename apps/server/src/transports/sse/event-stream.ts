@@ -29,6 +29,16 @@ export class RunEventStream {
   constructor(private readonly reply: FastifyReply) {}
 
   open(): void {
+    // 告诉 Fastify「这条响应由我接管」——必须在 writeHead 之前。
+    //
+    // 不 hijack 的后果(实测):我们直接在 reply.raw 上写了头,handler 返回时 Fastify
+    // 仍会走 reply.send() 发响应,发现头已发出后抛 ERR_HTTP_HEADERS_SENT,
+    // 接着它的 fallback error handler 又去 writeHead 一次 → 未捕获的 Promise 拒绝。
+    // 表现是「全部用例通过但 vitest 以 1 退出」,让「测试全绿」这个闸门形同虚设。
+    //
+    // hijack 不影响 handler 里继续 await(它只是让 Fastify 不再发响应、不跑
+    // onSend/onResponse 钩子)—— 重连路由 await 住 attach promise 的设计不变。
+    this.reply.hijack();
     this.reply.raw.writeHead(200, SSE_HEADERS);
 
     // 心跳:大工具可能几分钟不产帧,中间层会把这种静默连接当 idle 掐断。
