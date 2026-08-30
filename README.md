@@ -31,10 +31,31 @@ packages/
   harness/              Agent harness (model, agent loop, tools, prompts, skills)
   shared/               Shared types, contracts, and utility helpers
 docs/
-  architecture/         Architecture research + landing plan (16 docs)
+  architecture/         Architecture research + landing plan — read its README header
+                        first: 00-05/16-21 are competitor teardown, not Eva's design
   plans/                Design and implementation documents
-tests/                  Root-level Vitest coverage
+scripts/                Repo-level tooling (check-architecture.mjs = `pnpm lint:arch`)
+tests/                  Root-level Vitest coverage, mirroring the module tree
 ```
+
+### Build artifacts — do not read these, do not grep these
+
+None of the directories below hold source. They are build output or vendored copies,
+all gitignored, and several contain **stale duplicates of real source files** — a
+`grep -rn` that ignores `.gitignore` will happily return a version of the code that
+stopped being true months ago.
+
+| Directory | What it is |
+|---|---|
+| `.build/server-deploy/` | `pnpm deploy` output for packaging (includes a copy of `apps/server/src/`) |
+| `apps/*/dist/`, `apps/desktop/dist-electron/` | compiler output |
+| `apps/desktop/release/` | packed `Eva.app`, dmg/zip installers |
+| `.refrences/` | read-only clones of related projects, for reference only |
+| `node_modules/` | dependencies |
+
+`.vscode/settings.json` excludes all of them from editor search and file watching;
+`scripts/check-architecture.mjs` skips them too. If you add a new artifact directory,
+add it in both places.
 
 ## Architecture
 
