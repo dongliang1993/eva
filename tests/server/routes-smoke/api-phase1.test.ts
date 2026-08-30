@@ -12,18 +12,20 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { DrizzleMemoryRepository } from "../../../apps/server/src/db/repositories/memory-repository.js";
-import { DrizzleMessageRepository } from "../../../apps/server/src/db/repositories/message-repository.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
-import { SessionService } from "../../../apps/server/src/services/session.js";
-import { registerHealthRoutes } from "../../../apps/server/src/routes/health.js";
-import { registerMemoryRoutes } from "../../../apps/server/src/routes/memories.js";
-import { registerModelRoutes } from "../../../apps/server/src/routes/models.js";
-import { registerProviderRoutes } from "../../../apps/server/src/routes/providers.js";
-import { registerSettingsRoutes } from "../../../apps/server/src/routes/settings.js";
-import { registerThreadRoutes } from "../../../apps/server/src/routes/threads.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { DrizzleMemoryRepository } from "../../../apps/server/src/modules/memory/index.js";
+import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
+import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
+import { registerHealthRoutes } from "../../../apps/server/src/modules/system/index.js";
+import { registerMemoryRoutes } from "../../../apps/server/src/modules/memory/index.js";
+import {
+  registerModelRoutes,
+  registerProviderRoutes,
+} from "../../../apps/server/src/modules/providers/index.js";
+import { registerSettingsRoutes } from "../../../apps/server/src/modules/settings/index.js";
+import { registerThreadRoutes } from "../../../apps/server/src/modules/sessions/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 
 let app: FastifyInstance;

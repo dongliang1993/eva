@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { initDb, migrateDb, closeDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { BackgroundTaskRepository } from "../../../apps/server/src/db/repositories/background-task-repository.js";
-import { SqliteTaskStore } from "../../../apps/server/src/services/subagents/sqlite-task-store.js";
+import { BackgroundTaskRepository } from "../../../apps/server/src/modules/subagents/index.js";
+import { SqliteTaskStore } from "../../../apps/server/src/modules/subagents/index.js";
 
 let db: AppDatabase;
 const make = () => new SqliteTaskStore(db, new BackgroundTaskRepository(db));
@@ -84,7 +84,7 @@ describe("SqliteTaskStore (S7 任务事实)", () => {
     repo.create({ id: "t-fine", sessionId: "s", parentToolCallId: "ptc", subagentType: "explorer", depth: 0 });
     repo.settle("t-fine", { result: "ok" });
 
-    const { failStaleTasks } = await import("../../../apps/server/src/db/repositories/background-task-repository.js");
+    const { failStaleTasks } = await import("../../../apps/server/src/modules/subagents/index.js");
     expect(failStaleTasks(db)).toBe(1);
     expect(repo.findById("t-stale")?.status).toBe("failed");
     expect(repo.findById("t-fine")?.status).toBe("done");

@@ -1,26 +1,44 @@
 import type { AppInfrastructure, AppServices } from "../types/common.js";
-import { BackgroundTaskRepository } from "../db/repositories/background-task-repository.js";
-import { DrizzleMemoryRepository } from "../db/repositories/memory-repository.js";
-import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
-import { DrizzleMessageSearchRepository } from "../db/repositories/message-search-repository.js";
-import { RunEventRepository } from "../db/repositories/run-event-repository.js";
-import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
-import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
-import { McpServerRepository } from "../db/repositories/mcp-server-repository.js";
-import { UsageRecordRepository } from "../db/repositories/usage-record-repository.js";
-import { createApprovalsApi, type ApprovalsApi } from "./approvals-api.js";
-import { createMcpApi, type McpApi } from "./mcp-api.js";
-import { createMemoryApi, type MemoryApi } from "./memory-api.js";
-import { createObservabilityApi, type ObservabilityApi } from "./observability-api.js";
-import { createPlansApi, type PlansApi } from "./plans-api.js";
-import { createProvidersApi, type ProvidersApi } from "./providers-api.js";
-import { createRunsApi, type RunsApi } from "./runs-api.js";
-import { createSearchApi, type SearchApi } from "./search-api.js";
-import { createSessionsApi, type SessionsApi } from "./sessions-api.js";
-import { createSettingsApi, type SettingsApi } from "./settings-api.js";
-import { createSkillsApi, type SkillsApi } from "./skills-api.js";
-import { createUsageApi, type UsageApi } from "./usage-api.js";
-import { createWorkspacesApi, type WorkspacesApi } from "./workspaces-api.js";
+import { BackgroundTaskRepository } from "../modules/subagents/index.js";
+import {
+  createMemoryApi,
+  DrizzleMemoryRepository,
+  type MemoryApi,
+} from "../modules/memory/index.js";
+import { DrizzleMessageRepository } from "../modules/sessions/index.js";
+import {
+  createObservabilityApi,
+  RunEventRepository,
+  type ObservabilityApi,
+} from "../modules/observability/index.js";
+import {
+  createSearchApi,
+  DrizzleMessageSearchRepository,
+  type SearchApi,
+} from "../modules/search/index.js";
+import {
+  createRunsApi,
+  DrizzleRunRepository,
+  type RunsApi,
+} from "../modules/runs/index.js";
+import { DrizzleSessionRepository } from "../modules/sessions/index.js";
+import {
+  createMcpApi,
+  McpServerRepository,
+  type McpApi,
+} from "../modules/mcp/index.js";
+import {
+  createUsageApi,
+  UsageRecordRepository,
+  type UsageApi,
+} from "../modules/usage/index.js";
+import { createApprovalsApi, type ApprovalsApi } from "../modules/approvals/index.js";
+import { createPlansApi, type PlansApi } from "../modules/plan-weave/index.js";
+import { createProvidersApi, type ProvidersApi } from "../modules/providers/index.js";
+import { createSessionsApi, type SessionsApi } from "../modules/sessions/index.js";
+import { createSettingsApi, type SettingsApi } from "../modules/settings/index.js";
+import { createSkillsApi, type SkillsApi } from "../modules/skills/index.js";
+import { createWorkspacesApi, type WorkspacesApi } from "../modules/workspaces/index.js";
 
 /**
  * Route 能看到的全部东西 —— 按业务能力分组,一个能力一个入口。

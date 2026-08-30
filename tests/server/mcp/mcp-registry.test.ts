@@ -9,12 +9,12 @@ import {
 import {
   McpServerRepository,
   type McpServerRow
-} from "../../../apps/server/src/db/repositories/mcp-server-repository.js";
-import { McpServerClient } from "../../../apps/server/src/services/mcp/mcp-client.js";
+} from "../../../apps/server/src/modules/mcp/index.js";
+import { McpServerClient } from "../../../apps/server/src/modules/mcp/index.js";
 import {
   McpRegistry,
   type McpConnection
-} from "../../../apps/server/src/services/mcp/mcp-registry.js";
+} from "../../../apps/server/src/modules/mcp/index.js";
 import { startFakeMcpServer } from "../../helpers/fake-mcp-server.js";
 
 const logger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });

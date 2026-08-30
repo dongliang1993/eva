@@ -4,12 +4,16 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { DrizzleWorkspaceRepository } from "../../../apps/server/src/db/repositories/workspace-repository.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
+import { DrizzleWorkspaceRepository } from "../../../apps/server/src/modules/workspaces/index.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import type { Session } from "../../../apps/server/src/db/repositories/types.js";
-import { assertUsableWorkspacePath, UnusableWorkspacePathError } from "../../../apps/server/src/services/workspaces/workspace-guard.js";
-import { WorkspaceStore, resolveWorkspaceForSession } from "../../../apps/server/src/services/workspaces/workspace-store.js";
-import { loadProjectDocsSection } from "../../../apps/server/src/services/workspaces/project-docs.js";
+import {
+  assertUsableWorkspacePath,
+  loadProjectDocsSection,
+  resolveWorkspaceForSession,
+  UnusableWorkspacePathError,
+  WorkspaceStore,
+} from "../../../apps/server/src/modules/workspaces/index.js";
 
 const tmpDirs: string[] = [];
 

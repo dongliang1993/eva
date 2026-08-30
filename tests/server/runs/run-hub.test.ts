@@ -4,7 +4,7 @@ import type { FastifyReply } from "../../../apps/server/node_modules/fastify";
 import type { EvaUIMessage, RunStreamFrame } from "../../../packages/shared/src/index.js";
 import { UiMessageBuilder } from "../../../packages/shared/src/index.js";
 import { RunEventStream } from "../../../apps/server/src/transports/sse/event-stream.js";
-import { RunHub } from "../../../apps/server/src/services/runs/run-hub.js";
+import { RunHub } from "../../../apps/server/src/modules/runs/index.js";
 
 /** 只实现 RunEventStream 真正碰到的那几个 raw 属性。 */
 interface FakeSocket {

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
-import { RunRegistry } from "../../../apps/server/src/services/run-registry.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
+import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
 
 describe("abort 与 pending 审批", () => {
   let db: AppDatabase;

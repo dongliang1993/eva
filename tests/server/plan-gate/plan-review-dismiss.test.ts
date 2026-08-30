@@ -6,8 +6,8 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
 
 let db: AppDatabase | undefined;
 

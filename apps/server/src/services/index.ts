@@ -1,19 +1,24 @@
-import { ApprovalRepository } from "../db/repositories/approval-repository.js";
-import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
-import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
-import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
-import { McpServerRepository } from "../db/repositories/mcp-server-repository.js";
-import { DrizzleWorkspaceRepository } from "../db/repositories/workspace-repository.js";
+import { ApprovalRepository } from "../modules/approvals/index.js";
+import { DrizzleSessionRepository } from "../modules/sessions/index.js";
+import { DrizzleMessageRepository } from "../modules/sessions/index.js";
+import {
+  AgentFactory,
+  DrizzleRunRepository,
+  RunLedger,
+  RunRegistry,
+} from "../modules/runs/index.js";
+import { McpRegistry, McpServerRepository } from "../modules/mcp/index.js";
 import type { AppInfrastructure, AppServices } from "../types/common.js";
-import { AgentFactory } from "./agent-factory.js";
-import { ApprovalGateway } from "./approval-gateway.js";
-import { ApprovalPolicyStore } from "./approval-policy-store.js";
-import { McpRegistry } from "./mcp/mcp-registry.js";
-import { PlanWeaveService } from "./plan-weave/index.js";
-import { RunLedger } from "./runs/run-ledger.js";
-import { RunRegistry } from "./run-registry.js";
-import { SessionService } from "./session.js";
-import { WorkspaceStore } from "./workspaces/workspace-store.js";
+import {
+  ApprovalGateway,
+  ApprovalPolicyStore,
+} from "../modules/approvals/index.js";
+import { PlanWeaveService } from "../modules/plan-weave/index.js";
+import { SessionService } from "../modules/sessions/index.js";
+import {
+  DrizzleWorkspaceRepository,
+  WorkspaceStore,
+} from "../modules/workspaces/index.js";
 
 export const buildAppServices = (infra: AppInfrastructure): AppServices => {
   const workspaces = new WorkspaceStore(new DrizzleWorkspaceRepository(infra.db));

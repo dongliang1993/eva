@@ -4,11 +4,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { buildPolicyKeys } from "../../../packages/harness/src/approval/policy-key.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { ApprovalPolicyStore } from "../../../apps/server/src/services/approval-policy-store.js";
+import { ApprovalPolicyStore } from "../../../apps/server/src/modules/approvals/index.js";
 import {
   loadAppSettings,
   replaceAppSettings
-} from "../../../apps/server/src/services/settings/app-settings.js";
+} from "../../../apps/server/src/modules/settings/index.js";
 
 const config = { LOG_LEVEL: "info", PORT: 8082, HOST: "127.0.0.1", DB_PATH: "" } as never;
 
@@ -70,7 +70,7 @@ describe("T31 grant 选 key(后端单一事实来源)", () => {
 
 describe("T31 alwaysAllowTools 退役(钉死第二个事实源)", () => {
   it("runs.ts 放行链不再读 alwaysAllowTools", () => {
-    const source = readSource("apps/server/src/routes/runs.ts");
+    const source = readSource("apps/server/src/modules/runs/route.ts");
     expect(source).not.toContain("alwaysAllowTools");
   });
 
@@ -87,7 +87,7 @@ describe("T31 alwaysAllowTools 退役(钉死第二个事实源)", () => {
   });
 
   it("settings zod 不再要求 alwaysAllowTools 字段", () => {
-    const source = readSource("apps/server/src/routes/settings.ts");
+    const source = readSource("apps/server/src/modules/settings/route.ts");
     expect(source).not.toContain("alwaysAllowTools");
   });
 
@@ -118,7 +118,7 @@ describe("T31 迁移收敛(幂等,迁完即净)", () => {
     });
 
     const { migrateAlwaysAllowToolsToPolicies } = await import(
-      "../../../apps/server/src/services/settings/migrate-legacy.js"
+      "../../../apps/server/src/modules/settings/index.js"
     );
     const logger = { warn: () => undefined } as never;
     migrateAlwaysAllowToolsToPolicies(db, logger);

@@ -7,12 +7,12 @@ import { isDynamicToolPart, createUserUIMessage } from "../../../packages/shared
 import type { ApprovalDecision } from "../../../packages/shared/src/index.js";
 
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { DrizzleMessageRepository } from "../../../apps/server/src/db/repositories/message-repository.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { SessionService } from "../../../apps/server/src/services/session.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
-import { AssistantMessageRecorder } from "../../../apps/server/src/services/runs/assistant-message-recorder.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
+import { AssistantMessageRecorder } from "../../../apps/server/src/modules/runs/index.js";
 
 /**
  * T30:审批决策回写消息 part(docs/plans/r7/T30)。
@@ -121,7 +121,7 @@ describe("T30 决策回写消息 part", () => {
     // 只换了读哪个文件 —— 这条钉的是接线形态,接线搬家它就得跟着搬。
     const source = readFileSync(
       new URL(
-        "../../../apps/server/src/services/runs/run-approval-channel.ts",
+        "../../../apps/server/src/modules/runs/run-approval-channel.ts",
         import.meta.url
       ),
       "utf8"

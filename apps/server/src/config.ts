@@ -4,7 +4,7 @@ import path from "node:path";
 import { parse } from "dotenv";
 import { z } from "zod";
 
-import { findMonorepoRoot } from "./services/monorepo-root.js";
+import { findMonorepoRoot } from "./infrastructure/monorepo-root.js";
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8082),

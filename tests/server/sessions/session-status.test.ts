@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { DrizzleRunRepository } from "../../../apps/server/src/db/repositories/run-repository.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
+import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
 import {
   deriveSessionStatus,
   readSessionRuntimeStatus
-} from "../../../apps/server/src/services/session-status.js";
+} from "../../../apps/server/src/modules/sessions/index.js";
 
 describe("deriveSessionStatus", () => {
   it("两个 true 时取 requires_action(等人 > 在跑)", () => {

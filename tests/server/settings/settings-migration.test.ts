@@ -6,12 +6,12 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { loadAppSettings } from "../../../apps/server/src/services/settings/app-settings.js";
+import { loadAppSettings } from "../../../apps/server/src/modules/settings/index.js";
 import {
   migrateAlwaysAllowToolsToPolicies,
   migrateLegacySettings,
   migrateSecurityToAlwaysAllowTools
-} from "../../../apps/server/src/services/settings/migrate-legacy.js";
+} from "../../../apps/server/src/modules/settings/index.js";
 
 let db: AppDatabase;
 

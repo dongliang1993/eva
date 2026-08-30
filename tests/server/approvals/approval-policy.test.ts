@@ -3,13 +3,13 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
-import { ApprovalPolicyStore } from "../../../apps/server/src/services/approval-policy-store.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
+import { ApprovalPolicyStore } from "../../../apps/server/src/modules/approvals/index.js";
 import {
   loadAppSettings,
   replaceAppSettings
-} from "../../../apps/server/src/services/settings/app-settings.js";
+} from "../../../apps/server/src/modules/settings/index.js";
 
 const config = { LOG_LEVEL: "info", PORT: 8082, HOST: "127.0.0.1", DB_PATH: "" } as never;
 
@@ -20,7 +20,7 @@ const config = { LOG_LEVEL: "info", PORT: 8082, HOST: "127.0.0.1", DB_PATH: "" }
  */
 /** 放行链的源码 —— 两条「钉接线」的测试共用,读一次就够。 */
 const approvalChannelSource = readFileSync(
-  new URL("../../../apps/server/src/services/runs/run-approval-channel.ts", import.meta.url),
+  new URL("../../../apps/server/src/modules/runs/run-approval-channel.ts", import.meta.url),
   "utf8"
 );
 

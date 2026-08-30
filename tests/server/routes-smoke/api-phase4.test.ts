@@ -13,16 +13,16 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { DrizzleMemoryRepository } from "../../../apps/server/src/db/repositories/memory-repository.js";
-import { DrizzleMessageRepository } from "../../../apps/server/src/db/repositories/message-repository.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { SessionService } from "../../../apps/server/src/services/session.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
-import { registerMemoryRoutes } from "../../../apps/server/src/routes/memories.js";
-import { registerSearchRoutes } from "../../../apps/server/src/routes/search.js";
-import { registerSkillRoutes } from "../../../apps/server/src/routes/skills.js";
-import { registerThreadRoutes } from "../../../apps/server/src/routes/threads.js";
+import { DrizzleMemoryRepository } from "../../../apps/server/src/modules/memory/index.js";
+import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
+import { registerMemoryRoutes } from "../../../apps/server/src/modules/memory/index.js";
+import { registerSearchRoutes } from "../../../apps/server/src/modules/search/index.js";
+import { registerSkillRoutes } from "../../../apps/server/src/modules/skills/index.js";
+import { registerThreadRoutes } from "../../../apps/server/src/modules/sessions/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 
 const textMessage = (role: "user" | "assistant", text: string): EvaUIMessage =>

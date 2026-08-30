@@ -17,9 +17,9 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { UsageRecordRepository } from "../../../apps/server/src/db/repositories/usage-record-repository.js";
+import { UsageRecordRepository } from "../../../apps/server/src/modules/usage/index.js";
 import { sessions } from "../../../apps/server/src/db/schema.js";
-import { registerUsageRoutes } from "../../../apps/server/src/routes/usage.js";
+import { registerUsageRoutes } from "../../../apps/server/src/modules/usage/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 
 let app: FastifyInstance;

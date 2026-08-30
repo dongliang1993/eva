@@ -9,12 +9,12 @@ import {
 import {
   findStoredProviderById,
   updateProvider
-} from "../../../apps/server/src/services/providers/provider-repository.js";
+} from "../../../apps/server/src/modules/providers/index.js";
 import {
   clampContextWindow,
   computeClampedContextWindow,
   MIN_CONTEXT_WINDOW
-} from "../../../apps/server/src/services/providers/context-clamp.js";
+} from "../../../apps/server/src/modules/providers/index.js";
 
 let db: AppDatabase;
 

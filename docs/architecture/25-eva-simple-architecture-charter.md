@@ -1851,11 +1851,11 @@ CI 缓存）本身就是一次不小的改造，而且会立刻产出成百条�
 | # | 规则 | 现状 | 收敛于 |
 |---|---|---|---|
 | 1 | `routes/**` 不得导入 `db/**`、`repositories/**`、`schema` | ~~10/16 个业务 route 违反~~ **已收敛为 error（Wave 2）**，并顺带扩到「route 里不得出现 `app.infra` / `app.services`」 | Wave 2 ✅ |
-| 2 | 模块间只能从目标模块公开入口导入 | 大量跨模块深层导入 | Wave 4 |
-| 3 | Repository 只能在组合根或所属模块 Adapter 内创建 | ~~route 与 `run-preparation.ts` 都在 `new`~~ **两处已收敛为 error（Wave 2）**；`services/**` 下按模块自建的那些等 Wave 4 划出边界再判 | Wave 2 部分 ✅ / Wave 4 |
-| 4 | Domain 文件不得导入 Fastify、Drizzle、React、Electron、`node:fs` | 待核，需先划出 domain 文件集合 | Wave 4 |
-| 5 | package 根入口不得无审查 `export *` | `packages/harness/src/index.ts` 有 21 条 `export *` | Wave 3 |
-| 6 | 测试只能从被测模块公开入口导入 | 普遍直接 `new DrizzleXxxRepository` | Wave 4（见 §7.22） |
+| 2 | 模块间只能从目标模块公开入口导入 | **17 个垂直模块全部收敛为 error（Wave 4）**；外部生产代码与测试只能导入 `modules/<name>/index.ts` | Wave 4 ✅ |
+| 3 | Repository 只能在组合根或所属模块 Adapter 内创建 | route 与 preparation 层违规已清零；Repository 实现已归入所属模块，跨模块编排只能经目标模块公开入口拿 Adapter/能力 | Wave 4 ✅ |
+| 4 | Domain 文件不得导入 Fastify、Drizzle、React、Electron、`node:fs` | 当前模块没有单列 `domain/` 目录；纯规则/状态机文件按 Review checklist 审核，不用路径猜测伪造自动化保证 | Review checklist |
+| 5 | package 根入口不得无审查 `export *` | ~~`packages/harness/src/index.ts` 有 21 条 `export *`~~ **已改为显式能力白名单并收敛为 error（Wave 3）** | Wave 3 ✅ |
+| 6 | 测试只能从被测模块公开入口导入 | **Server 垂直模块测试全部改走公开入口，并由 `vertical-module-public-entry` error 锁住**；共享 DB contract `db/repositories/types.ts` 不属于业务模块实现 | Wave 4 ✅（见 §7.22） |
 
 ### 10.3 无法由脚本判定、必须进 Review checklist 的规则
 
@@ -2136,6 +2136,26 @@ Wave 0 的七条 characterization tests 一条不改地通过 —— **它们不
 
 退出条件：Agent 主文件只保留 façade 和主循环骨架；recovery/tool pipeline 可独立测试。
 
+> **Wave 3 已结束（2026-08-30）。** `packages/harness/src/agents/agent.ts` 从 926 行降到
+> **34 行**，现在只保留 Harness 组合入口；SDK 主循环在 `run-loop.ts`，工具横切装配在
+> `tools/tool-pipeline.ts`，compact / max-output / notice 决策在 `recovery-policy.ts`，
+> 正常终态与 abort 补偿在 `finish-run.ts`。目录沿用现有 `agents/`，没有为匹配示意图做无收益改名。
+>
+> 退出条件逐条：
+>
+> - **tool pipeline 可独立测试** —— `buildToolPipeline()` 固定执行序
+>   `plan gate → approval → concurrency cap → execution timing → tool`，测试证明 plan gate
+>   拦截时不会先弹审批、不会执行工具，且所有 wrapper 共享同一个 timing state；
+> - **recovery / finish 可独立测试** —— reactive compact 的一次性恢复、max-output 累计正文、
+>   notice 轮数上限、终态台账顺序、在飞工具 abort 补偿都有直接模块测试；原有 Agent 行为测试
+>   保持通过，事件协议与顺序未改；
+> - **公共面收敛** —— Harness 根入口从 21 条 `export *` 降到 **0 条**，只显式导出 Server
+>   当前使用的稳定能力；测试内部需要 mapper/client/wrapper 时改从被测模块直接导入，不把测试便利
+>   反向变成产品公共 API；
+> - **防回退已生效** —— 新增 `harness-root-explicit-exports` error 规则，`pnpm lint:arch`
+>   现在是 **8 条规则、0 error / 0 warning**；全量 **95 个测试文件、742 个用例**通过，
+>   `pnpm typecheck`、`pnpm build`、`pnpm web:build` 全部通过。
+
 ### Wave 4：业务模块垂直化（本轮唯一的大搬迁）
 
 目标：`services/` + `db/repositories/` 的横向分层，换成 `modules/<能力>/` 的纵向切分。
@@ -2144,8 +2164,9 @@ Wave 0 的七条 characterization tests 一条不改地通过 —— **它们不
 
 - commit A：`git mv` 把该模块的 service、repository、route 归拢到 `modules/<name>/`，
   旧路径退化为一行 shim，import 改写。**零逻辑改动。**
-- commit B：收敛该模块的公开入口（`index.ts` 只导出用例与 Query API，不导出 Repository），
-  删除 commit A 留下的 shim。
+- commit B：收敛该模块的公开入口（`index.ts` 显式列出跨模块、组合根与测试允许使用的能力；
+  不使用 `export *`），删除 commit A 留下的 shim。Repository Adapter 只有需要在组合根注入或做
+  持久化契约测试时才公开，普通业务调用仍优先使用 Command / Query API。
 
 建议顺序 —— **依赖少的先搬**，这样后搬的模块搬过去时它的依赖已经在新位置了：
 
@@ -2162,6 +2183,27 @@ Wave 0 的七条 characterization tests 一条不改地通过 —— **它们不
 | 9 | `mcp` | 独立性高，但工具装配挂在 runtime builder 上 |
 | 10 | `observability` + `search` + `usage` | 三个只读投影模块 |
 | 11 | `runs` | **最后搬**：它依赖上面全部，先搬会导致 shim 大爆炸 |
+
+> **Wave 4 已完成（2026-08-30，11/11 批）。**
+>
+> - `modules/settings/` 已归拢设置读写、历史迁移、模型 ID 规则、Settings API 与 Route；
+> - `modules/providers/` 已归拢 Provider API、Provider/Model Routes、Repository、Catalog、
+>   HTTP Client、Model Resolver 与 Context Clamp；加密实现归入独立 `infrastructure/crypto/`，
+>   Providers 只依赖它的 `Encryptor`，没有为了目录整齐合并两个变化原因；
+> - 中间五批 `workspaces`、`sessions`（含 messages / message-tree）、`approvals`（含 policy）、
+>   `memory + compact`、`plan-gate + plan-weave` 也已完成垂直归拢；其中 `plan-gate` 与
+>   `plan-weave` 保持两个独立模块，没有因为名称相近而合并；
+> - 最后四批 `subagents`、`mcp`、`observability + search + usage`、`runs` 已全部归位；
+>   `runs` 最后搬迁，因此它依赖的模块在改写 import 前都已有稳定公开入口；
+> - 顺手把剩余的 `skills` 与进程级 `system` route 归入模块；纯基础设施
+>   `crypto` / `monorepo-root` 归入 `infrastructure/`，token 估算器归入 `lib/`，避免为清空
+>   横向目录而把非业务能力硬塞进某个领域模块；
+> - 已迁移模块的旧 `services/`、`api/`、`routes/` 与所属 Repository 文件均已删除，
+>   当前累计 **shim 数为 0**；模块外生产代码和测试统一从 `modules/<name>/index.ts` 进入，
+>   `vertical-module-public-entry` 已作为 error 锁住全部 17 个垂直模块，当前架构检查为
+>   **9 条规则、0 error / 0 warning**；
+> - `apps/server/src/services/`、`routes/`、`api/` 均只剩组合入口（`api/README.md` 除外），
+>   满足本 Wave 退出条件。
 
 `db/schema.ts` 与 `db/migrations/` **不搬**（migration 语义不能动，见 §7.15）；
 schema 按领域拆文件是可选的 P2，与本次搬迁解耦。

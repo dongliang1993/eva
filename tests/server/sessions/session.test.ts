@@ -10,9 +10,9 @@ import {
 } from "../../../packages/shared/src/index.js";
 
 import { initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { DrizzleMessageRepository } from "../../../apps/server/src/db/repositories/message-repository.js";
-import { SessionService } from "../../../apps/server/src/services/session.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
 
 let db: AppDatabase;
 let sessionRepo: DrizzleSessionRepository;

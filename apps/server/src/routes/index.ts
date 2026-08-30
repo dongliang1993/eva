@@ -1,22 +1,26 @@
 import type { FastifyInstance } from "fastify";
 
-import { registerApprovalRoutes } from "./approvals.js";
-import { registerApprovalPolicyRoutes } from "./approval-policies.js";
-import { registerHealthRoutes } from "./health.js";
-import { registerMcpServerRoutes } from "./mcp-servers.js";
-import { registerMemoryRoutes } from "./memories.js";
-import { registerModelRoutes } from "./models.js";
-import { registerPlanWeaveRoutes } from "./plan-weave.js";
-import { registerProviderRoutes } from "./providers.js";
-import { registerRunRoutes } from "./runs.js";
-import { registerSearchRoutes } from "./search.js";
-import { registerSettingsRoutes } from "./settings.js";
-import { registerSkillRoutes } from "./skills.js";
-import { registerStaticRoutes } from "./static.js";
-import { registerThreadRoutes } from "./threads.js";
-import { registerTrajectoryRoutes } from "./trajectory.js";
-import { registerUsageRoutes } from "./usage.js";
-import { registerWorkspaceRoutes } from "./workspaces.js";
+import {
+  registerApprovalPolicyRoutes,
+  registerApprovalRoutes,
+} from "../modules/approvals/index.js";
+import {
+  registerHealthRoutes,
+  registerStaticRoutes,
+} from "../modules/system/index.js";
+import { registerMcpServerRoutes } from "../modules/mcp/index.js";
+import { registerMemoryRoutes } from "../modules/memory/index.js";
+import { registerModelRoutes } from "../modules/providers/index.js";
+import { registerPlanWeaveRoutes } from "../modules/plan-weave/index.js";
+import { registerProviderRoutes } from "../modules/providers/index.js";
+import { registerRunRoutes } from "../modules/runs/index.js";
+import { registerSearchRoutes } from "../modules/search/index.js";
+import { registerSettingsRoutes } from "../modules/settings/index.js";
+import { registerSkillRoutes } from "../modules/skills/index.js";
+import { registerThreadRoutes } from "../modules/sessions/index.js";
+import { registerTrajectoryRoutes } from "../modules/observability/index.js";
+import { registerUsageRoutes } from "../modules/usage/index.js";
+import { registerWorkspaceRoutes } from "../modules/workspaces/index.js";
 
 export const registerRoutes = async (app: FastifyInstance): Promise<void> => {
   registerApprovalRoutes(app);

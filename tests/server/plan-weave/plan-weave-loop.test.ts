@@ -10,10 +10,9 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { DrizzleWorkspaceRepository } from "../../../apps/server/src/db/repositories/workspace-repository.js";
+import { DrizzleWorkspaceRepository, WorkspaceStore } from "../../../apps/server/src/modules/workspaces/index.js";
 import { planWeaveDir } from "../../../apps/server/src/paths.js";
-import { PlanWeaveService } from "../../../apps/server/src/services/plan-weave/index.js";
-import { WorkspaceStore } from "../../../apps/server/src/services/workspaces/workspace-store.js";
+import { PlanWeaveService } from "../../../apps/server/src/modules/plan-weave/index.js";
 
 const tempDirs: string[] = [];
 let db: AppDatabase | undefined;

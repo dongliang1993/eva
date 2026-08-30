@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { RunRegistry } from "../../../apps/server/src/services/run-registry.js";
+import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
 
 describe("RunRegistry", () => {
   it("register returns a live AbortController", () => {

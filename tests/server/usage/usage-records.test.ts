@@ -4,8 +4,8 @@ import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { DrizzleRunRepository } from "../../../apps/server/src/db/repositories/run-repository.js";
-import { UsageRecordRepository } from "../../../apps/server/src/db/repositories/usage-record-repository.js";
+import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
+import { UsageRecordRepository } from "../../../apps/server/src/modules/usage/index.js";
 import { sessions } from "../../../apps/server/src/db/schema.js";
 
 const seedSession = (db: AppDatabase, id: string): void => {

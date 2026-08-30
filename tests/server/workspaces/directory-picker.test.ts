@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { pickDirectory } from "../../../apps/server/src/services/workspaces/directory-picker.js";
-import type { ExecFn } from "../../../apps/server/src/services/workspaces/directory-picker.js";
+import { pickDirectory, type ExecFn } from "../../../apps/server/src/modules/workspaces/index.js";
 
 const ok = (stdout: string): ExecFn => async () => ({ code: 0, stdout, stderr: "" });
 const fail = (stderr: string, code = 1): ExecFn => async () => ({ code, stdout: "", stderr });

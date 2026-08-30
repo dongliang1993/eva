@@ -8,24 +8,30 @@ import { loadConfig, type AppConfig } from "./config.js";
 import {
   initializeDatabase
 } from "./db/index.js";
-import { DrizzleRunRepository } from "./db/repositories/run-repository.js";
-import { failStaleTasks } from "./db/repositories/background-task-repository.js";
-import { ApprovalRepository } from "./db/repositories/approval-repository.js";
-import { createPinoObserver } from "./observability.js";
-import { sweepAbandonedOperations } from "./services/observability/abandoned-sweep.js";
-import { applyObservabilityRetention } from "./services/observability/retention.js";
-import { loadAppSettings } from "./services/settings/app-settings.js";
-import { clampContextWindow } from "./services/providers/context-clamp.js";
-import { findMonorepoRoot } from "./services/monorepo-root.js";
-import { syncMcpConfigFile } from "./services/mcp/mcp-config-file.js";
+import { DrizzleRunRepository } from "./modules/runs/index.js";
+import { failStaleTasks } from "./modules/subagents/index.js";
+import { ApprovalRepository } from "./modules/approvals/index.js";
+import {
+  applyObservabilityRetention,
+  createPinoObserver,
+  sweepAbandonedOperations,
+} from "./modules/observability/index.js";
+import { loadAppSettings } from "./modules/settings/index.js";
+import { clampContextWindow } from "./modules/providers/index.js";
+import { findMonorepoRoot } from "./infrastructure/monorepo-root.js";
+import { syncMcpConfigFile } from "./modules/mcp/index.js";
 import {
   migrateLegacySettings,
   migrateSecurityToAlwaysAllowTools,
   migrateAlwaysAllowToolsToPolicies
-} from "./services/settings/migrate-legacy.js";
+} from "./modules/settings/index.js";
 import { secretKeyPath, userSkillsDir } from "./paths.js";
-import { AesGcmEncryptor, IdentityEncryptor, type Encryptor } from "./services/crypto/encryptor.js";
-import { loadSecretKey } from "./services/crypto/secret-key.js";
+import {
+  AesGcmEncryptor,
+  IdentityEncryptor,
+  type Encryptor,
+} from "./infrastructure/crypto/encryptor.js";
+import { loadSecretKey } from "./infrastructure/crypto/secret-key.js";
 import type { AppInfrastructure, AppServices } from "./types/common.js";
 
 export const buildInfrastructure = async (): Promise<AppInfrastructure> => {

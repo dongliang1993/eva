@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isReactiveCompactCandidateError,
   normalizeModelError
-} from "../../../packages/harness/src/index.js";
+} from "../../../packages/harness/src/models/errors.js";
 
 describe("normalizeModelError", () => {
   it("normalizes prompt-too-long style messages", () => {

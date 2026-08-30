@@ -3,11 +3,11 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { DrizzleMessageRepository } from "../../../apps/server/src/db/repositories/message-repository.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { SessionCompactionRepository } from "../../../apps/server/src/db/repositories/session-compaction-repository.js";
-import { compactSession } from "../../../apps/server/src/services/compact/compact.js";
-import type { SummarizeMessages } from "../../../apps/server/src/services/compact/summarize-with-model.js";
+import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { SessionCompactionRepository } from "../../../apps/server/src/modules/compact/index.js";
+import { compactSession } from "../../../apps/server/src/modules/compact/index.js";
+import type { SummarizeMessages } from "../../../apps/server/src/modules/compact/index.js";
 import { createUserUIMessage } from "../../../packages/shared/src/index.js";
 
 let db: AppDatabase;

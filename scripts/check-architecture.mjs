@@ -44,6 +44,32 @@ const SKIP_DIRS = new Set([
 
 const SOURCE_EXT = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
+const VERTICAL_MODULES = [
+  "approvals",
+  "compact",
+  "mcp",
+  "memory",
+  "observability",
+  "plan-gate",
+  "plan-weave",
+  "providers",
+  "runs",
+  "search",
+  "sessions",
+  "settings",
+  "skills",
+  "subagents",
+  "system",
+  "usage",
+  "workspaces",
+];
+
+const isDeepVerticalModuleImport = (spec) => {
+  const names = VERTICAL_MODULES.join("|");
+  return new RegExp(`(?:^|/)modules/(?:${names})/(?!index\\.js$)`).test(spec) ||
+    new RegExp(`^\\.\\./(?:${names})/(?!index\\.js$)`).test(spec);
+};
+
 /**
  * 规则表。
  *
@@ -72,6 +98,18 @@ const RULES = [
       spec === "fastify" || spec.startsWith("fastify/") ||
       spec.startsWith("drizzle-orm") || spec.startsWith("drizzle-kit") ||
       spec === "better-sqlite3"
+  },
+  {
+    id: "harness-root-explicit-exports",
+    level: "error",
+    since: "§10.2 第 5 条,Wave 3 收敛(2026-08-30)",
+    from: ["packages/harness/src/index.ts"],
+    why:
+      "Harness 根入口是给宿主的显式能力白名单。export * 会把循环、恢复、wrapper 等 " +
+      "实现细节无意变成公共 API,让内部重构反向受调用方约束",
+    forbidText: [
+      { pattern: /\bexport\s*\*\s*from\b/g, label: "export * from" }
+    ]
   },
   {
     id: "shared-wire-only",
@@ -167,11 +205,36 @@ const RULES = [
       spec.includes("repositories/") ||
       /(^|\/)schema(\.js)?$/.test(spec) ||
       spec.startsWith("drizzle-orm")
+  },
+  {
+    id: "vertical-module-public-entry",
+    level: "error",
+    since: "§10.2 第 2、6 条,Wave 4 收敛(2026-08-30)",
+    from: ["apps/server/src", "tests"],
+    why:
+      "垂直化模块的外部生产代码和测试只能从 modules/<name>/index 进入；旧 " +
+      "services/api/routes 路径与模块内部文件都不是公共 API",
+    forbid: (spec) =>
+      /(?:^|\/)services\/(?!index\.js$)/.test(spec) ||
+      spec.includes("apps/server/src/api/") && !spec.endsWith("/api/index.js") ||
+      /^(?:\.\.\/)+api\/(?!index\.js$)/.test(spec) ||
+      spec.includes("apps/server/src/routes/") && !spec.endsWith("/routes/index.js") ||
+      /^(?:\.\.\/)+routes\/(?!index\.js$)/.test(spec) ||
+      spec.includes("/db/repositories/") && !spec.endsWith("/db/repositories/types.js") ||
+      isDeepVerticalModuleImport(spec)
   }
 ];
 
 /** 递归收集源文件。 */
 const collect = (dir, out = []) => {
+  try {
+    if (statSync(dir).isFile()) {
+      if (SOURCE_EXT.has(path.extname(dir))) out.push(dir);
+      return out;
+    }
+  } catch {
+    return out;
+  }
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });

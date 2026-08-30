@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { MemoryFileStore } from "../../../apps/server/src/services/memory/memory-file-store.js";
+import { MemoryFileStore } from "../../../apps/server/src/modules/memory/index.js";
 
 const tempDirs: string[] = [];
 

@@ -9,11 +9,11 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { registerProviderRoutes } from "../../../apps/server/src/routes/providers.js";
+import { registerProviderRoutes } from "../../../apps/server/src/modules/providers/index.js";
 import {
   findProviderById,
   updateProvider
-} from "../../../apps/server/src/services/providers/provider-repository.js";
+} from "../../../apps/server/src/modules/providers/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 
 let app: FastifyInstance;

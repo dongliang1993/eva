@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { McpServerRow } from "../../../apps/server/src/db/repositories/mcp-server-repository.js";
-import type { McpToolDescriptor } from "../../../apps/server/src/services/mcp/mcp-client.js";
+import type { McpServerRow } from "../../../apps/server/src/modules/mcp/index.js";
+import type { McpToolDescriptor } from "../../../apps/server/src/modules/mcp/index.js";
 import {
   mcpToolName,
   toAgentTools,
   toToolSummaries,
   type McpToolInvoker,
-} from "../../../apps/server/src/services/mcp/mcp-tools.js";
+} from "../../../apps/server/src/modules/mcp/index.js";
 
 const TOOL_CALL_OPTIONS = { messages: [], toolCallId: "c1", context: {} };
 

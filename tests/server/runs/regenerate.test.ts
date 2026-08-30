@@ -11,17 +11,17 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { DrizzleMessageRepository } from "../../../apps/server/src/db/repositories/message-repository.js";
-import { DrizzleRunRepository } from "../../../apps/server/src/db/repositories/run-repository.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
-import { RunLedger } from "../../../apps/server/src/services/runs/run-ledger.js";
-import { RunRegistry } from "../../../apps/server/src/services/run-registry.js";
-import { SessionService } from "../../../apps/server/src/services/session.js";
-import { registerRunRoutes } from "../../../apps/server/src/routes/runs.js";
-import { registerThreadRoutes } from "../../../apps/server/src/routes/threads.js";
-import { loadAppSettings, replaceAppSettings } from "../../../apps/server/src/services/settings/app-settings.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
+import { RunLedger } from "../../../apps/server/src/modules/runs/index.js";
+import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
+import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
+import { registerRunRoutes } from "../../../apps/server/src/modules/runs/index.js";
+import { registerThreadRoutes } from "../../../apps/server/src/modules/sessions/index.js";
+import { loadAppSettings, replaceAppSettings } from "../../../apps/server/src/modules/settings/index.js";
 import type { StoredMessage } from "../../../apps/server/src/db/repositories/types.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 

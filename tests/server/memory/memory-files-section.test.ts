@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DAILY_NOTE_DAYS,
   loadMemoryFilesSection
-} from "../../../apps/server/src/services/memory/memory-files-section.js";
+} from "../../../apps/server/src/modules/memory/index.js";
 
 const tempDirs: string[] = [];
 

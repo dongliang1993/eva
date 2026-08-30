@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { AgentFactory, AgentUnavailableError } from "../../../apps/server/src/services/agent-factory.js";
+import { AgentFactory, AgentUnavailableError } from "../../../apps/server/src/modules/runs/index.js";
 import { loadConfig, type AppConfig } from "../../../apps/server/src/config.js";
 import {
   closeDb,
@@ -11,9 +11,9 @@ import {
 import {
   loadAppSettings,
   replaceAppSettings
-} from "../../../apps/server/src/services/settings/app-settings.js";
-import { updateProvider } from "../../../apps/server/src/services/providers/provider-repository.js";
-import { IdentityEncryptor } from "../../../apps/server/src/services/crypto/encryptor.js";
+} from "../../../apps/server/src/modules/settings/index.js";
+import { updateProvider } from "../../../apps/server/src/modules/providers/index.js";
+import { IdentityEncryptor } from "../../../apps/server/src/infrastructure/crypto/encryptor.js";
 import type { AppInfrastructure } from "../../../apps/server/src/types/common.js";
 
 let db: AppDatabase;

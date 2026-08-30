@@ -11,19 +11,19 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { DrizzleRunRepository, runStatusFor } from "../../../apps/server/src/db/repositories/run-repository.js";
+import { DrizzleRunRepository, runStatusFor } from "../../../apps/server/src/modules/runs/index.js";
 import { runs } from "../../../apps/server/src/db/schema.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { DrizzleMessageRepository } from "../../../apps/server/src/db/repositories/message-repository.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { AgentUnavailableError, type AgentFactory } from "../../../apps/server/src/services/agent-factory.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
-import { RunLedger } from "../../../apps/server/src/services/runs/run-ledger.js";
-import { RunRegistry } from "../../../apps/server/src/services/run-registry.js";
-import { SessionService } from "../../../apps/server/src/services/session.js";
-import { SubagentRunner } from "../../../apps/server/src/services/subagents/subagent-runner.js";
-import { registerRunRoutes } from "../../../apps/server/src/routes/runs.js";
-import { loadAppSettings, replaceAppSettings } from "../../../apps/server/src/services/settings/app-settings.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { AgentUnavailableError, type AgentFactory } from "../../../apps/server/src/modules/runs/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
+import { RunLedger } from "../../../apps/server/src/modules/runs/index.js";
+import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
+import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
+import { SubagentRunner } from "../../../apps/server/src/modules/subagents/index.js";
+import { registerRunRoutes } from "../../../apps/server/src/modules/runs/index.js";
+import { loadAppSettings, replaceAppSettings } from "../../../apps/server/src/modules/settings/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 
 const usage = {

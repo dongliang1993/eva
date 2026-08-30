@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, initDb, isVecAvailable, migrateDb } from "../../../apps/server/src/db/index.js";
-import { MemoryEmbeddingRepository } from "../../../apps/server/src/db/repositories/memory-embedding-repository.js";
+import { MemoryEmbeddingRepository } from "../../../apps/server/src/modules/memory/index.js";
 
 let dir: string;
 beforeEach(() => {

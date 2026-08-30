@@ -7,16 +7,16 @@ import { initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db
 import {
   DrizzleMemoryRepository,
   type IMemoryRepository
-} from "../../../apps/server/src/db/repositories/memory-repository.js";
+} from "../../../apps/server/src/modules/memory/index.js";
 import {
   buildMemoryRuntimeSupport,
-} from "../../../apps/server/src/services/memory/memory-runtime.js";
+} from "../../../apps/server/src/modules/memory/index.js";
 import {
   calculateMemoryContextTokenBudget,
   renderRecallPromptContext,
   type RecalledHistoryHit,
   type RecalledMemoryEntry
-} from "../../../apps/server/src/services/memory/memory-recall.js";
+} from "../../../apps/server/src/modules/memory/index.js";
 
 let db: AppDatabase;
 let repo: IMemoryRepository;

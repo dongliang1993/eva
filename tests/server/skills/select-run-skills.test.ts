@@ -6,8 +6,8 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { selectRunSkills } from "../../../apps/server/src/services/skills/select-run-skills.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { selectRunSkills } from "../../../apps/server/src/modules/skills/index.js";
 import type { Skill } from "../../../packages/harness/src/skills/types.js";
 
 let db: AppDatabase | undefined;

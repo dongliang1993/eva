@@ -10,8 +10,8 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { McpServerRepository } from "../../../apps/server/src/db/repositories/mcp-server-repository.js";
-import { syncMcpConfigFile } from "../../../apps/server/src/services/mcp/mcp-config-file.js";
+import { McpServerRepository } from "../../../apps/server/src/modules/mcp/index.js";
+import { syncMcpConfigFile } from "../../../apps/server/src/modules/mcp/index.js";
 
 let db: AppDatabase;
 let dir: string;

@@ -2,22 +2,23 @@ import { describe, expect, it } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 
+import { createAgent } from "../../../packages/harness/src/agents/agent.js";
+import type { AgentTelemetryEvent } from "../../../packages/harness/src/agents/observer.js";
+import { buildJsonSchemaTool } from "../../../packages/harness/src/tools/build-json-schema-tool.js";
 import {
-  buildJsonSchemaTool,
   buildTool,
-  createAgent,
-  createPlanGateState,
-  createToolTimingState,
-  Semaphore,
   TOOL_CALL_ABORTED_OUTPUT,
-  withApproval,
-  withConcurrencyCap,
-  withExecTiming,
-  withPlanGate,
-  type AgentTelemetryEvent,
   type AgentTool,
-  type ToolTimingState
-} from "../../../packages/harness/src/index.js";
+} from "../../../packages/harness/src/tools/build-tool.js";
+import { Semaphore, withConcurrencyCap } from "../../../packages/harness/src/tools/concurrency-cap.js";
+import { createPlanGateState } from "../../../packages/harness/src/tools/plan-gate/state.js";
+import { withPlanGate } from "../../../packages/harness/src/tools/plan-gate/with-plan-gate.js";
+import {
+  createToolTimingState,
+  type ToolTimingState,
+} from "../../../packages/harness/src/tools/tool-timing.js";
+import { withApproval } from "../../../packages/harness/src/tools/with-approval.js";
+import { withExecTiming } from "../../../packages/harness/src/tools/with-exec-timing.js";
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));

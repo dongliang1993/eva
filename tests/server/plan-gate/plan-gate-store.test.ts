@@ -10,10 +10,10 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { DrizzlePlanRepository } from "../../../apps/server/src/db/repositories/plan-repository.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { DrizzleWorkspaceRepository } from "../../../apps/server/src/db/repositories/workspace-repository.js";
-import { createPlanGateStore } from "../../../apps/server/src/services/plan-gate/index.js";
+import { DrizzlePlanRepository } from "../../../apps/server/src/modules/plan-gate/index.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { DrizzleWorkspaceRepository } from "../../../apps/server/src/modules/workspaces/index.js";
+import { createPlanGateStore } from "../../../apps/server/src/modules/plan-gate/index.js";
 
 const tempDirs: string[] = [];
 let db: AppDatabase | undefined;

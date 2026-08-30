@@ -4,11 +4,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { loadConfig } from "../../../apps/server/src/config.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { DrizzleMessageRepository } from "../../../apps/server/src/db/repositories/message-repository.js";
-import { SessionService } from "../../../apps/server/src/services/session.js";
-import { readSessionUsage } from "../../../apps/server/src/services/session-usage.js";
-import { updateProvider } from "../../../apps/server/src/services/providers/provider-repository.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
+import { readSessionUsage } from "../../../apps/server/src/modules/sessions/index.js";
+import { updateProvider } from "../../../apps/server/src/modules/providers/index.js";
 import { createUserUIMessage } from "../../../packages/shared/src/index.js";
 
 let db: AppDatabase;

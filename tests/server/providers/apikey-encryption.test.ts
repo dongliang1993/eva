@@ -10,13 +10,13 @@ import { initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db
 import {
   AesGcmEncryptor,
   IdentityEncryptor
-} from "../../../apps/server/src/services/crypto/encryptor.js";
-import { loadSecretKey } from "../../../apps/server/src/services/crypto/secret-key.js";
+} from "../../../apps/server/src/infrastructure/crypto/encryptor.js";
+import { loadSecretKey } from "../../../apps/server/src/infrastructure/crypto/secret-key.js";
 import {
   createProvider,
   findStoredProviderById,
   updateProvider
-} from "../../../apps/server/src/services/providers/provider-repository.js";
+} from "../../../apps/server/src/modules/providers/index.js";
 
 const TEST_KEY = randomBytes(32);
 

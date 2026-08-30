@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   convertToMarkdown,
-  WebFetchClient,
-} from "../../../packages/harness/src/index.js";
+} from "../../../packages/harness/src/tools/web-fetch/markdown.js";
+import { WebFetchClient } from "../../../packages/harness/src/tools/web-fetch/client.js";
 import { createWebFetchPromptSection } from "../../../packages/harness/src/prompts/sections/web-fetch.js";
 
 afterEach(() => {

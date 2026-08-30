@@ -15,8 +15,8 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { registerThreadRoutes } from "../../../apps/server/src/routes/threads.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { registerThreadRoutes } from "../../../apps/server/src/modules/sessions/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 
 let app: FastifyInstance;

@@ -5,7 +5,7 @@ import type { ProviderType } from "../../../packages/shared/src/index.js";
 import {
   PROVIDER_CATALOG,
   findProviderSpec
-} from "../../../apps/server/src/services/providers/provider-catalog.js";
+} from "../../../apps/server/src/modules/providers/index.js";
 
 describe("provider-catalog", () => {
   it("每个 spec 的 type 唯一", () => {

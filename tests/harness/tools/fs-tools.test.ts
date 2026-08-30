@@ -21,10 +21,12 @@ import {
   createEditTool,
   createReadFileTool,
   createWriteTool,
+} from "../../../packages/harness/src/index.js";
+import {
   PathEscapeError,
   resolveReadablePath,
   resolveWorkspacePath,
-} from "../../../packages/harness/src/index.js";
+} from "../../../packages/harness/src/tools/fs/resolve-workspace-path.js";
 
 const tempDirs: string[] = [];
 

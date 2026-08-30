@@ -7,12 +7,14 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { updateProvider } from "../../../apps/server/src/services/providers/provider-repository.js";
-import { resolveModelSlot } from "../../../apps/server/src/services/providers/model-resolver.js";
+import {
+  resolveModelSlot,
+  updateProvider,
+} from "../../../apps/server/src/modules/providers/index.js";
 import {
   loadAppSettings,
   replaceAppSettings
-} from "../../../apps/server/src/services/settings/app-settings.js";
+} from "../../../apps/server/src/modules/settings/index.js";
 
 let db: AppDatabase;
 

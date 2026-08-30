@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ReportGateway } from "../../../apps/server/src/services/subagents/report-gateway.js";
+import { ReportGateway } from "../../../apps/server/src/modules/subagents/index.js";
 import type { SubagentNotice } from "../../../packages/harness/src/subagents/types.js";
 
 const notice = (over: Partial<SubagentNotice> = {}): SubagentNotice => ({

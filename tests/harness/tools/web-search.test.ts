@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createWebSearchPromptSection,
-  createWebSearchTool,
-  DuckDuckGoWebSearchClient,
-  type WebSearchClient,
-  type WebSearchResponse,
-} from "../../../packages/harness/src/index.js";
+import { createWebSearchPromptSection } from "../../../packages/harness/src/prompts/sections/web-search.js";
+import { createWebSearchTool } from "../../../packages/harness/src/tools/web-search/tool.js";
+import { DuckDuckGoWebSearchClient } from "../../../packages/harness/src/tools/web-search/duckduckgo-client.js";
+import type {
+  WebSearchClient,
+  WebSearchResponse,
+} from "../../../packages/harness/src/tools/web-search/types.js";
 
 afterEach(() => {
   vi.restoreAllMocks();

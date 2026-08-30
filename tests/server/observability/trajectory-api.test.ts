@@ -4,9 +4,9 @@ import type { FastifyInstance } from "../../../apps/server/node_modules/fastify"
 
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
 import { backgroundTasks, runs, sessions } from "../../../apps/server/src/db/schema.js";
-import { RunEventRepository } from "../../../apps/server/src/db/repositories/run-event-repository.js";
+import { RunEventRepository } from "../../../apps/server/src/modules/observability/index.js";
 import { registerLoopbackTokenHook } from "../../../apps/server/src/loopback.js";
-import { registerTrajectoryRoutes } from "../../../apps/server/src/routes/trajectory.js";
+import { registerTrajectoryRoutes } from "../../../apps/server/src/modules/observability/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 import type {
   RunEventDto,

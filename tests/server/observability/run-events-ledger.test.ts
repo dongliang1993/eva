@@ -4,20 +4,20 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
 import { runs, sessions, usageRecords } from "../../../apps/server/src/db/schema.js";
-import { RunEventRepository } from "../../../apps/server/src/db/repositories/run-event-repository.js";
-import { DrizzleRunRepository } from "../../../apps/server/src/db/repositories/run-repository.js";
-import { canonicalStringify, sha256Hex } from "../../../apps/server/src/services/observability/canonical.js";
+import { RunEventRepository } from "../../../apps/server/src/modules/observability/index.js";
+import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
+import { canonicalStringify, sha256Hex } from "../../../apps/server/src/modules/observability/index.js";
 import {
   MAX_FIELD_BYTES,
   REDACTED,
   redactValue
-} from "../../../apps/server/src/services/observability/redact.js";
+} from "../../../apps/server/src/modules/observability/index.js";
 import {
   createRunRecorder,
   type RunRecorderLogger
-} from "../../../apps/server/src/services/observability/run-recorder.js";
-import { sweepAbandonedOperations } from "../../../apps/server/src/services/observability/abandoned-sweep.js";
-import { applyObservabilityRetention } from "../../../apps/server/src/services/observability/retention.js";
+} from "../../../apps/server/src/modules/observability/index.js";
+import { sweepAbandonedOperations } from "../../../apps/server/src/modules/observability/index.js";
+import { applyObservabilityRetention } from "../../../apps/server/src/modules/observability/index.js";
 
 const createLogger = (): RunRecorderLogger & { warnings: unknown[] } => {
   const warnings: unknown[] = [];

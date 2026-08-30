@@ -7,8 +7,8 @@ import type { AgentStreamEvent } from "../../../packages/harness/src/agents/type
 import { APPROVAL_DENIED_PREFIX, withApproval } from "../../../packages/harness/src/tools/with-approval.js";
 import { buildTool } from "../../../packages/harness/src/tools/build-tool.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
 
 type FinishEvent = Extract<AgentStreamEvent, { type: "finish" }>;
 

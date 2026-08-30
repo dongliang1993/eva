@@ -4,7 +4,7 @@ import type { StoredMessage } from "../../../apps/server/src/db/repositories/typ
 import {
   buildActiveChain,
   resolveLeafFrom
-} from "../../../apps/server/src/services/message-tree.js";
+} from "../../../apps/server/src/modules/sessions/index.js";
 
 // 构造 StoredMessage 的辅助。message 字段用最小可用的 EvaUIMessage。
 const msg = (id: string, parentId: string | null = null, slotId = "s"): StoredMessage => ({

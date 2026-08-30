@@ -36,7 +36,7 @@ Fastify decorators:
 - `app.infra` — `AppInfrastructure` (config, db, logger, skills, observer?)
 - `app.services` — `AppServices` (agents, session, approvals, runRegistry, workspaces, mcp)
 
-**`AgentFactory`** (`services/agent-factory.ts`) resolves the agent **per run**:
+**`AgentFactory`** (`modules/runs/agent-factory.ts`) resolves the agent **per run**:
 
 1. `resolveModels({ requestedModelId? })` — resolves the three model slots (chat / tool / embedding) via `resolveModelSlot`; tool 缺省回落 chat; temperature is a call setting read once from settings.
 2. `resolve(options)` — builds the agent with `createConfiguredAgent`, injecting per-run `workspace` context.
@@ -130,7 +130,7 @@ Approvals are driven by the SSE `approval_request` / `approval_resolved` events 
 - First request: no `sessionId` → server creates session → `run_start` frame carries the new `sessionId`.
 - Subsequent requests: send `sessionId` → server loads history.
 - Frontend stores `sessionId` in `useState`; new conversation clears it.
-- Session lifecycle: request reordered to session/workspace → agent → context (see `routes/runs.ts` `openSessionTurn` → `resolve` → `buildRunContext`); a 503 on a freshly created session rolls it back.
+- Session lifecycle: request reordered to session/workspace → agent → context (see `modules/runs/run-preparation.ts` → `run-coordinator.ts`); a 503 on a freshly created session rolls it back.
 
 ## Workspaces & MCP
 
@@ -153,7 +153,7 @@ Workspace 级文件型任务图（与 Plan Gate 的 `.eva/plan-gate/` 目录刻�
 
 「这个 Run 到底发生了什么」是一等事实，不靠 Pino 反推：
 
-- **`run_events`** 是 append-only canonical ledger（`apps/server/src/db/schema.ts`，时间一律 epoch ms）。`seq` 由 **run-scoped recorder** 独占单调分配（`services/observability/run-recorder.ts`）：同一 Run 主 Agent 与前台子代理共用一个实例（`UNIQUE(run_id, seq)` 成立的唯一理由）；后台子代理有自己 Run 的 recorder，seq 从 0。`record` 绝不抛回 Agent loop；payload 在 recorder 内定型（脱敏 → 截断 16 KiB → canonical JSON）。崩溃未闭合操作由启动清扫补 `operation_abandoned`，retention 按 `observability.retentionDays` / `maxDatabaseBytes` 整 Run 粒度删（`usage_records` 独立存活 —— 0030 起它没有 runs FK）。
+- **`run_events`** 是 append-only canonical ledger（`apps/server/src/db/schema.ts`，时间一律 epoch ms）。`seq` 由 **run-scoped recorder** 独占单调分配（`modules/observability/run-recorder.ts`）：同一 Run 主 Agent 与前台子代理共用一个实例（`UNIQUE(run_id, seq)` 成立的唯一理由）；后台子代理有自己 Run 的 recorder，seq 从 0。`record` 绝不抛回 Agent loop；payload 在 recorder 内定型（脱敏 → 截断 16 KiB → canonical JSON）。崩溃未闭合操作由启动清扫补 `operation_abandoned`，retention 按 `observability.retentionDays` / `maxDatabaseBytes` 整 Run 粒度删（`usage_records` 独立存活 —— 0030 起它没有 runs FK）。
 - **事件路径**：harness `AgentTelemetryEvent` → server `createObserverBridge(recorder).forAgent(agent)`（`agent: "main" | taskId`，**没有隐式 current run**，runId 属于绑定不属于事件）→ `fanout` 合并 Pino 第二订阅者。`AgentBuildOptions.observer` / `buildSubagent.observer` 必填。
 - **三段计时**:`withApproval`（审批等待）/ `withConcurrencyCap`（排队等待）/ `withExecTiming`（真实执行）汇入 run-scoped `ToolTimingState`，mapper 在 tool-result 时取快照；SSE `tool-result` 帧带 `toolExecMs/approvalWaitMs/queueWaitMs`，旧 `durationMs` 不再赋值（历史消息徽章隐藏）。abort 补发落 `tool_call_abandoned`（`duration_ms` 未分解墙钟，不伪造三段）。
 - **读取面**:`GET /threads/:id/trajectory`（主 Run 事件 + subRuns 摘要，三元组游标）、`GET /runs/:id/trajectory`（seq 游标，两种语义不合并）、`GET /threads/:id/session-log`(JSONL 导出，byte 稳定）。**都不进 loopback token 白名单**(`loopback.ts` 精确相等判定，改前缀匹配前先想清在放行什么）。

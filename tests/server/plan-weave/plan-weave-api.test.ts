@@ -12,11 +12,10 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { DrizzleWorkspaceRepository } from "../../../apps/server/src/db/repositories/workspace-repository.js";
+import { DrizzleWorkspaceRepository, WorkspaceStore } from "../../../apps/server/src/modules/workspaces/index.js";
 import { planWeaveDir } from "../../../apps/server/src/paths.js";
-import { registerPlanWeaveRoutes } from "../../../apps/server/src/routes/plan-weave.js";
-import { PlanWeaveService } from "../../../apps/server/src/services/plan-weave/index.js";
-import { WorkspaceStore } from "../../../apps/server/src/services/workspaces/workspace-store.js";
+import { registerPlanWeaveRoutes } from "../../../apps/server/src/modules/plan-weave/index.js";
+import { PlanWeaveService } from "../../../apps/server/src/modules/plan-weave/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 
 let app: FastifyInstance;

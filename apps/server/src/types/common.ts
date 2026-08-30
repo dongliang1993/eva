@@ -8,16 +8,18 @@ import type { Logger } from "pino";
 
 import type { AppConfig } from "../config.js";
 import type { AppDatabase } from "../db/index.js";
-import type { AgentFactory } from "../services/agent-factory.js";
-import type { Encryptor } from "../services/crypto/encryptor.js";
-import type { McpRegistry } from "../services/mcp/mcp-registry.js";
-import type { ApprovalGateway } from "../services/approval-gateway.js";
-import type { ApprovalPolicyStore } from "../services/approval-policy-store.js";
-import type { PlanWeaveService } from "../services/plan-weave/index.js";
-import type { RunRegistry } from "../services/run-registry.js";
-import type { RunLedger } from "../services/runs/run-ledger.js";
-import type { SessionService } from "../services/session.js";
-import type { WorkspaceStore } from "../services/workspaces/workspace-store.js";
+import type {
+  AgentFactory,
+  RunLedger,
+  RunRegistry,
+} from "../modules/runs/index.js";
+import type { Encryptor } from "../infrastructure/crypto/encryptor.js";
+import type { McpRegistry } from "../modules/mcp/index.js";
+import type { ApprovalGateway } from "../modules/approvals/index.js";
+import type { ApprovalPolicyStore } from "../modules/approvals/index.js";
+import type { PlanWeaveService } from "../modules/plan-weave/index.js";
+import type { SessionService } from "../modules/sessions/index.js";
+import type { WorkspaceStore } from "../modules/workspaces/index.js";
 import type { AppApi } from "../api/index.js";
 
 export interface AppInfrastructure {

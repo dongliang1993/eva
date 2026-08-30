@@ -16,21 +16,21 @@ import {
 } from "../../../packages/harness/src/index.js";
 import { loadConfig } from "../../../apps/server/src/config.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { ApprovalRepository } from "../../../apps/server/src/db/repositories/approval-repository.js";
-import { DrizzleMessageRepository } from "../../../apps/server/src/db/repositories/message-repository.js";
-import { RunEventRepository } from "../../../apps/server/src/db/repositories/run-event-repository.js";
-import { DrizzleRunRepository } from "../../../apps/server/src/db/repositories/run-repository.js";
+import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
+import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { RunEventRepository } from "../../../apps/server/src/modules/observability/index.js";
+import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
 import { runs, sessions } from "../../../apps/server/src/db/schema.js";
-import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
-import { ApprovalGateway } from "../../../apps/server/src/services/approval-gateway.js";
-import { createObserverBridge, fanout } from "../../../apps/server/src/services/observability/observer-bridge.js";
-import { createRunRecorder } from "../../../apps/server/src/services/observability/run-recorder.js";
-import { RunLedger } from "../../../apps/server/src/services/runs/run-ledger.js";
-import { RunRegistry } from "../../../apps/server/src/services/run-registry.js";
-import { SessionService } from "../../../apps/server/src/services/session.js";
-import { SubagentRunner } from "../../../apps/server/src/services/subagents/subagent-runner.js";
-import type { AgentFactory } from "../../../apps/server/src/services/agent-factory.js";
-import { registerRunRoutes } from "../../../apps/server/src/routes/runs.js";
+import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
+import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
+import { createObserverBridge, fanout } from "../../../apps/server/src/modules/observability/index.js";
+import { createRunRecorder } from "../../../apps/server/src/modules/observability/index.js";
+import { RunLedger } from "../../../apps/server/src/modules/runs/index.js";
+import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
+import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
+import { SubagentRunner } from "../../../apps/server/src/modules/subagents/index.js";
+import type { AgentFactory } from "../../../apps/server/src/modules/runs/index.js";
+import { registerRunRoutes } from "../../../apps/server/src/modules/runs/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 
 const usage = {
