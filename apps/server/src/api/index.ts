@@ -1,6 +1,20 @@
 import type { AppInfrastructure, AppServices } from "../types/common.js";
+import { BackgroundTaskRepository } from "../db/repositories/background-task-repository.js";
+import { DrizzleMemoryRepository } from "../db/repositories/memory-repository.js";
+import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
+import { DrizzleMessageSearchRepository } from "../db/repositories/message-search-repository.js";
+import { RunEventRepository } from "../db/repositories/run-event-repository.js";
+import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
+import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
+import { McpServerRepository } from "../db/repositories/mcp-server-repository.js";
 import { UsageRecordRepository } from "../db/repositories/usage-record-repository.js";
+import { createMcpApi, type McpApi } from "./mcp-api.js";
+import { createMemoryApi, type MemoryApi } from "./memory-api.js";
+import { createObservabilityApi, type ObservabilityApi } from "./observability-api.js";
 import { createProvidersApi, type ProvidersApi } from "./providers-api.js";
+import { createRunsApi, type RunsApi } from "./runs-api.js";
+import { createSearchApi, type SearchApi } from "./search-api.js";
+import { createSessionsApi, type SessionsApi } from "./sessions-api.js";
 import { createSettingsApi, type SettingsApi } from "./settings-api.js";
 import { createUsageApi, type UsageApi } from "./usage-api.js";
 
@@ -14,7 +28,13 @@ import { createUsageApi, type UsageApi } from "./usage-api.js";
  * 再动 threads.ts 时就不用返工(§12 Wave 2)。还没搬完的能力暂时不在这个类型里。
  */
 export interface AppApi {
+  readonly mcp: McpApi;
+  readonly memory: MemoryApi;
+  readonly observability: ObservabilityApi;
   readonly providers: ProvidersApi;
+  readonly runs: RunsApi;
+  readonly search: SearchApi;
+  readonly sessions: SessionsApi;
   readonly settings: SettingsApi;
   readonly usage: UsageApi;
 }
@@ -26,6 +46,19 @@ export interface AppApi {
  * 这里建的是无状态的用例入口。分成两个函数是因为后者依赖前者。
  */
 export const buildAppApi = (infra: AppInfrastructure, services: AppServices): AppApi => ({
+  mcp: createMcpApi({
+    servers: new McpServerRepository(infra.db),
+    registry: services.mcp
+  }),
+  memory: createMemoryApi({
+    db: infra.db,
+    config: infra.config,
+    memories: new DrizzleMemoryRepository(infra.db)
+  }),
+  observability: createObservabilityApi({
+    runEvents: new RunEventRepository(infra.db),
+    runs: new DrizzleRunRepository(infra.db)
+  }),
   providers: createProvidersApi({
     db: infra.db,
     encryptor: infra.encryptor,
@@ -35,6 +68,22 @@ export const buildAppApi = (infra: AppInfrastructure, services: AppServices): Ap
     db: infra.db,
     config: infra.config,
     agents: services.agents
+  }),
+  runs: createRunsApi(infra, services),
+  search: createSearchApi({
+    db: infra.db,
+    messageSearch: new DrizzleMessageSearchRepository(infra.db)
+  }),
+  sessions: createSessionsApi({
+    db: infra.db,
+    config: infra.config,
+    logger: infra.logger,
+    sessions: new DrizzleSessionRepository(infra.db),
+    messages: new DrizzleMessageRepository(infra.db),
+    runs: new DrizzleRunRepository(infra.db),
+    backgroundTasks: new BackgroundTaskRepository(infra.db),
+    approvals: services.approvals,
+    session: services.session
   }),
   usage: createUsageApi({
     usageRecords: new UsageRecordRepository(infra.db)

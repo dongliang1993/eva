@@ -1,21 +1,14 @@
-import { randomUUID } from "node:crypto";
-
-import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { SubagentMessage, ThreadMessage, ThreadStatus, ThreadSummary, ThreadUsage } from "@eva/shared";
+import type {
+  SubagentMessage,
+  ThreadMessage,
+  ThreadStatus,
+  ThreadSummary,
+  ThreadUsage
+} from "@eva/shared";
 
-import { BackgroundTaskRepository } from "../db/repositories/background-task-repository.js";
-import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
-import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
-import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
-import { buildActiveChain, resolveLeafFrom } from "../services/message-tree.js";
-import { compactSession } from "../services/compact/compact.js";
-import { deriveSessionStatus, readSessionRuntimeStatus } from "../services/session-status.js";
-import { readSessionUsage } from "../services/session-usage.js";
-import { createModelSummarizer } from "../services/compact/summarize-with-model.js";
-import { resolveModelSlot } from "../services/providers/model-resolver.js";
-import { messages } from "../db/schema.js";
+import type { ThreadCompactResult } from "../api/sessions-api.js";
 
 const listThreadsQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(200).optional()
@@ -42,84 +35,20 @@ const renameThreadSchema = z.object({
   title: z.string().min(1).max(200)
 });
 
-interface ThreadCompactResult {
-  success: boolean;
-  compacted: boolean;
-  trigger: "manual";
-  coveredMessageCount: number;
-  preservedTailMessageCount: number;
-  estimatedTokensBefore: number;
-  estimatedTokensAfter: number;
-  compactionId?: string;
-  thread: ThreadSummary;
-}
-
-/**
- * 列表一次查完(不要 N+1):running 会话 id 一次查,running 之外再逐条查审批。
- * pending 数量正常是 0–2,会话数上百时 O(threads×pending) 可接受;若成为热点,
- * 再给 ApprovalGateway 加 sessionId → count 索引。
- */
-const listThreadSummaries = (
-  app: FastifyInstance,
-  limit = 50
-): readonly ThreadSummary[] => {
-  const sessionRepo = new DrizzleSessionRepository(app.infra.db);
-  const runningSessionIds = new Set(
-    new DrizzleRunRepository(app.infra.db).listRunningSessionIds()
-  );
-
-  return sessionRepo.listAll(limit).map((thread) => {
-    const countRow = app.infra.db
-      .select({
-        count: sql<number>`count(*)`
-      })
-      .from(messages)
-      .where(eq(messages.sessionId, thread.id))
-      .get();
-
-    return {
-      id: thread.id,
-      title: thread.title,
-      model: thread.model,
-      origin: thread.origin,
-      updatedAt: thread.updatedAt,
-      messageCount: Number(countRow?.count ?? 0),
-      workspaceId: thread.workspaceId,
-      status: deriveSessionStatus({
-        hasPendingApproval:
-          app.services.approvals.listPending(thread.id).length > 0,
-        hasRunningRun: runningSessionIds.has(thread.id)
-      })
-    };
-  });
-};
+const NOT_FOUND = { error: "Thread not found" } as const;
 
 export const registerThreadRoutes = (app: FastifyInstance): void => {
   app.get("/api/v1/threads", async (request): Promise<readonly ThreadSummary[]> => {
     const query = listThreadsQuerySchema.parse(request.query ?? {});
-    return listThreadSummaries(app, query.limit ?? 50);
+
+    return app.api.sessions.listSummaries(query.limit ?? 50);
   });
 
   app.post("/api/v1/threads", async (request, reply): Promise<ThreadSummary> => {
     const body = createThreadSchema.parse(request.body ?? {});
-    const repo = new DrizzleSessionRepository(app.infra.db);
-    const thread = repo.create({
-      id: randomUUID(),
-      ...(body.title ? { title: body.title } : {})
-    });
-
     reply.code(201);
 
-    return {
-      id: thread.id,
-      title: thread.title,
-      model: thread.model,
-      origin: thread.origin,
-      updatedAt: thread.updatedAt,
-      messageCount: 0,
-      workspaceId: thread.workspaceId,
-      status: "idle"
-    };
+    return app.api.sessions.create(body.title);
   });
 
   app.put(
@@ -127,16 +56,14 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
     async (request, reply): Promise<ThreadSummary | { error: string }> => {
       const { id } = request.params as { id: string };
       const body = setThreadWorkspaceSchema.parse(request.body ?? {});
-      const sessionRepo = new DrizzleSessionRepository(app.infra.db);
-
-      const updated = sessionRepo.updateWorkspace(id, body.workspaceId);
+      const updated = app.api.sessions.setWorkspace(id, body.workspaceId);
 
       if (!updated) {
         reply.code(404);
-        return { error: "Thread not found" };
+        return NOT_FOUND;
       }
 
-      return listThreadSummaries(app, 1000).find((item) => item.id === id)!;
+      return updated;
     }
   );
 
@@ -145,26 +72,23 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
     async (request, reply): Promise<ThreadSummary | { error: string }> => {
       const { id } = request.params as { id: string };
       const body = renameThreadSchema.parse(request.body ?? {});
-      const sessionRepo = new DrizzleSessionRepository(app.infra.db);
+      const updated = app.api.sessions.rename(id, body.title);
 
-      const updated = sessionRepo.updateTitle(id, body.title);
       if (!updated) {
         reply.code(404);
-        return { error: "Thread not found" };
+        return NOT_FOUND;
       }
 
-      return listThreadSummaries(app, 1000).find((item) => item.id === id)!;
+      return updated;
     }
   );
 
   app.delete("/api/v1/threads/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const repo = new DrizzleSessionRepository(app.infra.db);
-    const deleted = repo.deleteById(id);
 
-    if (!deleted) {
+    if (!app.api.sessions.delete(id)) {
       reply.code(404);
-      return { error: "Thread not found" };
+      return NOT_FOUND;
     }
 
     reply.code(204);
@@ -175,212 +99,96 @@ export const registerThreadRoutes = (app: FastifyInstance): void => {
     "/api/v1/threads/:id/compact",
     async (request, reply): Promise<ThreadCompactResult | { error: string }> => {
       const { id } = request.params as { id: string };
-      const sessionRepo = new DrizzleSessionRepository(app.infra.db);
-      const thread = sessionRepo.findById(id);
+      const result = await app.api.sessions.compact(id);
 
-      if (!thread) {
+      if (!result) {
         reply.code(404);
-        return { error: "Thread not found" };
+        return NOT_FOUND;
       }
 
-      // 手动压缩用 tool 槽位模型写摘要;tool 没配则回落**这个会话绑定的模型**
-      // (thread.model = 最近一轮 run 选定的)—— 主对话模型是 per-thread 的,
-      // 没有全局 chat 槽位可问。两者都没有时不注入 summarizer,compactSession
-      // 回落确定性拼接:摘要质量可以降级,这条路由不能挂。
-      let summarize: ReturnType<typeof createModelSummarizer> | undefined;
-      try {
-        const toolSlot = resolveModelSlot(app.infra.db, app.infra.config, "tool");
-        const sessionSlot = thread.model
-          ? resolveModelSlot(app.infra.db, app.infra.config, "chat", thread.model)
-          : undefined;
-        const binding = toolSlot.ok
-          ? toolSlot.binding
-          : sessionSlot?.ok
-            ? sessionSlot.binding
-            : undefined;
-        summarize = binding !== undefined ? createModelSummarizer(binding, app.log) : undefined;
-      } catch {
-        summarize = undefined;
-      }
-
-      const result = await compactSession(app.infra.db, {
-        sessionId: id,
-        trigger: "manual",
-        ...(summarize ? { summarize } : {})
-      });
-
-      const updatedThread = listThreadSummaries(app, 1000).find((item) => item.id === id) ?? {
-        id: thread.id,
-        title: thread.title,
-        model: thread.model,
-        origin: thread.origin,
-        updatedAt: thread.updatedAt,
-        messageCount: app.infra.db
-          .select({ count: sql<number>`count(*)` })
-          .from(messages)
-          .where(eq(messages.sessionId, thread.id))
-          .get()?.count ?? 0,
-        workspaceId: thread.workspaceId,
-        status: "idle"
-      };
-
-      return {
-        success: true,
-        compacted: result.compacted,
-        trigger: "manual",
-        coveredMessageCount: result.coveredMessageCount,
-        preservedTailMessageCount: result.preservedTailMessageCount,
-        estimatedTokensBefore: result.estimatedTokensBefore,
-        estimatedTokensAfter: result.estimatedTokensAfter,
-        ...(result.compactionId ? { compactionId: result.compactionId } : {}),
-        thread: updatedThread
-      };
+      return result;
     }
   );
 
-  app.get("/api/v1/threads/:id/status", async (request, reply): Promise<ThreadStatus | { error: string }> => {
-    const { id } = request.params as { id: string };
-    const sessionRepo = new DrizzleSessionRepository(app.infra.db);
-    const thread = sessionRepo.findById(id);
+  app.get(
+    "/api/v1/threads/:id/status",
+    async (request, reply): Promise<ThreadStatus | { error: string }> => {
+      const { id } = request.params as { id: string };
+      const status = app.api.sessions.readStatus(id);
 
-    if (!thread) {
-      reply.code(404);
-      return { error: "Thread not found" };
-    }
-
-    return readSessionRuntimeStatus(app.infra.db, app.services.approvals, id);
-  });
-
-  app.get("/api/v1/threads/:id/usage", async (request, reply): Promise<ThreadUsage | { error: string }> => {
-    const { id } = request.params as { id: string };
-    const sessionRepo = new DrizzleSessionRepository(app.infra.db);
-    const thread = sessionRepo.findById(id);
-
-    if (!thread) {
-      reply.code(404);
-      return { error: "Thread not found" };
-    }
-
-    return readSessionUsage(app.infra.db, app.infra.config, app.services.session, id);
-  });
-
-  app.get("/api/v1/threads/:id/messages", async (request, reply): Promise<readonly ThreadMessage[] | { error: string }> => {
-    const { id } = request.params as { id: string };
-    const query = getThreadMessagesQuerySchema.parse(request.query ?? {});
-    const sessionRepo = new DrizzleSessionRepository(app.infra.db);
-    const thread = sessionRepo.findById(id);
-
-    if (!thread) {
-      reply.code(404);
-      return { error: "Thread not found" };
-    }
-
-    const messageRepo = new DrizzleMessageRepository(app.infra.db);
-    const all = messageRepo.findBySessionId(id, { limit: query.limit ?? 200 });
-    const chain = buildActiveChain(all, thread.activeLeafId);
-
-    // 每个 slot 的版本 id 列表(创建序)→ ThreadMessage.siblingIds。
-    const siblingsBySlot = new Map<string, string[]>();
-    for (const message of all) {
-      if (message.slotId !== null) {
-        const list = siblingsBySlot.get(message.slotId) ?? [];
-        list.push(message.id);
-        siblingsBySlot.set(message.slotId, list);
+      if (!status) {
+        reply.code(404);
+        return NOT_FOUND;
       }
-    }
 
-    return chain.map((message) => ({
-      id: message.id,
-      role: message.role,
-      message: message.message,
-      runId: message.runId,
-      createdAt: message.createdAt,
-      siblingIds: message.slotId !== null
-        ? (siblingsBySlot.get(message.slotId) ?? [message.id])
-        : [message.id]
-    }));
-  });
+      return status;
+    }
+  );
+
+  app.get(
+    "/api/v1/threads/:id/usage",
+    async (request, reply): Promise<ThreadUsage | { error: string }> => {
+      const { id } = request.params as { id: string };
+      const usage = app.api.sessions.readUsage(id);
+
+      if (!usage) {
+        reply.code(404);
+        return NOT_FOUND;
+      }
+
+      return usage;
+    }
+  );
+
+  app.get(
+    "/api/v1/threads/:id/messages",
+    async (request, reply): Promise<readonly ThreadMessage[] | { error: string }> => {
+      const { id } = request.params as { id: string };
+      const query = getThreadMessagesQuerySchema.parse(request.query ?? {});
+      const messages = app.api.sessions.listMessages(id, query.limit ?? 200);
+
+      if (!messages) {
+        reply.code(404);
+        return NOT_FOUND;
+      }
+
+      return messages;
+    }
+  );
 
   // S7:某次 Task 调用页面的子代理消息流 —— 刷新后任务卡片展开区的数据源。
-  // 子代理进程与主链共表,靠 parent_tool_call_id 隔离;这里按 toolCallId 取那棵子树。
-  app.get("/api/v1/threads/:id/subagent-messages", async (request, reply): Promise<SubagentMessage | { error: string }> => {
-    const { id } = request.params as { id: string };
-    const query = getSubagentMessagesQuerySchema.parse(request.query ?? {});
+  app.get(
+    "/api/v1/threads/:id/subagent-messages",
+    async (request, reply): Promise<SubagentMessage | { error: string }> => {
+      const { id } = request.params as { id: string };
+      const query = getSubagentMessagesQuerySchema.parse(request.query ?? {});
+      const found = app.api.sessions.findSubagentMessages(id, query.toolCallId);
 
-    const sessionRepo = new DrizzleSessionRepository(app.infra.db);
-    const thread = sessionRepo.findById(id);
-    if (!thread) {
-      reply.code(404);
-      return { error: "Thread not found" };
-    }
-
-    const task = new BackgroundTaskRepository(app.infra.db).findByParentToolCallId(query.toolCallId);
-    if (!task || task.sessionId !== id) {
-      reply.code(404);
-      return { error: "Subagent task not found for this tool call" };
-    }
-
-    // 该任务下挂的消息(任务书 user + 子代理 assistant),按创建顺序排好。
-    const messageRepo = new DrizzleMessageRepository(app.infra.db);
-    const rows = messageRepo.findBySubagentToolCallId(query.toolCallId);
-
-    return {
-      taskId: task.id,
-      parentToolCallId: task.parentToolCallId,
-      subagentType: task.subagentType,
-      description: task.description,
-      status: task.status,
-      result: task.result,
-      error: task.error,
-      startedAt: task.startedAt,
-      endedAt: task.endedAt,
-      messages: rows.map((message) => ({
-        id: message.id,
-        role: message.role,
-        message: message.message,
-        runId: message.runId,
-        createdAt: message.createdAt,
-        siblingIds: [message.id]
-      }))
-    };
-  });
-
-  app.post("/api/v1/messages/:id/switch-version", async (request, reply): Promise<readonly ThreadMessage[] | { error: string }> => {
-    const { id } = request.params as { id: string };
-    const messageRepo = new DrizzleMessageRepository(app.infra.db);
-    const message = messageRepo.findById(id);
-
-    if (!message) {
-      reply.code(404);
-      return { error: "Message not found" };
-    }
-
-    // 切版本:activeLeafId = 从 target 向下探到分支末端(该分支的后续对话一并恢复)。
-    const all = messageRepo.findBySessionId(message.sessionId, { limit: 2000 });
-    const sessionRepo = new DrizzleSessionRepository(app.infra.db);
-    const session = sessionRepo.findById(message.sessionId)!;
-    const leafId = resolveLeafFrom(all, id);
-    sessionRepo.updateActiveLeaf(session.id, leafId);
-
-    const chain = buildActiveChain(all, leafId);
-    const siblingsBySlot = new Map<string, string[]>();
-    for (const m of all) {
-      if (m.slotId !== null) {
-        const list = siblingsBySlot.get(m.slotId) ?? [];
-        list.push(m.id);
-        siblingsBySlot.set(m.slotId, list);
+      if (!found) {
+        // 会话不存在与「这个 toolCallId 下没有子代理任务」都是 404 —— 但错误信息
+        // 保持区分:前者是 URL 错了,后者是卡片指向了一个不存在的任务。
+        reply.code(404);
+        return app.api.sessions.find(id)
+          ? { error: "Subagent task not found for this tool call" }
+          : NOT_FOUND;
       }
-    }
 
-    return chain.map((m) => ({
-      id: m.id,
-      role: m.role,
-      message: m.message,
-      runId: m.runId,
-      createdAt: m.createdAt,
-      siblingIds: m.slotId !== null
-        ? (siblingsBySlot.get(m.slotId) ?? [m.id])
-        : [m.id]
-    }));
-  });
+      return found;
+    }
+  );
+
+  app.post(
+    "/api/v1/messages/:id/switch-version",
+    async (request, reply): Promise<readonly ThreadMessage[] | { error: string }> => {
+      const { id } = request.params as { id: string };
+      const chain = app.api.sessions.switchMessageVersion(id);
+
+      if (!chain) {
+        reply.code(404);
+        return { error: "Message not found" };
+      }
+
+      return chain;
+    }
+  );
 };

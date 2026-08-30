@@ -7,10 +7,7 @@ import type {
   SubRunSummaryDto
 } from "@eva/shared";
 
-import { RunEventRepository } from "../db/repositories/run-event-repository.js";
-import type { RunEventRecord, SubRunSummary } from "../db/repositories/run-event-repository.js";
-import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
-import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
+import type { RunEventRecord, SubRunSummary } from "../api/observability-api.js";
 
 const limitSchema = z.coerce.number().int().min(1).max(1000).default(200);
 
@@ -113,14 +110,12 @@ export const registerTrajectoryRoutes = (app: FastifyInstance): void => {
     const { sessionId } = request.params as { sessionId: string };
     const query = sessionTrajectoryQuerySchema.parse(request.query ?? {});
 
-    const session = new DrizzleSessionRepository(app.infra.db).findById(sessionId);
-    if (!session) {
+    if (!app.api.sessions.find(sessionId)) {
       reply.code(404);
       return { error: "session not found" };
     }
 
-    const repository = new RunEventRepository(app.infra.db);
-    const events = repository.listBySession(sessionId, {
+    const events = app.api.observability.listSessionEvents(sessionId, {
       ...(query.beforeOccurredAtMs !== undefined &&
         query.beforeRunId !== undefined &&
         query.beforeSeq !== undefined
@@ -139,7 +134,7 @@ export const registerTrajectoryRoutes = (app: FastifyInstance): void => {
     const last = events[events.length - 1];
     const response: SessionTrajectoryResponse = {
       events: events.map(toDto),
-      subRuns: repository.summarizeSubRuns(sessionId).map(toSubRunDto),
+      subRuns: app.api.observability.summarizeSubRuns(sessionId).map(toSubRunDto),
       nextCursor:
         events.length === query.limit && last !== undefined
           ? {
@@ -167,13 +162,12 @@ export const registerTrajectoryRoutes = (app: FastifyInstance): void => {
       })
       .parse(rawQuery);
 
-    const run = new DrizzleRunRepository(app.infra.db).findById(runId);
-    if (!run) {
+    if (!app.api.observability.runExists(runId)) {
       reply.code(404);
       return { error: "run not found" };
     }
 
-    const events = new RunEventRepository(app.infra.db).listByRun(runId, {
+    const events = app.api.observability.listRunEvents(runId, {
       ...(query.beforeSeq !== undefined ? { beforeSeq: query.beforeSeq } : {}),
       limit: query.limit
     });
@@ -192,13 +186,13 @@ export const registerTrajectoryRoutes = (app: FastifyInstance): void => {
   app.get("/api/v1/threads/:sessionId/session-log", async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
 
-    const session = new DrizzleSessionRepository(app.infra.db).findById(sessionId);
+    const session = app.api.sessions.find(sessionId);
     if (!session) {
       reply.code(404);
       return { error: "session not found" };
     }
 
-    const rows = new RunEventRepository(app.infra.db).listAllBySession(sessionId);
+    const rows = app.api.observability.listAllSessionEvents(sessionId);
     const lines = [
       JSON.stringify({
         type: "session",

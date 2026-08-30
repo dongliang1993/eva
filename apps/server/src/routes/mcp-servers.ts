@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type { FastifyInstance } from "fastify";
 import type {
   McpServerConfig,
@@ -8,11 +6,7 @@ import type {
 } from "@eva/shared";
 import { z } from "zod";
 
-import {
-  McpServerRepository,
-  toMcpServerConfig,
-  type McpServerFields
-} from "../db/repositories/mcp-server-repository.js";
+import type { McpServerFields } from "../api/mcp-api.js";
 import { MCP_SERVER_NAME_PATTERN } from "../services/mcp/mcp-tools.js";
 
 const nameSchema = z
@@ -68,36 +62,24 @@ const toFields = (input: ServerInput): McpServerFields =>
     };
 
 export const registerMcpServerRoutes = (app: FastifyInstance): void => {
-  const repo = (): McpServerRepository => new McpServerRepository(app.infra.db);
-
-  app.get("/api/v1/mcp-servers", async (): Promise<McpServersPayload> => {
-    // 先确保连过一轮，否则 enabled 但未连接的 server 只能报"未连接"，对用户没信息量。
-    await app.services.mcp.ensureConnected();
-
-    return {
-      servers: repo().listAll().map(toMcpServerConfig),
-      statuses: app.services.mcp.describe()
-    };
-  });
+  app.get("/api/v1/mcp-servers", async (): Promise<McpServersPayload> =>
+    app.api.mcp.describeAll()
+  );
 
   app.post(
     "/api/v1/mcp-servers",
     async (request, reply): Promise<McpServerConfig | { error: string }> => {
       // 校验交给全局 ZodError handler(400 + firstIssue),这里只管业务。
       const input = serverInputSchema.parse(request.body ?? {});
+      const result = await app.api.mcp.create(toFields(input));
 
-      const store = repo();
-
-      if (store.findByName(input.name)) {
+      if (!result.ok) {
         reply.code(409);
         return { error: `已存在名为 "${input.name}" 的 MCP server` };
       }
 
-      const created = store.create(randomUUID(), "manual", toFields(input));
-      await app.services.mcp.reconnect(created.id);
-
       reply.code(201);
-      return toMcpServerConfig(created);
+      return result.server;
     }
   );
 
@@ -105,8 +87,7 @@ export const registerMcpServerRoutes = (app: FastifyInstance): void => {
     "/api/v1/mcp-servers/:id",
     async (request, reply): Promise<McpServerConfig | { error: string }> => {
       const { id } = request.params as { id: string };
-      const store = repo();
-      const existing = store.findById(id);
+      const existing = app.api.mcp.find(id);
 
       if (!existing) {
         reply.code(404);
@@ -133,33 +114,25 @@ export const registerMcpServerRoutes = (app: FastifyInstance): void => {
           };
         }
 
-        const updated = store.setEnabled(id, (body as { enabled: boolean }).enabled)!;
-        await app.services.mcp.reconnect(id);
-
-        return toMcpServerConfig(updated);
+        return (await app.api.mcp.setEnabled(id, (body as { enabled: boolean }).enabled))!;
       }
 
       // 手动 server：校验交给全局 ZodError handler(400 + firstIssue)。
       const input = serverInputSchema.parse(request.body ?? {});
+      const result = await app.api.mcp.update(id, toFields(input));
 
-      const conflict = store.findByName(input.name);
-
-      if (conflict && conflict.id !== id) {
+      if (!result.ok) {
         reply.code(409);
         return { error: `已存在名为 "${input.name}" 的 MCP server` };
       }
 
-      const updated = store.update(id, toFields(input))!;
-      await app.services.mcp.reconnect(id);
-
-      return toMcpServerConfig(updated);
+      return result.server;
     }
   );
 
   app.delete("/api/v1/mcp-servers/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const store = repo();
-    const existing = store.findById(id);
+    const existing = app.api.mcp.find(id);
 
     if (!existing) {
       reply.code(404);
@@ -173,8 +146,7 @@ export const registerMcpServerRoutes = (app: FastifyInstance): void => {
       };
     }
 
-    await app.services.mcp.disconnect(id);
-    store.deleteById(id);
+    await app.api.mcp.delete(id);
 
     reply.code(204);
     return null;
@@ -185,12 +157,12 @@ export const registerMcpServerRoutes = (app: FastifyInstance): void => {
     async (request, reply): Promise<McpServerStatus | { error: string }> => {
       const { id } = request.params as { id: string };
 
-      if (!repo().findById(id)) {
+      if (!app.api.mcp.find(id)) {
         reply.code(404);
         return { error: "MCP server not found" };
       }
 
-      return app.services.mcp.reconnect(id);
+      return app.api.mcp.reconnect(id);
     }
   );
 };

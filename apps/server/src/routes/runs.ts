@@ -2,49 +2,21 @@ import type { FastifyInstance } from "fastify";
 import { toErrorMessage } from "@eva/shared";
 
 import { AgentUnavailableError } from "../services/agent-factory.js";
-import { RunCoordinator } from "../services/runs/run-coordinator.js";
-import { RunFinalizer } from "../services/runs/run-finalizer.js";
 import { SessionBusyError } from "../services/runs/run-preparation.js";
 import { RunEventStream } from "../transports/sse/event-stream.js";
+
+const RUN_GONE = { error: "run not found or already finished" } as const;
 
 /**
  * Run 的三条 HTTP 端点 —— **只做协议翻译**(宪法 C2)。
  *
- * 这个文件里没有业务顺序:一次 Run 怎么跑在 services/runs/run-coordinator.ts。
- * 留在这里的只有三样东西:SSE 连接的建立、`RunOutcome` → HTTP 状态码的映射、
- * 以及注册表查询的 404 语义。
+ * 这个文件里没有业务顺序,也没有装配:一次 Run 怎么跑在
+ * services/runs/run-coordinator.ts,依赖怎么拼在 api/runs-api.ts。
+ * 留在这里的只有 SSE 连接的建立、`RunOutcome` → HTTP 状态码、以及 404 语义。
  */
 export const registerRunRoutes = (app: FastifyInstance): void => {
-  // 依赖都是进程级的 —— 一个实例服务所有请求,per-run 状态活在 coordinator.run() 里面。
-  const coordinator = new RunCoordinator({
-    config: app.infra.config,
-    db: app.infra.db,
-    logger: app.log,
-    skills: app.infra.skills,
-    baseObserver: app.infra.observer,
-    agents: app.services.agents,
-    session: app.services.session,
-    approvals: app.services.approvals,
-    approvalPolicies: app.services.approvalPolicies,
-    runLedger: app.services.runLedger,
-    runRegistry: app.services.runRegistry,
-    workspaces: app.services.workspaces,
-    planWeave: app.services.planWeave,
-    mcp: app.services.mcp,
-    // 终态的构造权留在这一侧(今天的组合根)。coordinator 只拿到这个工厂,
-    // 拿不到 RunSettlingLedger —— 于是「在 catch 里顺手 fail 一下」编译不过。
-    createFinalizer: (binding) =>
-      new RunFinalizer({
-        ...binding,
-        runLedger: app.services.runLedger,
-        session: app.services.session,
-        runRegistry: app.services.runRegistry,
-        approvals: app.services.approvals
-      })
-  });
-
   app.post("/api/v1/runs/stream", async (request, reply) => {
-    const outcome = await coordinator.run(
+    const outcome = await app.api.runs.start(
       request.body,
       new RunEventStream(reply),
       request.log
@@ -78,20 +50,12 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
    */
   app.get("/api/v1/runs/:runId/stream", async (request, reply) => {
     const { runId } = request.params as { runId: string };
-    const hub = app.services.runRegistry.hubFor(runId);
 
     // 404 是正常语义:run 在刷新与这次请求之间跑完了 —— 前端退回只读 DB 消息。
-    if (!hub) {
+    if (!(await app.api.runs.attach(runId, new RunEventStream(reply)))) {
       reply.code(404);
-      return { error: "run not found or already finished" };
+      return RUN_GONE;
     }
-
-    const stream = new RunEventStream(reply);
-    stream.open();
-    const done = hub.attach(stream, { replay: true });
-    stream.onDisconnect(() => hub.detach(stream));
-
-    await done;
 
     return undefined;
   });
@@ -99,13 +63,10 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
   app.post("/api/v1/runs/:runId/abort", async (request, reply) => {
     const { runId } = request.params as { runId: string };
 
-    if (!app.services.runRegistry.abort(runId)) {
+    if (!app.api.runs.abort(runId)) {
       reply.code(404);
-      return { error: "run not found or already finished" };
+      return RUN_GONE;
     }
-
-    // 中止时立刻拒绝该 run 下 pending 的审批,否则 agent loop 会被吊住
-    app.services.approvals.cancelByRun(runId);
 
     return { ok: true };
   });

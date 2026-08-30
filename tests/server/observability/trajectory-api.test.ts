@@ -7,6 +7,7 @@ import { backgroundTasks, runs, sessions } from "../../../apps/server/src/db/sch
 import { RunEventRepository } from "../../../apps/server/src/db/repositories/run-event-repository.js";
 import { registerLoopbackTokenHook } from "../../../apps/server/src/loopback.js";
 import { registerTrajectoryRoutes } from "../../../apps/server/src/routes/trajectory.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 import type {
   RunEventDto,
   RunTrajectoryResponse,
@@ -22,6 +23,7 @@ describe("trajectory API(T52)", () => {
     migrateDb(db);
     app = Fastify();
     app.decorate("infra", { db });
+    decorateAppApi(app);
     registerTrajectoryRoutes(app);
     await app.ready();
   });
@@ -259,6 +261,7 @@ describe("trajectory API(T52)", () => {
   it("启用 loopback token:无 token 访问三个接口全部 401;GET /api/v1/threads 仍放行", async () => {
     const guarded = Fastify();
     guarded.decorate("infra", { db });
+    decorateAppApi(guarded);
     registerLoopbackTokenHook(guarded, "test-token");
     registerTrajectoryRoutes(guarded);
     // 白名单豁免的路径给个 stub,验证它不被拦
