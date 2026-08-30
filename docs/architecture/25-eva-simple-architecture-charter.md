@@ -186,6 +186,8 @@ Run Registry、Run Ledger、Run Hub、Message Recorder、Approval Gateway、Run 
 - 不一次性重写整个仓库；
 - 不更换现有主要技术栈；
 - 不为了“纯粹”把每个函数都包装成 Service 或 Interface；
+- **不为只有一种实现的 SQLite 表造 `XxxStore` + `DrizzleXxxStore` 成对文件**（C6）；
+- **不把现有文件改个名当成重构** —— 改名断掉 `git blame`，却不减少任何理解成本；
 - 不引入全局 Event Bus 代替显式控制流；
 - 不为了缩短文件而制造大量只有几十行、命名含糊的中转文件；
 - 不把所有模块强行做成可动态加载的插件；
@@ -308,17 +310,29 @@ Route 禁止：
 
 ### C6：只在变化边界使用 Port
 
-Port 适用于：
+**门槛是硬的：今天就存在第二个实现，或者跨 package 边界。** 两条都不满足就直接用具体类。
 
-- 数据库存储；
-- 文件系统；
-- 时钟与 UUID；
-- 模型供应商；
-- MCP；
-- Event Sink；
-- Harness 与 Eva Server 的边界。
+「以后可能要换」不算变化边界 —— Eva 是本地优先桌面应用，SQLite 不会被换掉，
+为它造 Port 只会买到一层 indirection。「方便测试」也不算：Eva 的测试已经用真 SQLite
+（`initDb` + `migrateDb`，见 `tests/run-lifecycle.test.ts`），真库又快又保真，
+换 in-memory 实现买不到任何东西。
 
-不要为每个只有一个实现的纯业务类创建 `IXxxService`。接口的价值是隔离变化、支持替换和测试，不是提高抽象数量。
+按这把尺子量，Eva 里**真正值得 Port 的只有四类**：
+
+| 值得 | 满足哪一条 |
+|---|---|
+| `LanguageModel`（AI SDK 提供） | 已有 5+ provider 实现；测试用 `MockLanguageModelV4` |
+| MCP Client | 真有两种形态（stdio / http），且 `tests/helpers/fake-mcp-server.ts` 已存在 |
+| `RequestApproval` / `RequestPlanReview` / `PlanWeaveGateway` | 跨 package 边界 —— harness 绝不能知道 DB 与 SSE |
+| `Encryptor` | 今天就有两个实现：`AesGcmEncryptor` 与降级用的 `IdentityEncryptor` |
+
+**明确不要 Port 的：** 每张 SQLite 表的 Repository / Store、时钟、UUID、文件系统、
+以及任何只有一个实现的纯业务类。不要为它们创建 `XxxStore` + `DrizzleXxxStore` 这样的成对文件 ——
+那是两个文件、一层跳转，换来零灵活性。Repository 就叫 `xxx-repository.ts`，
+直接实例化，由组合根注入。
+
+不要为每个只有一个实现的纯业务类创建 `IXxxService`。接口的价值是隔离变化、支持替换和测试，
+不是提高抽象数量。
 
 ### C7：控制流用直接调用，旁路投影用事件
 
@@ -465,13 +479,15 @@ packages/
 
 ```text
 modules/approvals/
-  approval-service.ts
-  approval-policy.ts
-  approval-store.ts           # Port
-  drizzle-approval-store.ts   # Adapter
+  approval-gateway.ts         # pending promise + 决策
+  approval-policy.ts          # 「始终允许」policy key 匹配
+  approval-repository.ts      # SQL,直接实例化,不造 Port(见 C6)
   approval-routes.ts          # HTTP Adapter
   index.ts                    # Public API
 ```
+
+注意这个示例**没有** `approval-store.ts`(Port) + `drizzle-approval-store.ts`(Adapter) 这一对。
+按 C6 的门槛，approval_requests 表永远只有一种实现，成对文件买不到任何东西。
 
 只有当文件数和职责明显增长后，再在模块内部创建：
 
@@ -730,32 +746,63 @@ Runs 模块拥有：
 
 #### 建议结构
 
+先看 `runs.ts` 575 行的实测分区 —— 目标结构必须从这里推导，不能从分层模板抄：
+
+| 区块 | 行数 | 独立的变化原因 |
+|---|---|---|
+| 审批闭包 + 决策查询 | 109 + 20 | 审批策略（直放顺序、policy 记忆） |
+| 能力装配（skill / memory / planGate / mcp / planWeave） | 84 | 「本轮 agent 能用什么」 |
+| 子代理装配 | 76 | 同上 |
+| 收尾 + `catch` + `finally` | 66 | 终态与资源释放 |
+| 阶段①+台账+观测 / 路由回填 / 流式循环 | 58 + 31 + **13** | 编排顺序本身 |
+| setup | 32 | HTTP / SSE 协议 |
+
+**流式循环只有 13 行** —— 它不配一个文件。任何把它单独立成 `run-executor.ts` 的方案，
+都违反 §2.2「不为了缩短文件而制造大量只有几十行的中转文件」。
+
+目标结构（**11 个文件里 6 个是搬家，只有 5 个是新概念**）：
+
 ```text
 modules/runs/
-  run-routes.ts
-  run-coordinator.ts
-  run-scope.ts
-  run-opener.ts
-  run-runtime-builder.ts
-  run-executor.ts
-  run-finalizer.ts
-  run-registry.ts
-  run-hub.ts
-  run-store.ts
-  drizzle-run-store.ts
+  run-routes.ts                    # 新   ~70   schema / SSE 连接 / 错误码映射
+  run-coordinator.ts               # 新  ~150   五阶段顺序 + 流式循环 + RunScope(内联)
+  run-approval-channel.ts          # 新  ~130   三个审批闭包 + 两个决策查询
+  run-runtime-builder.ts           # 新  ~160   本轮能力装配(含子代理)
+  run-finalizer.ts                 # 新   ~70   终态唯一出口
+  run-preparation.ts               # 搬家  250  今天在 services/runs/
+  run-ledger.ts                    # 搬家   60  今天在 services/runs/
+  run-registry.ts                  # 搬家   48  今天在 services/
+  run-hub.ts                       # 搬家  100  今天在 services/runs/
+  assistant-message-recorder.ts    # 搬家  171  今天在 services/runs/
+  run-repository.ts                # 搬家  304  今天在 db/repositories/,名字不改
   index.ts
 ```
 
-不要求一次创建所有文件。先提取 `RunScope`、`RunCoordinator` 和 `RunFinalizer` 即可。
+三处刻意的取舍，都是对「抽象数量」的克制：
+
+- **不造 `run-store.ts` + `drizzle-run-store.ts` 这一对 Port/Adapter。** `runs` 表永远只有
+  一种实现，且测试本来就用真 SQLite（C6）。保留 `run-repository.ts` 这个名字，不改名。
+- **不造 `run-opener.ts`。** 它只是 `prepareRunInput` 换个名字 —— 纯 churn，还断了 `git blame`。
+  `run-preparation.ts` 原样搬过来。
+- **`RunScope` 不单独成文件。** 它约 50 行、只有 coordinator 一个使用者，写在
+  `run-coordinator.ts` 里与使用者同处。涨过 80 行或出现第二个使用者时再拆。
+
+**`run-finalizer.ts` 保留独立文件，理由不是行数而是它能被脚本守住**：定一条规则
+「只有 `run-finalizer.ts` 可以 import `run-ledger` 的 `settle` / `fail`」，
+就再没人能在某个 `catch` 里偷偷开第二个终态出口。放进 coordinator，这条规则无法表达。
 
 #### 改造动作
 
+提取顺序按**风险升序**排，而不是按概念优先级 —— 每一步做完 `runs.ts` 都更短，
+且可以停在任何一步：
+
 1. **P0**：补齐 Start/Retry/Abort/Disconnect/Approval pending/Agent error 的 characterization tests；
-2. **P1**：提取 `RunScope`，统一持有 run-scoped 资源和幂等清理；
-3. **P1**：提取 `RunApprovalChannel`，移出 Route 中的审批与 Plan Review 闭包；
-4. **P1**：提取 `RunRuntimeBuilder`，显式装配 Skill、Memory、Plan、MCP、Subagent；
-5. **P1**：提取 `RunFinalizer`，统一完成 settle/fail/rollback/end/cleanup；
-6. **P1**：Route 收敛为 schema、connection、use case、error mapping；
+2. **P1**：提取 `RunApprovalChannel`（575 → 446 行）。最安全的一步：三个闭包是纯函数式的，
+   不碰生命周期。**必须保持现有短路顺序**：bash 只读直放 → plan 文件直放 → policy 命中 → 才弹窗；
+3. **P1**：提取 `RunRuntimeBuilder`（446 → 286 行）。最机械的一步：依赖多但没有控制流；
+4. **P1**：提取 `RunFinalizer`（286 → 220 行）。开始碰 `catch`/`finally`，靠第 1 步的测试兜底；
+5. **P1**：把剩下的 220 行劈成 `run-routes.ts` + `run-coordinator.ts`，`RunScope` 内联在后者；
+6. **P1**：加 lint 规则锁住「只有 `run-finalizer.ts` 能 import `run-ledger.settle/fail`」；
 7. **P2**：将 `runPhase` 替换为显式状态转换；
 8. **P2**：为 `RunScope.dispose` 添加幂等、部分初始化和异常清理测试；
 9. **P3**：把「`RunRegistry` 不持有 `sessionId`」「Hub 与 Registry 同寿」写成 registry 的单测断言 ——
@@ -845,7 +892,9 @@ Harness 只认识 `RequestApproval` / `RequestPlanReview` Port，不认识数据
 4. **P2**：把 `provider-repository.ts` 中的 SQL 与 provider 业务校验分开；
 5. **P2**：保存 Run 级 `RoutingSnapshot`，明确 requested/resolved/tool model；
 6. **P2**：Settings Route 只调用 `getSettings` / `replaceSettings`；
-7. **P3**：为 Provider 探活和模型发现定义统一、可超时的 Client Port。
+7. **P3**：为 Provider 探活和模型发现定义统一、可超时的 Client 抽象 —— 它满足 C6
+   （`openai-compatible` 与 `anthropic` 两套探活协议今天就并存），但只做这一层，
+   不要顺手给 provider 表也造 Port。
 
 ### 7.6 Agent Factory 与 Runtime Builder
 
@@ -898,7 +947,9 @@ Server Skills：
 #### 改造动作
 
 1. **P1**：建立 `SkillCatalog` 公开 Query API，Skill Route 不再读取 `app.infra.skills`；
-2. **P1**：`selectRunSkills` 依赖 Selection Store Port 和 Model Selector Port，不直接创建 Repository；
+2. **P1**：`selectRunSkills` 通过注入拿到 selection repository 与 tool 槽位模型，不自己 `new Repository`
+   也不自己读 DB。**注意：这里注入的是具体类，不是新造的 Port** —— `session_skill_selections`
+   只有一种实现（C6）；模型侧本来就是 `LanguageModel` 这个既有 Port；
 3. **P1**：Run Runtime 保存 selected skill names、allowed tools 和 fallback 结果快照；
 4. **P2**：把 always-inject、Session 累积、本轮新选的合并规则提取为纯函数；
 5. **P2**：明确 `allowed-tools` 只是 preferred tools contribution，不是整个工具集的替代；
@@ -1050,7 +1101,8 @@ Server Subagent：
 1. **P1**：建立 create/update/delete/reconnect MCP 应用用例；
 2. **P1**：Route 不再创建 McpServerRepository；
 3. **P1**：定义配置更新与 live reconnect 的失败语义；
-4. **P2**：MCP Client 与 Registry 通过 Port 隔离；
+4. **P2**：MCP Client 与 Registry 通过 Port 隔离 —— 这是 C6 认可的四类之一
+   （stdio / http 两种形态今天就并存，且 `tests/helpers/fake-mcp-server.ts` 已经是它的第二个实现）；
 5. **P2**：Run 获取不可变 Tool Snapshot，避免一次 Run 中工具集被中途改变；
 6. **P2**：MCP 错误保持降级，不让单个 Server 破坏主 Run；
 7. **P3**：为动态工具 schema 和 readOnly hint 建契约测试。
@@ -1593,6 +1645,22 @@ Run、Approval、Background Task、Plan Gate、Plan Weave Block 均应通过具�
 
 这不是硬性编译规则，而是 Review 信号。超过时必须解释每次跳转带来的明确价值。
 
+### 9.2.1 评价一份目标结构，数的是「净新增概念」不是「文件数」
+
+审阅任何目标目录结构时，把文件分成三堆再下结论：
+
+| 分类 | 认知成本 | 举例（`modules/runs/` 的 11 个文件） |
+|---|---|---|
+| **搬家**：今天就存在、职责已清楚，只是换了位置 | ≈ 0，甚至为负（今天散在三个目录，归拢后更好找） | `run-preparation` `run-ledger` `run-registry` `run-hub` `assistant-message-recorder` `run-repository` —— 6 个 |
+| **净新增概念**：读者必须新学的东西 | 每个都要付一次学习成本，必须能一句话说清它的独立变化原因 | `run-routes` `run-coordinator` `run-approval-channel` `run-runtime-builder` `run-finalizer` —— 5 个 |
+| **虚增**：改名、一个函数一个文件、只有一种实现的 Port/Adapter 对 | 纯负担 | 应为 0 |
+
+所以「一个 Run 需要 11 个文件吗」这个问题问错了方向 —— 正确的问法是
+**「一个 Run 需要读者新学 5 个概念吗」**。Runs 是全系统唯一同时接触会话、模型、工具、审批、
+子代理、观测、持久化和流式传输的模块，5 个是它的复杂度下界，不是设计冗余。
+
+反过来，如果一份目标结构里「虚增」那一堆不为零，无论文件总数多少都应当打回。
+
 ### 9.3 文件命名
 
 避免：
@@ -1728,13 +1796,20 @@ CI 缓存）本身就是一次不小的改造，而且会立刻产出成百条�
 
 ### 11.2 Port 契约测试
 
-同一套测试验证：
+只对 C6 认定的那四类 Port 做契约测试。**不要为「in-memory Store vs Drizzle Store」写契约测试** ——
+Eva 里不存在 in-memory Store，也不该为了写这类测试去造一个（C6）。
 
-- In-memory Store；
-- Drizzle/SQLite Store；
-- fake MCP Client；
-- real MCP adapter；
-- fake Clock/UUID。
+实际需要的是：
+
+| Port | 两侧实现 |
+|---|---|
+| `LanguageModel` | `MockLanguageModelV4`（测试）／真 provider（手动验证） |
+| MCP Client | `tests/helpers/fake-mcp-server.ts` ／ 真 stdio + http adapter |
+| `RequestApproval` / `RequestPlanReview` | fake（自动同意/拒绝）／ server 真实实现 |
+| `Encryptor` | `IdentityEncryptor` ／ `AesGcmEncryptor` |
+
+数据库侧一律用**真 SQLite**（`initDb` + `migrateDb`，现状即如此）：幂等、并发、排序、事务、
+崩溃恢复这些语义只有真库能验证，换成 fake 反而会让测试通过而线上出错。
 
 重点不是 mock 调用次数，而是验证语义：幂等、并发、失败、排序、事务和恢复。
 
@@ -1842,21 +1917,21 @@ request
 
 目标：让一次 Run 可以从一个应用入口阅读 —— 即 §5.0 那张「7 个文件」的表变成「5 个文件」。
 
-按这个顺序提取，**每一步单独 commit 且测试全绿**（顺序不是随意的：先把状态与清理收进 Scope，
-后面的提取才不需要再操心资源释放）：
+按**风险升序**提取（§7.2 改造动作给了同一个顺序与行数轨迹），每一步单独 commit 且测试全绿。
+可以停在任何一步 —— 每步做完 `runs.ts` 都更短，且仍然自洽：
 
-1. `RunScope`：持有 recorder、reportGateway、planGateState、controller、hub 绑定，
-   提供幂等 `dispose()`；把 `routes/runs.ts` 现有的 `try/catch/finally` 语义原样搬进去；
-2. `RunApprovalChannel`：搬走三个审批闭包（`requestApproval`、`subagentRequestApproval`、
-   `requestPlanReview`）与两个 `lookup*Decision`。注意保持现有短路顺序：
-   **bash 只读直放 → plan 文件直放 → policy 命中 → 才弹窗**，顺序变了会改变产品行为；
-3. `RunRuntimeBuilder`：搬走 skill 选择、memory section、plan gate 装配、MCP 工具、
-   plan weave 工具、subagent runner 的装配；
-4. `RunFinalizer`：搬走 `messageRecorder.finish` + `runLedger.settle/fail` + 会话回滚 +
-   `end` 帧 + `cancelByRun`，成为终态的唯一出口；
-5. `RunCoordinator`：只剩五阶段骨架；
-6. `run-routes.ts`：只剩 schema 校验、SSE 连接、调用用例、错误 → 状态码映射
-   （409 SessionBusy / 503 AgentUnavailable / 400 其他）。
+1. `RunApprovalChannel`（575 → 446）：三个审批闭包 + 两个 `lookup*Decision`。最安全，不碰生命周期。
+   **必须保持现有短路顺序：bash 只读直放 → plan 文件直放 → policy 命中 → 才弹窗**，顺序变了会改产品行为；
+2. `RunRuntimeBuilder`（446 → 286）：skill 选择、memory section、plan gate 装配、MCP 工具、
+   plan weave 工具、subagent runner。最机械，依赖多但没有控制流；
+3. `RunFinalizer`（286 → 220）：`messageRecorder.finish` + `runLedger.settle/fail` + 会话回滚 +
+   `end` 帧 + `cancelByRun`。开始碰 `catch`/`finally`，靠 Wave 0 的测试兜底；
+4. 把剩下的 220 行劈成 `run-coordinator.ts`（五阶段骨架 + 13 行流式循环 + 内联 `RunScope`）与
+   `run-routes.ts`（schema / SSE / 409 SessionBusy、503 AgentUnavailable、400 其他）;
+5. 加 lint 规则：只有 `run-finalizer.ts` 能 import `run-ledger` 的 `settle` / `fail`。
+
+**不提取 `run-executor.ts`（13 行 for-loop）、不提取 `run-opener.ts`（`prepareRunInput` 改名）、
+`RunScope` 不单独成文件** —— 理由见 §7.2。
 
 退出条件：`runs.ts` 不再直接访问 DB 或装配业务能力；§5.0 的主链在 5 个文件内读完；
 Wave 0 的七条 characterization tests 一条不改地通过 —— **它们不许为了适配新结构而修改断言**。
