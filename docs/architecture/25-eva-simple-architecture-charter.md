@@ -1850,9 +1850,9 @@ CI 缓存）本身就是一次不小的改造，而且会立刻产出成百条�
 
 | # | 规则 | 现状 | 收敛于 |
 |---|---|---|---|
-| 1 | `routes/**` 不得导入 `db/**`、`repositories/**`、`schema` | **10/16 个业务 route 违反** | Wave 2 |
+| 1 | `routes/**` 不得导入 `db/**`、`repositories/**`、`schema` | ~~10/16 个业务 route 违反~~ **已收敛为 error（Wave 2）**，并顺带扩到「route 里不得出现 `app.infra` / `app.services`」 | Wave 2 ✅ |
 | 2 | 模块间只能从目标模块公开入口导入 | 大量跨模块深层导入 | Wave 4 |
-| 3 | Repository 只能在组合根或所属模块 Adapter 内创建 | route 与 `run-preparation.ts` 都在 `new` | Wave 2–4 |
+| 3 | Repository 只能在组合根或所属模块 Adapter 内创建 | ~~route 与 `run-preparation.ts` 都在 `new`~~ **两处已收敛为 error（Wave 2）**；`services/**` 下按模块自建的那些等 Wave 4 划出边界再判 | Wave 2 部分 ✅ / Wave 4 |
 | 4 | Domain 文件不得导入 Fastify、Drizzle、React、Electron、`node:fs` | 待核，需先划出 domain 文件集合 | Wave 4 |
 | 5 | package 根入口不得无审查 `export *` | `packages/harness/src/index.ts` 有 21 条 `export *` | Wave 3 |
 | 6 | 测试只能从被测模块公开入口导入 | 普遍直接 `new DrizzleXxxRepository` | Wave 4（见 §7.22） |
@@ -2096,6 +2096,33 @@ Wave 0 的七条 characterization tests 一条不改地通过 —— **它们不
 
 退出条件：`pnpm lint:arch` 里 §10.2 第 1、3 条升为 error 且全仓库通过 ——
 即 `grep -ln 'infra\.db\|Repository(' apps/server/src/routes/*.ts` 输出为空。
+
+> **Wave 2 已结束（2026-08-30）。** `lint:arch` 从 91 warning 降到 **0 error / 0 warning**，
+> 那条 grep 输出为空。落地形态与三处偏差：
+>
+> **`AppApi` 落在 `apps/server/src/api/`**，一个能力一个 `<name>-api.ts`（12 个），
+> `index.ts` 是组合根的第二半、也是唯一 `new` Repository 的地方。选这个形状是因为
+> Wave 4 的终点：`api/<name>-api.ts` → `modules/<name>/index.ts`，每个文件现在就是
+> 那个模块将来的公开入口，所以它只导出用例与查询，不导出 Repository。
+>
+> 1. **退出条件被加严了，不只是达成。** 原文只禁 `app.infra.db` 与 `Repository(`。
+>    实测发现更该禁的是**整个 `app.infra` 与 `app.services`**：前者是原始句柄，
+>    后者是有状态的长寿服务 —— route 拿到 `app.services.workspaces` 就已经在编排了，
+>    只是恰好没碰 db。收完之后 `routes/**` 里这两个词零命中，规则也就照这个形态锁死
+>    （`routes-only-app-api`）。两条 error 规则都用探针实测过会红。
+> 2. **`agents.invalidate()` 是这一步真正的收获，不是行数。** provider 的 7 个 handler
+>    各自记得调一次；漏一个的表现是「改了 API key 但这轮还用旧的」，而没有任何测试会红。
+>    它属于「写 provider」这个用例，现在收在 `api.providers` 的每条写路径里。
+>    `settings.replace` 同理。
+> 3. **`run-runtime-builder.ts` 里还藏着一处跨模块 `new`**：`new DrizzlePlanRepository`。
+>    是升 error 时被规则抓出来的，不是读代码找到的 —— `plans` 表归 plan-gate 模块，
+>    runs 模块自己 new 它，「谁拥有这张表」就没有答案。已改为注入。
+>
+> 一处**没有**做到原文字面的地方：`app.infra` 仍然挂在 Fastify 实例上（`server.ts` 要
+> `config.HOST/PORT`，测试 fixture 也照它搭）。原文说「`app.infra` 不再向 route 暴露
+> `db` 与 `encryptor`」—— 落地方式是 lint 规则禁止 route 提及它，而不是从实例上摘掉。
+> 真正摘掉要改 `buildApp` 的返回形状与 13 处 fixture，收益只是把一条已经红的 lint
+> 换成编译错误，本轮不做。
 
 ### Wave 3：Harness 内核收敛
 
