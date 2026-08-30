@@ -5,6 +5,8 @@
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "build": "pnpm --filter @eva/server --filter eva build",
+    "lint:arch": "node scripts/check-architecture.mjs",
+    "verify": "pnpm lint:arch && pnpm typecheck && pnpm test",
     "serve:dev": "pnpm --filter @eva/server dev",
     "test": "vitest run",
     "typecheck": "pnpm -r --if-present typecheck",
