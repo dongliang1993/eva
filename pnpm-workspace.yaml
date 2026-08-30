@@ -2,4 +2,10 @@ packages:
   - apps/*
   - packages/*
 
-onlyBuiltDependencies: '["electron"]'
+# 允许跑安装脚本的包(native 编译/二进制下载)。必须是 YAML 列表 ——
+# 写成 '["electron"]' 这种字符串形式 pnpm 不认,会导致 better-sqlite3
+# 的 native 编译被静默跳过,只留下 ABI 可能不匹配的预编译产物。
+onlyBuiltDependencies:
+  - better-sqlite3
+  - electron
+  - esbuild
