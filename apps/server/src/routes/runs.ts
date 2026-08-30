@@ -8,6 +8,10 @@ import { AgentUnavailableError } from "../services/agent-factory.js";
 import { AssistantMessageRecorder } from "../services/runs/assistant-message-recorder.js";
 import { RunApprovalChannel } from "../services/runs/run-approval-channel.js";
 import {
+  RunFinalizer,
+  type RunFailurePhase
+} from "../services/runs/run-finalizer.js";
+import {
   prepareRunInput,
   prepareRunContext,
   SessionBusyError,
@@ -36,7 +40,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     let runInput: RunInput | undefined;
     // T48 失败归因:流式开始前失败的层。"routing" = provider/模型/skill 解析;
     // "context" = prepareRunContext(compact/历史转换);undefined = 已进入流式(归因走事件层)。
-    let runPhase: "routing" | "context" | undefined;
+    let runPhase: RunFailurePhase | undefined;
     // T49:run_failed / max-steps 事件带的失败层(agent.ts 发出,observer 桥回填),
     // settle/fail 时写进 runs。声明在 try 外,catch 才能读到。
     const failureLayerRef: { current?: RunFailureLayer } = {};
@@ -53,6 +57,16 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       session: app.services.session,
       workspaces: app.services.workspaces
     };
+    // 终态的唯一出口。建在 try 外:阶段①就抛错时也要有人收台账。
+    const finalizer = new RunFinalizer({
+      runId,
+      runLedger: app.services.runLedger,
+      session: app.services.session,
+      runRegistry: app.services.runRegistry,
+      approvals: app.services.approvals,
+      hub,
+      failureLayer: failureLayerRef
+    });
     const builder = new RunRuntimeBuilder({
       db: app.infra.db,
       logger: app.log,
@@ -195,22 +209,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         messageRecorder.push(event);
       }
 
-      // assistantMessage 无论什么终态都落库(含 aborted / error)。丢一半的回复也比
-      // DB 里没痕迹强 —— metadata.aborted 标出来即可。
-      const recorded = messageRecorder.finish();
-
-      app.services.runLedger.settle(runId, {
-        finishReason: recorded.finishReason,
-        assistantMessageId: recorded.assistantMessageId,
-        ...(recorded.usage !== undefined ? { usage: recorded.usage } : {}),
-        ...(recorded.streamError !== undefined ? { error: recorded.streamError } : {}),
-        ...(failureLayerRef.current !== undefined
-          ? { failureLayer: failureLayerRef.current }
-          : {})
-      });
-
-      emit({ type: "end", finishReason: recorded.finishReason });
-      hub.closeAll();
+      finalizer.settle(messageRecorder);
     } catch (error) {
       // 409 是正常拒绝(会话忙),不该在日志里冒充故障。
       if (error instanceof SessionBusyError) {
@@ -219,23 +218,11 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         request.log.error({ err: error, runId }, "failed to stream agent run");
       }
 
-      // 模型不可用(503)且这条会话是本次请求刚建的 → 撤掉,别让没配好 API key 的
-      // 新装用户每点一次发送就攒一条空会话。已有会话不动:用户说的话得留下。
-      if (error instanceof AgentUnavailableError && runInput?.createdSessionId) {
-        app.services.session.deleteSession(runInput.createdSessionId);
-      }
-
-      if (sessionId) {
-        app.services.runLedger.fail(
-          runId,
-          toErrorMessage(error),
-          runPhase !== undefined
-            ? { failureLayer: runPhase }
-            : failureLayerRef.current !== undefined
-              ? { failureLayer: failureLayerRef.current }
-              : {}
-        );
-      }
+      finalizer.fail(error, {
+        sessionId,
+        createdSessionId: runInput?.createdSessionId,
+        phase: runPhase
+      });
 
       if (!reply.raw.headersSent) {
         // 409 带上 activeRunId:前端据此直接挂到在跑的那个 run 上,不用再查一次 status。
@@ -250,15 +237,9 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
         return { error: toErrorMessage(error) };
       }
 
-      emit({ type: "error", message: toErrorMessage(error) });
-      emit({ type: "end", finishReason: "error" });
-      hub.closeAll();
+      finalizer.closeWithError(error);
     } finally {
-      // 唤醒可能还在等通知的 drain,别留悬挂 Promise。
-      reportGateway?.dispose();
-      app.services.runRegistry.unregister(runId);
-      // pending 审批要么已被决策、要么被上面 cancelByRun 清掉;这里兜底。
-      app.services.approvals.cancelByRun(runId);
+      finalizer.release(reportGateway);
     }
   });
 
