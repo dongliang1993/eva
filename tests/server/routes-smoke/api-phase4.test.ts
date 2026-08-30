@@ -23,6 +23,7 @@ import { registerMemoryRoutes } from "../../../apps/server/src/routes/memories.j
 import { registerSearchRoutes } from "../../../apps/server/src/routes/search.js";
 import { registerSkillRoutes } from "../../../apps/server/src/routes/skills.js";
 import { registerThreadRoutes } from "../../../apps/server/src/routes/threads.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 const textMessage = (role: "user" | "assistant", text: string): EvaUIMessage =>
   role === "user"
@@ -72,6 +73,7 @@ beforeEach(async () => {
       }
     } as never
   } as never);
+  decorateAppApi(app);
 
   registerSearchRoutes(app);
   registerMemoryRoutes(app);

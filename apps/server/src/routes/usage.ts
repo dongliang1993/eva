@@ -1,10 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
-import {
-  UsageRecordRepository,
-  type UsageStatsRow
-} from "../db/repositories/usage-record-repository.js";
+import type { UsageStatsRow } from "../api/usage-api.js";
 
 /**
  * T41:GET /api/usage/stats —— 跨会话/按周期/按模型/provider 的 token 用量聚合。
@@ -87,7 +84,7 @@ export const registerUsageRoutes = (app: FastifyInstance): void => {
       return { error: "startDate 不能晚于 endDate" };
     }
 
-    const rows = new UsageRecordRepository(app.infra.db).sumByDateAndModel({
+    const rows = app.api.usage.statsByDateAndModel({
       fromDate: from,
       toDate: to,
       ...(providerId !== undefined ? { providerId } : {}),

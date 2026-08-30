@@ -23,6 +23,7 @@ import { registerRunRoutes } from "../../../apps/server/src/routes/runs.js";
 import { registerThreadRoutes } from "../../../apps/server/src/routes/threads.js";
 import { loadAppSettings, replaceAppSettings } from "../../../apps/server/src/services/settings/app-settings.js";
 import type { StoredMessage } from "../../../apps/server/src/db/repositories/types.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -72,6 +73,7 @@ const startApp = async (): Promise<void> => {
     mcp: { ensureConnected: async () => {}, listTools: () => [] },
     workspaces: {} as never
   });
+  decorateAppApi(app);
 
   registerRunRoutes(app);
   registerThreadRoutes(app);

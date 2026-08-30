@@ -22,6 +22,7 @@ import { SessionService } from "../../../apps/server/src/services/session.js";
 import { registerRunRoutes } from "../../../apps/server/src/routes/runs.js";
 import { loadAppSettings, replaceAppSettings } from "../../../apps/server/src/services/settings/app-settings.js";
 import { buildActiveChain } from "../../../apps/server/src/services/message-tree.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -141,6 +142,7 @@ const startApp = async (agentOverride?: Agent): Promise<void> => {
     runRegistry: new RunRegistry(),
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });
+  decorateAppApi(app);
 
   registerRunRoutes(app);
   await app.ready();

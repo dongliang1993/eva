@@ -17,6 +17,7 @@ import { planWeaveDir } from "../../../apps/server/src/paths.js";
 import { registerPlanWeaveRoutes } from "../../../apps/server/src/routes/plan-weave.js";
 import { PlanWeaveService } from "../../../apps/server/src/services/plan-weave/index.js";
 import { WorkspaceStore } from "../../../apps/server/src/services/workspaces/workspace-store.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 let app: FastifyInstance;
 let db: AppDatabase;
@@ -50,9 +51,12 @@ beforeEach(async () => {
   repo.create({ id: "w1", name: "repo", path: workspaceRoot });
 
   app = Fastify();
+  // plan-weave 路由本身不碰 infra,但 decorateAppApi 要从 infra 里取 db —— 补上。
+  app.decorate("infra", { db } as never);
   app.decorate("services", {
     planWeave: new PlanWeaveService(new WorkspaceStore(repo))
   } as never);
+  decorateAppApi(app);
   registerPlanWeaveRoutes(app);
   await app.ready();
 });

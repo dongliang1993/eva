@@ -17,6 +17,7 @@ import {
 } from "../../../apps/server/src/db/index.js";
 import { DrizzleSessionRepository } from "../../../apps/server/src/db/repositories/session-repository.js";
 import { registerThreadRoutes } from "../../../apps/server/src/routes/threads.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 let app: FastifyInstance;
 let db: AppDatabase;
@@ -44,6 +45,7 @@ beforeEach(async () => {
     // listThreadSummaries 要用 approvals.listPending 算 status,给个空 stub。
     approvals: { listPending: () => [] }
   } as never);
+  decorateAppApi(app);
   registerThreadRoutes(app);
   await app.ready();
 });

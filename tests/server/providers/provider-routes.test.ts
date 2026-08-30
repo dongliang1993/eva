@@ -14,6 +14,7 @@ import {
   findProviderById,
   updateProvider
 } from "../../../apps/server/src/services/providers/provider-repository.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 let app: FastifyInstance;
 let db: AppDatabase;
@@ -33,6 +34,7 @@ beforeEach(async () => {
   app.decorate("services", {
     agents: { invalidate() { /* no-op in this fixture */ } }
   } as never);
+  decorateAppApi(app);
 
   registerProviderRoutes(app);
   await app.ready();

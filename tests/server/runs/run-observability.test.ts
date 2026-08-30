@@ -31,6 +31,7 @@ import { SessionService } from "../../../apps/server/src/services/session.js";
 import { SubagentRunner } from "../../../apps/server/src/services/subagents/subagent-runner.js";
 import type { AgentFactory } from "../../../apps/server/src/services/agent-factory.js";
 import { registerRunRoutes } from "../../../apps/server/src/routes/runs.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -132,6 +133,7 @@ describe("run observability(T49)route 级", () => {
       runRegistry: new RunRegistry(),
       mcp: { ensureConnected: async () => {}, listTools: () => [] }
     });
+    decorateAppApi(app);
     registerRunRoutes(app);
     await app.ready();
   };

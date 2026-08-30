@@ -16,6 +16,7 @@ import { RunLedger } from "../../../apps/server/src/services/runs/run-ledger.js"
 import { RunRegistry } from "../../../apps/server/src/services/run-registry.js";
 import { SessionService } from "../../../apps/server/src/services/session.js";
 import { registerRunRoutes } from "../../../apps/server/src/routes/runs.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -73,6 +74,7 @@ beforeEach(async () => {
     runRegistry: registry,
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });
+  decorateAppApi(app);
   registerRunRoutes(app);
 
   // app.inject 永远不会断连 —— 这条路径只有真 socket 能测。

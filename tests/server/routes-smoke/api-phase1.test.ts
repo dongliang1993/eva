@@ -24,6 +24,7 @@ import { registerModelRoutes } from "../../../apps/server/src/routes/models.js";
 import { registerProviderRoutes } from "../../../apps/server/src/routes/providers.js";
 import { registerSettingsRoutes } from "../../../apps/server/src/routes/settings.js";
 import { registerThreadRoutes } from "../../../apps/server/src/routes/threads.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 let app: FastifyInstance;
 let db: AppDatabase;
@@ -50,6 +51,7 @@ beforeEach(async () => {
     runRegistry: {} as never,
     mcp: {} as never
   } as never);
+  decorateAppApi(app);
 
   registerHealthRoutes(app);
   registerSettingsRoutes(app);

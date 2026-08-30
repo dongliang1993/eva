@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import { ZodError } from "zod";
 
+import { buildAppApi } from "./api/index.js";
 import { buildInfrastructure } from "./deps.js";
 import { registerLoopbackTokenHook } from "./loopback.js";
 import { registerRoutes } from "./routes/index.js";
@@ -49,7 +50,9 @@ export const buildApp = async () => {
   });
 
   app.decorate("infra", infra);
-  app.decorate("services", buildAppServices(infra));
+  const services = buildAppServices(infra);
+  app.decorate("services", services);
+  app.decorate("api", buildAppApi(infra, services));
   await registerRoutes(app);
 
   return app;

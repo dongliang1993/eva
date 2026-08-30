@@ -18,6 +18,7 @@ import type { RunRegistry } from "../services/run-registry.js";
 import type { RunLedger } from "../services/runs/run-ledger.js";
 import type { SessionService } from "../services/session.js";
 import type { WorkspaceStore } from "../services/workspaces/workspace-store.js";
+import type { AppApi } from "../api/index.js";
 
 export interface AppInfrastructure {
   config: AppConfig;
@@ -47,5 +48,12 @@ declare module "fastify" {
   interface FastifyInstance {
     infra: AppInfrastructure;
     services: AppServices;
+    /**
+     * Route 唯一该用的那个 —— 按业务能力分组的用例入口(见 src/api/README.md)。
+     *
+     * `infra` 与 `services` 仍然挂在实例上,因为组合根、coordinator 和尚未搬完的
+     * route 还要用。Wave 2 结束时 route 侧只应出现 `app.api`。
+     */
+    api: AppApi;
   }
 }

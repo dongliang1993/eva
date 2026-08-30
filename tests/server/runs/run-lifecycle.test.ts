@@ -24,6 +24,7 @@ import { SessionService } from "../../../apps/server/src/services/session.js";
 import { SubagentRunner } from "../../../apps/server/src/services/subagents/subagent-runner.js";
 import { registerRunRoutes } from "../../../apps/server/src/routes/runs.js";
 import { loadAppSettings, replaceAppSettings } from "../../../apps/server/src/services/settings/app-settings.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -86,6 +87,7 @@ const startApp = async (agent: Agent): Promise<void> => {
     // 本用例不测 MCP:给个空 registry 桩,证明"没配 MCP 时 run 照常跑"
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });
+  decorateAppApi(app);
 
   registerRunRoutes(app);
   await app.ready();
@@ -163,6 +165,7 @@ const startAppWithUnavailableAgent = async (): Promise<void> => {
     runRegistry: new RunRegistry(),
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });
+  decorateAppApi(app);
   registerRunRoutes(app);
   await app.ready();
 };

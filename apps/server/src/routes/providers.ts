@@ -9,23 +9,11 @@ import type {
   ProviderType
 } from "@eva/shared";
 
-import {
-  createProvider,
-  deleteProvider,
-  findProviderById,
-  findStoredProviderById,
-  listProviders,
-  updateProvider,
-  type ProviderCreateInput,
-  type ProviderUpdateInput
+import type {
+  ProviderCreateInput,
+  ProviderUpdateInput
 } from "../services/providers/provider-repository.js";
-import {
-  ProviderHttpError,
-  discoverProviderModels,
-  listProviderModels,
-  testProviderConnection
-} from "../services/providers/provider-http.js";
-import { PROVIDER_CATALOG } from "../services/providers/provider-catalog.js";
+import { ProviderHttpError } from "../services/providers/provider-http.js";
 
 const providerTypeSchema = z.enum([
   "openai",
@@ -117,19 +105,18 @@ const normalizeProviderModels = (
 
 export const registerProviderRoutes = (app: FastifyInstance): void => {
   app.get("/api/v1/providers", async (): Promise<readonly Provider[]> =>
-    listProviders(app.infra.db)
+    app.api.providers.list()
   );
 
   // provider 静态知识(不含密钥),frontend 用 staleTime=Infinity 缓存。
   app.get("/api/v1/provider-catalog", async (): Promise<readonly ProviderSpec[]> =>
-    PROVIDER_CATALOG
+    app.api.providers.catalog()
   );
 
   app.post("/api/v1/providers", async (request, reply): Promise<Provider | { error: string }> => {
     const body = createProviderSchema.parse(request.body ?? {});
-    const existing = body.id ? findProviderById(app.infra.db, body.id) : undefined;
 
-    if (existing) {
+    if (body.id && app.api.providers.exists(body.id)) {
       reply.code(409);
       return { error: `Provider "${body.id}" already exists` };
     }
@@ -147,25 +134,26 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
         : {})
     };
     reply.code(201);
-    const created = createProvider(app.infra.db, input, app.infra.encryptor);
-    app.services.agents.invalidate();
-    return created;
+    // AgentFactory 失效在 api.providers 内部 —— 每条写路径都要,不该由 7 个 handler 各记一遍。
+    return app.api.providers.create(input);
   });
 
   app.post(
     "/api/v1/providers/:id/test",
     async (request, reply): Promise<ProviderConnectionTestResult | { error: string }> => {
       const { id } = request.params as { id: string };
-      const provider = findStoredProviderById(app.infra.db, id, app.infra.encryptor);
-      if (!provider) {
-        reply.code(404);
-        return { error: "Provider not found" };
-      }
       const body = providerRuntimeOverrideSchema.parse(request.body ?? {});
-      return testProviderConnection(provider, {
+      const result = await app.api.providers.testConnection(id, {
         ...(body.apiKey !== undefined ? { apiKey: body.apiKey } : {}),
         ...(body.baseURL !== undefined ? { baseURL: body.baseURL } : {})
       });
+
+      if (!result) {
+        reply.code(404);
+        return { error: "Provider not found" };
+      }
+
+      return result;
     }
   );
 
@@ -178,12 +166,14 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
     "/api/v1/providers/:id/api-key",
     async (request, reply): Promise<{ apiKey: string } | { error: string }> => {
       const { id } = request.params as { id: string };
-      const provider = findStoredProviderById(app.infra.db, id, app.infra.encryptor);
-      if (!provider) {
+      const apiKey = app.api.providers.revealApiKey(id);
+
+      if (apiKey === undefined) {
         reply.code(404);
         return { error: "Provider not found" };
       }
-      return { apiKey: provider.apiKey };
+
+      return { apiKey };
     }
   );
 
@@ -191,12 +181,14 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
     "/api/v1/providers/:id/models",
     async (request, reply): Promise<ProviderModelsPayload | { error: string }> => {
       const { id } = request.params as { id: string };
-      const provider = findStoredProviderById(app.infra.db, id, app.infra.encryptor);
-      if (!provider) {
+      const models = app.api.providers.listModels(id);
+
+      if (!models) {
         reply.code(404);
         return { error: "Provider not found" };
       }
-      return listProviderModels(provider);
+
+      return models;
     }
   );
 
@@ -204,22 +196,22 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
     "/api/v1/providers/:id/models/fetch",
     async (request, reply): Promise<ProviderModelsPayload | { error: string }> => {
       const { id } = request.params as { id: string };
-      const provider = findStoredProviderById(app.infra.db, id, app.infra.encryptor);
-      if (!provider) {
-        reply.code(404);
-        return { error: "Provider not found" };
-      }
       const body = providerRuntimeOverrideSchema.parse(request.body ?? {});
 
       try {
-        const discovered = await discoverProviderModels(provider, {
+        const discovered = await app.api.providers.discoverModels(id, {
           ...(body.apiKey !== undefined ? { apiKey: body.apiKey } : {}),
           ...(body.baseURL !== undefined ? { baseURL: body.baseURL } : {})
         });
-        updateProvider(app.infra.db, id, { availableModels: discovered.models });
-        app.services.agents.invalidate();
+
+        if (!discovered) {
+          reply.code(404);
+          return { error: "Provider not found" };
+        }
+
         return discovered;
       } catch (error) {
+        // 上游 HTTP 故障 → 502/400。这条映射是协议翻译,留在 route。
         if (error instanceof ProviderHttpError) {
           reply.code(error.statusCode >= 500 ? 502 : 400);
           return { error: error.message };
@@ -235,12 +227,11 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
       const { id } = request.params as { id: string };
       const body = updateProviderModelsSchema.parse(request.body ?? {});
       const input: ProviderUpdateInput = { models: normalizeProviderModels(body.models) };
-      const updated = updateProvider(app.infra.db, id, input);
+      const updated = app.api.providers.update(id, input);
       if (!updated) {
         reply.code(404);
         return { error: "Provider not found" };
       }
-      app.services.agents.invalidate();
       return updated;
     }
   );
@@ -260,23 +251,20 @@ export const registerProviderRoutes = (app: FastifyInstance): void => {
         ? { availableModels: normalizeProviderModels(body.availableModels) }
         : {})
     };
-    const updated = updateProvider(app.infra.db, id, input, app.infra.encryptor);
+    const updated = app.api.providers.update(id, input);
     if (!updated) {
       reply.code(404);
       return { error: "Provider not found" };
     }
-    app.services.agents.invalidate();
     return updated;
   });
 
   app.delete("/api/v1/providers/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const deleted = deleteProvider(app.infra.db, id);
-    if (!deleted) {
+    if (!app.api.providers.delete(id)) {
       reply.code(404);
       return { error: "Provider not found" };
     }
-    app.services.agents.invalidate();
     reply.code(204);
     return null;
   });

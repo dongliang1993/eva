@@ -2,11 +2,6 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppSettings } from "@eva/shared";
 
-import {
-  loadAppSettings,
-  replaceAppSettings
-} from "../services/settings/app-settings.js";
-
 const appSettingsSchema = z.object({
   // 没有 chat —— 主对话模型 per-run 由请求的 modelId 给,不是全局设置项。
   models: z.object({
@@ -41,16 +36,10 @@ const appSettingsSchema = z.object({
 });
 
 export const registerSettingsRoutes = (app: FastifyInstance): void => {
-  app.get("/api/v1/settings", async (): Promise<AppSettings> =>
-    loadAppSettings(app.infra.db, app.infra.config)
+  app.get("/api/v1/settings", async (): Promise<AppSettings> => app.api.settings.read());
+
+  app.put("/api/v1/settings", async (request): Promise<AppSettings> =>
+    // AgentFactory 失效在 api.settings.replace 里 —— 它是「改设置」这个用例的一部分。
+    app.api.settings.replace(appSettingsSchema.parse(request.body ?? {}) as AppSettings)
   );
-
-  app.put("/api/v1/settings", async (request): Promise<AppSettings> => {
-    const body = appSettingsSchema.parse(request.body ?? {}) as AppSettings;
-
-    const updated = replaceAppSettings(app.infra.db, app.infra.config, body);
-    app.services.agents.invalidate();
-
-    return updated;
-  });
 };

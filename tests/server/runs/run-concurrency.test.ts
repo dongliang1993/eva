@@ -15,6 +15,7 @@ import { RunLedger } from "../../../apps/server/src/services/runs/run-ledger.js"
 import { RunRegistry } from "../../../apps/server/src/services/run-registry.js";
 import { SessionService } from "../../../apps/server/src/services/session.js";
 import { registerRunRoutes } from "../../../apps/server/src/routes/runs.js";
+import { decorateAppApi } from "../../helpers/app-api.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -61,6 +62,7 @@ const startApp = async (): Promise<void> => {
     runRegistry: new RunRegistry(),
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });
+  decorateAppApi(app);
 
   registerRunRoutes(app);
   await app.ready();
