@@ -8,15 +8,19 @@ import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
 import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
 import { McpServerRepository } from "../db/repositories/mcp-server-repository.js";
 import { UsageRecordRepository } from "../db/repositories/usage-record-repository.js";
+import { createApprovalsApi, type ApprovalsApi } from "./approvals-api.js";
 import { createMcpApi, type McpApi } from "./mcp-api.js";
 import { createMemoryApi, type MemoryApi } from "./memory-api.js";
 import { createObservabilityApi, type ObservabilityApi } from "./observability-api.js";
+import { createPlansApi, type PlansApi } from "./plans-api.js";
 import { createProvidersApi, type ProvidersApi } from "./providers-api.js";
 import { createRunsApi, type RunsApi } from "./runs-api.js";
 import { createSearchApi, type SearchApi } from "./search-api.js";
 import { createSessionsApi, type SessionsApi } from "./sessions-api.js";
 import { createSettingsApi, type SettingsApi } from "./settings-api.js";
+import { createSkillsApi, type SkillsApi } from "./skills-api.js";
 import { createUsageApi, type UsageApi } from "./usage-api.js";
+import { createWorkspacesApi, type WorkspacesApi } from "./workspaces-api.js";
 
 /**
  * Route 能看到的全部东西 —— 按业务能力分组,一个能力一个入口。
@@ -28,15 +32,19 @@ import { createUsageApi, type UsageApi } from "./usage-api.js";
  * 再动 threads.ts 时就不用返工(§12 Wave 2)。还没搬完的能力暂时不在这个类型里。
  */
 export interface AppApi {
+  readonly approvals: ApprovalsApi;
   readonly mcp: McpApi;
   readonly memory: MemoryApi;
   readonly observability: ObservabilityApi;
+  readonly plans: PlansApi;
   readonly providers: ProvidersApi;
   readonly runs: RunsApi;
   readonly search: SearchApi;
   readonly sessions: SessionsApi;
   readonly settings: SettingsApi;
+  readonly skills: SkillsApi;
   readonly usage: UsageApi;
+  readonly workspaces: WorkspacesApi;
 }
 
 /**
@@ -46,6 +54,10 @@ export interface AppApi {
  * 这里建的是无状态的用例入口。分成两个函数是因为后者依赖前者。
  */
 export const buildAppApi = (infra: AppInfrastructure, services: AppServices): AppApi => ({
+  approvals: createApprovalsApi({
+    approvals: services.approvals,
+    policies: services.approvalPolicies
+  }),
   mcp: createMcpApi({
     servers: new McpServerRepository(infra.db),
     registry: services.mcp
@@ -59,6 +71,7 @@ export const buildAppApi = (infra: AppInfrastructure, services: AppServices): Ap
     runEvents: new RunEventRepository(infra.db),
     runs: new DrizzleRunRepository(infra.db)
   }),
+  plans: createPlansApi({ planWeave: services.planWeave }),
   providers: createProvidersApi({
     db: infra.db,
     encryptor: infra.encryptor,
@@ -85,7 +98,9 @@ export const buildAppApi = (infra: AppInfrastructure, services: AppServices): Ap
     approvals: services.approvals,
     session: services.session
   }),
+  skills: createSkillsApi({ skills: infra.skills }),
   usage: createUsageApi({
     usageRecords: new UsageRecordRepository(infra.db)
-  })
+  }),
+  workspaces: createWorkspacesApi({ workspaces: services.workspaces })
 });

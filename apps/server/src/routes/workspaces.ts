@@ -16,7 +16,7 @@ const renameWorkspaceSchema = z.object({
 
 export const registerWorkspaceRoutes = (app: FastifyInstance): void => {
   app.get("/api/v1/workspaces", async (): Promise<readonly Workspace[]> => {
-    return app.services.workspaces.list();
+    return app.api.workspaces.list();
   });
 
   // 本机原生目录选择框:server 弹系统框拿绝对路径返回,浏览器/Electron 都不用
@@ -48,7 +48,7 @@ export const registerWorkspaceRoutes = (app: FastifyInstance): void => {
       const body = createWorkspaceSchema.parse(request.body ?? {});
 
       try {
-        const workspace = app.services.workspaces.add({
+        const workspace = app.api.workspaces.add({
           path: body.path,
           ...(body.name !== undefined ? { name: body.name } : {})
         });
@@ -73,7 +73,7 @@ export const registerWorkspaceRoutes = (app: FastifyInstance): void => {
       const { id } = request.params as { id: string };
       const body = renameWorkspaceSchema.parse(request.body ?? {});
 
-      const updated = app.services.workspaces.rename(id, body.name);
+      const updated = app.api.workspaces.rename(id, body.name);
 
       if (!updated) {
         reply.code(404);
@@ -86,7 +86,7 @@ export const registerWorkspaceRoutes = (app: FastifyInstance): void => {
 
   app.delete("/api/v1/workspaces/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const removed = app.services.workspaces.remove(id);
+    const removed = app.api.workspaces.remove(id);
 
     if (!removed) {
       reply.code(404);

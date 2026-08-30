@@ -11,9 +11,9 @@ import { convertToModelMessages, type ModelMessage } from "ai";
 import { defined, type WorkspaceContext } from "../agent-factory.js";
 import type { AppConfig } from "../../config.js";
 import type { AppDatabase } from "../../db/index.js";
-import { DrizzleMessageRepository } from "../../db/repositories/message-repository.js";
-import { DrizzleRunRepository } from "../../db/repositories/run-repository.js";
-import { DrizzleSessionRepository } from "../../db/repositories/session-repository.js";
+import type { DrizzleMessageRepository } from "../../db/repositories/message-repository.js";
+import type { DrizzleRunRepository } from "../../db/repositories/run-repository.js";
+import type { DrizzleSessionRepository } from "../../db/repositories/session-repository.js";
 import type { Session } from "../../db/repositories/types.js";
 import type { RunRequest } from "../../types/runs.js";
 import { autoCompactIfNeeded, createAutoCompactConfig } from "../compact/auto-compact.js";
@@ -35,10 +35,18 @@ interface WarnLogger {
 
 export interface RunPreparationDependencies {
   readonly config: AppConfig;
+  /**
+   * 仍然需要 —— compact、记忆检索、历史构建这几条都还是「函数吃 db」的形态,
+   * 它们各自的 Repository 归属要等 Wave 4 划模块时才定。
+   * 这里只把**本文件自己**曾经现建的三个 Repository 改成注入(§10.2 第 3 条)。
+   */
   readonly db: AppDatabase;
   readonly logger: WarnLogger;
   readonly session: SessionService;
   readonly workspaces: WorkspaceStore;
+  readonly sessions: DrizzleSessionRepository;
+  readonly messages: DrizzleMessageRepository;
+  readonly runs: DrizzleRunRepository;
 }
 
 /**
@@ -112,8 +120,11 @@ export class SessionBusyError extends Error {
   }
 }
 
-const assertSessionIdle = (db: AppDatabase, sessionId: string): void => {
-  const running = new DrizzleRunRepository(db).findRunningBySessionId(sessionId);
+const assertSessionIdle = (
+  runs: DrizzleRunRepository,
+  sessionId: string
+): void => {
+  const running = runs.findRunningBySessionId(sessionId);
 
   if (running) {
     throw new SessionBusyError(running.id);
@@ -131,18 +142,17 @@ export const prepareRunInput = async (
 ): Promise<RunInput> => {
   // send 与 retry 都从这里过;新建会话(无 sessionId)天然不可能有在飞 run。
   if (body.sessionId !== undefined) {
-    assertSessionIdle(dependencies.db, body.sessionId);
+    assertSessionIdle(dependencies.runs, body.sessionId);
   }
 
   if (body.retryMessageId !== undefined) {
-    const messageRepo = new DrizzleMessageRepository(dependencies.db);
-    const target = messageRepo.findById(body.retryMessageId);
+    const target = dependencies.messages.findById(body.retryMessageId);
 
     if (!target) throw new Error("要重新生成的消息不存在");
     if (target.sessionId !== body.sessionId) throw new Error("不能跨会话重新生成");
     if (target.role !== "assistant") throw new Error("只能重新生成 assistant 回复");
 
-    const current = new DrizzleSessionRepository(dependencies.db).findById(target.sessionId);
+    const current = dependencies.sessions.findById(target.sessionId);
     if (!current || current.activeLeafId !== target.id) {
       throw new Error("只能重新生成最后一条回复");
     }
@@ -156,7 +166,7 @@ export const prepareRunInput = async (
 
     const workspace = await loadWorkspaceContext(dependencies, current);
     const parentMessage =
-      target.parentId !== null ? messageRepo.findById(target.parentId) : undefined;
+      target.parentId !== null ? dependencies.messages.findById(target.parentId) : undefined;
 
     return {
       sessionId: target.sessionId,
@@ -197,8 +207,7 @@ export const prepareRunContext = async (
   resolved: { readonly mainModel: ModelBinding; readonly toolModel: ModelBinding }
 ): Promise<RunContext> => {
   const { mainModel } = resolved;
-  new DrizzleSessionRepository(dependencies.db)
-    .updateModel(input.sessionId, mainModel.qualifiedModelId);
+  dependencies.sessions.updateModel(input.sessionId, mainModel.qualifiedModelId);
 
   const settings = loadAppSettings(dependencies.db, dependencies.config);
   await autoCompactIfNeeded(

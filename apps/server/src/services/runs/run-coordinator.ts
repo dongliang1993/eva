@@ -11,6 +11,10 @@ import type { ApprovalGateway } from "../approval-gateway.js";
 import type { ApprovalPolicyStore } from "../approval-policy-store.js";
 import type { McpRegistry } from "../mcp/mcp-registry.js";
 import type { PlanWeaveService } from "../plan-weave/index.js";
+import type { DrizzleMessageRepository } from "../../db/repositories/message-repository.js";
+import type { DrizzlePlanRepository } from "../../db/repositories/plan-repository.js";
+import type { DrizzleRunRepository } from "../../db/repositories/run-repository.js";
+import type { DrizzleSessionRepository } from "../../db/repositories/session-repository.js";
 import type { RunRegistry } from "../run-registry.js";
 import type { SessionService } from "../session.js";
 import { loadAppSettings } from "../settings/app-settings.js";
@@ -62,6 +66,11 @@ export interface RunCoordinatorDependencies {
   readonly workspaces: WorkspaceStore;
   readonly planWeave: PlanWeaveService;
   readonly mcp: McpRegistry;
+  /** 阶段①要读会话/消息/在飞 run —— 由组合根注入,不在这里现建(§10.2 第 3 条)。 */
+  readonly sessions: DrizzleSessionRepository;
+  readonly messages: DrizzleMessageRepository;
+  readonly runs: DrizzleRunRepository;
+  readonly plans: DrizzlePlanRepository;
 }
 
 /** run() 需要的每请求日志口 —— 只用到这三个级别。 */
@@ -147,7 +156,10 @@ export class RunCoordinator {
       db: deps.db,
       logger: deps.logger,
       session: deps.session,
-      workspaces: deps.workspaces
+      workspaces: deps.workspaces,
+      sessions: deps.sessions,
+      messages: deps.messages,
+      runs: deps.runs
     };
     this.builder = new RunRuntimeBuilder({
       db: deps.db,
@@ -156,7 +168,8 @@ export class RunCoordinator {
       agents: deps.agents,
       mcp: deps.mcp,
       planWeave: deps.planWeave,
-      baseObserver: deps.baseObserver
+      baseObserver: deps.baseObserver,
+      plans: deps.plans
     });
   }
 

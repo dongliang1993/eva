@@ -1,8 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
-import { buildPolicyKeys } from "@eva/harness";
-
 interface GrantBody {
   readonly tool: string;
   readonly sessionId: string;
@@ -31,17 +29,12 @@ export const registerApprovalPolicyRoutes = (app: FastifyInstance): void => {
     }
 
     const { tool, sessionId, args } = parsed.data;
-    const keys = buildPolicyKeys({ toolName: tool, threadId: sessionId, args });
+    // key 生成与记忆都在 api 层 —— 不可记忆的工具返回 null,前端别弹「已加入」。
+    const key = app.api.approvals.grantPolicy({ tool, sessionId, args });
 
-    // 不可记忆(destructive 双保险 / 只读或未知工具)→ 不落库,前端别弹「已加入」。
-    if (keys.length === 0) {
-      return { key: null };
+    if (key !== null) {
+      request.log.info({ key, tool, sessionId }, "approval policy granted");
     }
-
-    // 精确 key 在前(T27 保证):点「始终允许 npm test」只记这一条命令,不是 :all 粗放。
-    const key = keys[0]!;
-    app.services.approvalPolicies.grant(key);
-    request.log.info({ key, tool, sessionId }, "approval policy granted");
 
     return { key };
   });

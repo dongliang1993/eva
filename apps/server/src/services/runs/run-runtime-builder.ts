@@ -11,7 +11,7 @@ import type { AgentObserver } from "@eva/harness";
 import type { RunStreamEvent } from "@eva/shared";
 
 import type { AppDatabase } from "../../db/index.js";
-import { DrizzlePlanRepository } from "../../db/repositories/plan-repository.js";
+import type { DrizzlePlanRepository } from "../../db/repositories/plan-repository.js";
 import type { AgentFactory, ResolvedAgent } from "../agent-factory.js";
 import { defined } from "../agent-factory.js";
 import type { McpRegistry } from "../mcp/mcp-registry.js";
@@ -40,6 +40,12 @@ export interface RunRuntimeBuilderDependencies {
   readonly agents: AgentFactory;
   readonly mcp: McpRegistry;
   readonly planWeave: PlanWeaveService;
+  /**
+   * plan gate 的初值来自这张表。注入而不是现建 —— `plans` 表归 plan-gate 模块,
+   * runs 模块自己 new 它就等于「谁拥有这张表」没有答案(§10.2 第 3 条)。
+   * Wave 4 划模块时这里会换成 plan-gate 的查询入口。
+   */
+  readonly plans: DrizzlePlanRepository;
   /** 进程级 pino observer —— 永远是第二订阅者,不是唯一订阅者。 */
   readonly baseObserver: AgentObserver | undefined;
 }
@@ -203,7 +209,7 @@ export class RunRuntimeBuilder {
     | undefined {
     if (!scope.input.workspace) return undefined;
 
-    const activePlan = new DrizzlePlanRepository(this.deps.db).findActive(scope.sessionId);
+    const activePlan = this.deps.plans.findActive(scope.sessionId);
     const state = createPlanGateState(
       activePlan
         ? {

@@ -101,16 +101,32 @@ const RULES = [
       spec === "fastify" || spec.startsWith("fastify/")
   },
   {
-    id: "routes-no-infra-handle",
-    level: "warning",
-    since: "§10.2 第 1 条,Wave 2 收敛为 error",
+    id: "routes-only-app-api",
+    level: "error",
+    since: "§10.2 第 1 条,Wave 2 收敛(2026-08-30)",
     from: ["apps/server/src/routes"],
     why:
-      "Route 不得拿到原始 DB / 加密器句柄。import 规则看不见这种形态 —— " +
-      "它们不 import db,而是把 app.infra.db 传给 service 函数(providers/models/settings 就是这样)",
+      "Route 只能经 app.api 拿东西(宪法 C2)。禁的不只是 app.infra.db —— " +
+      "整个 app.infra 与 app.services 都不该出现在 route 里:前者是原始句柄(db/encryptor)," +
+      "后者是有状态的长寿服务,route 拿到它就会开始编排。import 规则看不见这种形态," +
+      "因为它们不 import db,而是把 app.infra.db 递给 service 函数",
     forbidText: [
-      { pattern: /\bapp\.infra\.db\b/g, label: "app.infra.db" },
-      { pattern: /\bapp\.infra\.encryptor\b/g, label: "app.infra.encryptor" }
+      { pattern: /\bapp\.infra\b/g, label: "app.infra" },
+      { pattern: /\bapp\.services\b/g, label: "app.services" }
+    ]
+  },
+  {
+    id: "repository-only-in-composition-root",
+    level: "error",
+    since: "§10.2 第 3 条,Wave 2 收敛(2026-08-30)",
+    from: ["apps/server/src/routes", "apps/server/src/services/runs"],
+    why:
+      "Repository 只能在组合根(src/api/、src/services/index.ts、src/deps.ts)或所属模块的 " +
+      "Adapter 内创建。route 与 run-preparation.ts 曾经各自 new,于是「谁拥有这张表」" +
+      "这个问题没有答案。本条目前只覆盖已收敛的两处;services/ 下按模块自建的那些," +
+      "要等 Wave 4 划出模块边界后才能判定是否越界(§10.2 第 3 条写的是 Wave 2–4)",
+    forbidText: [
+      { pattern: /\bnew\s+[A-Za-z]*Repository\s*\(/g, label: "new XxxRepository(" }
     ]
   },
   {
@@ -142,8 +158,8 @@ const RULES = [
   },
   {
     id: "routes-no-db",
-    level: "warning",
-    since: "§10.2 第 1 条,Wave 2 收敛为 error",
+    level: "error",
+    since: "§10.2 第 1 条,Wave 2 收敛(2026-08-30)",
     from: ["apps/server/src/routes"],
     why: "Route 只翻译协议(宪法 C2)。直接访问 DB 就是它同时在当业务总控",
     forbid: (spec) =>

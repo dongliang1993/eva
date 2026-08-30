@@ -1,3 +1,7 @@
+import { DrizzleMessageRepository } from "../db/repositories/message-repository.js";
+import { DrizzlePlanRepository } from "../db/repositories/plan-repository.js";
+import { DrizzleRunRepository } from "../db/repositories/run-repository.js";
+import { DrizzleSessionRepository } from "../db/repositories/session-repository.js";
 import type { AppInfrastructure, AppServices } from "../types/common.js";
 import { RunFinalizer } from "../services/runs/run-finalizer.js";
 import {
@@ -42,6 +46,10 @@ export const createRunsApi = (infra: AppInfrastructure, services: AppServices): 
     workspaces: services.workspaces,
     planWeave: services.planWeave,
     mcp: services.mcp,
+    sessions: new DrizzleSessionRepository(infra.db),
+    messages: new DrizzleMessageRepository(infra.db),
+    runs: new DrizzleRunRepository(infra.db),
+    plans: new DrizzlePlanRepository(infra.db),
     // 终态的构造权留在组合根这一侧。coordinator 只拿到这个工厂,拿不到
     // RunSettlingLedger —— 于是「在 catch 里顺手 fail 一下」编译不过(§7.2)。
     createFinalizer: (binding) =>

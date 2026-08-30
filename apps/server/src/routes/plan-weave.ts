@@ -56,7 +56,7 @@ const sendError = (reply: FastifyReply, error: unknown): { error: string } => {
 };
 
 export const registerPlanWeaveRoutes = (app: FastifyInstance): void => {
-  const service = () => app.services.planWeave;
+  const service = () => app.api.plans;
 
   app.get("/api/v1/workspaces/:id/plan", async (request, reply) => {
     const { id } = request.params as { id: string };

@@ -25,7 +25,7 @@ const CLIENT_SUBMITTABLE_OUTCOMES = new Set<PlanReviewOutcome>(
 export const registerApprovalRoutes = (app: FastifyInstance): void => {
   app.get("/api/v1/tool-approvals", async (request) => {
     const { sessionId } = request.query as { sessionId?: string };
-    const pending = app.services.approvals.listPending(sessionId);
+    const pending = app.api.approvals.listPending(sessionId);
     return {
       approvals: pending.map((p) => ({
         callId: p.callId,
@@ -42,7 +42,7 @@ export const registerApprovalRoutes = (app: FastifyInstance): void => {
     async (request, reply) => {
       const callId = request.params.callId;
       const allowed = request.body?.allowed ?? false;
-      const decided = app.services.approvals.decide(callId, allowed);
+      const decided = app.api.approvals.decide(callId, allowed);
 
       if (!decided) {
         reply.code(404);
@@ -71,7 +71,7 @@ export const registerApprovalRoutes = (app: FastifyInstance): void => {
         return { error: "revise requires non-empty feedback." };
       }
 
-      const decided = app.services.approvals.decidePlanReview(callId, {
+      const decided = app.api.approvals.decidePlanReview(callId, {
         outcome,
         ...(feedback !== undefined ? { feedback } : {}),
         ...(request.body?.selectedLabel !== undefined
