@@ -182,9 +182,15 @@ pnpm desktop:build# Build the desktop app
 pnpm desktop:pack # Pack the desktop app for distribution
 ```
 
-> Node ≥ 20.3 required (harness uses `AbortSignal.any` in the tool abort/timeout
-> wiring, r6 T25). Desktop builds ship the server on Electron's bundled Node —
-> verify there before a release.
+> **Node ≥ 22 required** — pinned by `engines.node` and `.nvmrc`, and verified by CI on
+> Node 22 and 26. (`AbortSignal.any` needs ≥ 20.3, but `apps/server/tsup.config.ts`
+> emits for `target: "node22"`, so 22 is the real floor.) Desktop builds ship the server
+> on Electron's bundled Node — verify there before a release.
+>
+> **native 模块提醒**：`better-sqlite3` 必须为当前 Node 的 ABI 编译。允许它跑编译脚本的
+> 开关在 `pnpm-workspace.yaml` 的 `onlyBuiltDependencies`（必须是 YAML 列表；写成
+> `'["electron"]'` 这种字符串 pnpm 不认，会让编译被静默跳过）。升级 Node 后若测试大面积
+> 报 `NODE_MODULE_VERSION` 不匹配，跑 `pnpm rebuild -r better-sqlite3`。
 
 打包链路（T11 起）：`pack` = web build → server build → `pnpm deploy .server-deploy`
 （server 的 prod node_modules，供 external 依赖）→ `electron-rebuild`（better-sqlite3 按
