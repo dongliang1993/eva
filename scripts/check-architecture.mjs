@@ -53,8 +53,11 @@ const SOURCE_EXT = new Set([".ts", ".tsx", ".mts", ".cts"]);
  * from       : 规则适用的路径前缀(仓库相对,POSIX 分隔符)
  * forbid     : 命中即违规的 import 说明符判定函数
  * forbidText : 可选,源文本级规则 —— 只用于**稳定的、不会漂移的表达式**
- *              (例如 Fastify decorator 名 `app.infra.db`)。绝不要用它做符号级判定
- *              (`.settle(` 那种),变量改名就漏 —— 那类不变量交给编译器(C6 能力收窄)。
+ *              (例如 Fastify decorator 名 `app.infra.db`,或 import 语句里的具体类名)。
+ *              绝不要用它做符号级判定(`.settle(` 那种),变量改名就漏 ——
+ *              那类不变量交给编译器(C6 能力收窄)。
+ *              条目可带 `multiline: true`:整份源文本上匹配(用于跨行 import 块),
+ *              行号由匹配位置反算。缺省是逐行匹配。
  * exempt     : 可选,豁免文件(仓库相对路径),必须写清理由
  */
 const RULES = [
@@ -108,6 +111,33 @@ const RULES = [
     forbidText: [
       { pattern: /\bapp\.infra\.db\b/g, label: "app.infra.db" },
       { pattern: /\bapp\.infra\.encryptor\b/g, label: "app.infra.encryptor" }
+    ]
+  },
+  {
+    id: "run-ledger-terminal-state",
+    level: "error",
+    since: "§7.2,Wave 1 落地",
+    from: ["apps/server/src"],
+    why:
+      "Run 的终态只有一个出口。RunLedger 具体类同时带着 start/patchRouting 与 settle/fail —— " +
+      "拿到它就等于拿到开第二个终态出口的能力。别处只能用两个窄视图 " +
+      "RunOpeningLedger / RunSettlingLedger(宪法 C6 能力收窄,不是 Port)",
+    // 只认「从 run-ledger 模块 import 了 RunLedger 这个名字」。\b 保证 RunOpeningLedger /
+    // RunSettlingLedger 不被误伤(两者都不含 "RunLedger" 这个完整词)。
+    // 这是 import 名级判定,不是符号级:改类名是刻意行为,应该同步改这条规则。
+    forbidText: [
+      {
+        pattern: /import\s+(?:type\s+)?\{[^}]*\bRunLedger\b[^}]*\}\s*from\s*["'][^"']*run-ledger(?:\.js)?["']/g,
+        label: "import { RunLedger }",
+        multiline: true
+      }
+    ],
+    exempt: [
+      // 组合根:它就是那个 new 出唯一实例、再把两个视图分发下去的地方(C8)。
+      "apps/server/src/services/index.ts",
+      // AppServices 的类型声明。app.services.runLedger 的具体类型在这里定,
+      // 组合根照它注入;它不调用任何方法。
+      "apps/server/src/types/common.ts"
     ]
   },
   {
@@ -218,7 +248,18 @@ for (const rule of RULES) {
         // 文本规则同样先剥注释 —— 注释里提到 app.infra.db 不算违规。
         const src = blankComments(readFileSync(file, "utf-8"));
         const lines = src.split("\n");
-        for (const { pattern, label } of rule.forbidText) {
+        for (const { pattern, label, multiline } of rule.forbidText) {
+          pattern.lastIndex = 0;
+          if (multiline) {
+            // 整份源文本上匹配:跨行的 import 块逐行看不出来。
+            let m;
+            while ((m = pattern.exec(src)) !== null) {
+              const line = src.slice(0, m.index).split("\n").length;
+              violations.push({ rule, file: relFile, line, spec: label });
+              if (m[0].length === 0) pattern.lastIndex += 1; // 防零宽匹配死循环
+            }
+            continue;
+          }
           lines.forEach((text, i) => {
             pattern.lastIndex = 0;
             if (pattern.test(text)) {

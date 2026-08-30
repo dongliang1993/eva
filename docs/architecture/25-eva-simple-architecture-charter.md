@@ -2067,6 +2067,21 @@ request
 退出条件：`runs.ts` 不再直接访问 DB 或装配业务能力；§5.0 的主链在 5 个文件内读完；
 Wave 0 的七条 characterization tests 一条不改地通过 —— **它们不许为了适配新结构而修改断言**。
 
+> **Wave 1 已结束（2026-08-30）。** 五步全部落地，`routes/runs.ts` 575 → 101 行。
+> 落地形态与两处偏差见 §5.0 末尾的落地表。退出条件逐条：
+>
+> - **不再访问 DB** —— `routes/runs.ts` 里 `routes-no-db` 违规清零；`app.infra.db` 还剩一处
+>   （把 db 传给 `RunCoordinator` 的构造参数），那一处由 Wave 2 的 `AppApi` 收掉。
+> - **主链 5 个文件** —— `run-routes` → `run-coordinator` → `run-runtime-builder` →
+>   `agent.ts` → `run-finalizer`。
+> - **测试一条断言没改** —— 736 个用例通过（Wave 0 基线 735 + 新增 1）。
+>   唯一改动的是两条「读源码钉接线」的测试**读哪个文件**：接线搬到
+>   `run-approval-channel.ts` 之后，不改路径它们钉的是一个空文件（实测会退化成
+>   `-1 > -1` 这种假绿）。断言文本一字未动。
+> - **终态收窄已生效** —— 实测在 coordinator 里写 `runLedger.settle(...)` 编译不过：
+>   `TS2339 Property 'settle' does not exist on type 'RunOpeningLedger'`。
+>   兜底的 import 规则 `run-ledger-terminal-state` 也实测拦得住（含跨行 import）。
+
 ### Wave 2：组合根与 Route 边界
 
 目标：让「Route 只是协议适配器」从愿望变成脚本能验证的事实。

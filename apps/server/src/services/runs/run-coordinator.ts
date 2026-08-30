@@ -20,9 +20,9 @@ import type { RunEventStream } from "../../transports/sse/event-stream.js";
 import { runRequestSchema } from "../../types/runs.js";
 import { AssistantMessageRecorder } from "./assistant-message-recorder.js";
 import { RunApprovalChannel } from "./run-approval-channel.js";
-import { RunFinalizer, type RunFailurePhase } from "./run-finalizer.js";
+import type { RunFailurePhase, RunFinalizerFactory } from "./run-finalizer.js";
 import type { RunHub } from "./run-hub.js";
-import type { RunLedger } from "./run-ledger.js";
+import type { RunOpeningLedger } from "./run-ledger.js";
 import {
   prepareRunContext,
   prepareRunInput,
@@ -47,7 +47,17 @@ export interface RunCoordinatorDependencies {
   readonly session: SessionService;
   readonly approvals: ApprovalGateway;
   readonly approvalPolicies: ApprovalPolicyStore;
-  readonly runLedger: RunLedger;
+  /**
+   * 只给 Open 阶段的两个方法。**编译器在这里替代 lint**:coordinator 看不见
+   * settle / fail,所以「在某个 catch 里顺手写一句 runLedger.fail」这件事编译不过
+   * (实测:TS2339 Property 'settle' does not exist on type 'RunOpeningLedger')。
+   */
+  readonly runLedger: RunOpeningLedger;
+  /**
+   * 终态的构造权在组合根手里 —— coordinator 只能「要一个 finalizer」,不能自己 new。
+   * 自己 new 就等于手里出现了 RunSettlingLedger,上面那条收窄立刻白做。
+   */
+  readonly createFinalizer: RunFinalizerFactory;
   readonly runRegistry: RunRegistry;
   readonly workspaces: WorkspaceStore;
   readonly planWeave: PlanWeaveService;
@@ -163,12 +173,8 @@ export class RunCoordinator {
     // register 时就建好了枢纽 —— 传进来这条连接只是它的第一个订阅者。
     const scope = new RunScope(runId, controller, this.deps.runRegistry.hubFor(runId)!);
     // 终态的唯一出口。建在 try 外:阶段①就抛错时也要有人收台账。
-    const finalizer = new RunFinalizer({
+    const finalizer = this.deps.createFinalizer({
       runId,
-      runLedger: this.deps.runLedger,
-      session: this.deps.session,
-      runRegistry: this.deps.runRegistry,
-      approvals: this.deps.approvals,
       hub: scope.hub,
       failureLayer: scope.failureLayer
     });
@@ -208,7 +214,7 @@ export class RunCoordinator {
     scope: RunScope,
     stream: RunEventStream,
     log: RunRequestLog,
-    finalizer: RunFinalizer
+    finalizer: ReturnType<RunFinalizerFactory>
   ): Promise<void> {
     const { runId, hub, emit } = scope;
     const runRequest = runRequestSchema.parse(body ?? {});

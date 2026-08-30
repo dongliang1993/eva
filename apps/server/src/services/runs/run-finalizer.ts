@@ -8,7 +8,7 @@ import type { ReportGateway } from "../subagents/report-gateway.js";
 import type { RunRegistry } from "../run-registry.js";
 import type { AssistantMessageRecorder } from "./assistant-message-recorder.js";
 import type { RunHub } from "./run-hub.js";
-import type { RunLedger } from "./run-ledger.js";
+import type { RunSettlingLedger } from "./run-ledger.js";
 
 /**
  * 流式开始**前**的失败层。"routing" = provider/模型/skill 解析,"context" = 历史/compact。
@@ -18,7 +18,8 @@ export type RunFailurePhase = "routing" | "context";
 
 export interface RunFinalizerDependencies {
   readonly runId: string;
-  readonly runLedger: RunLedger;
+  /** 只要终态那两个方法 —— 拿全量 RunLedger 就等于把 start/patchRouting 也带进来了。 */
+  readonly runLedger: RunSettlingLedger;
   readonly session: SessionService;
   readonly runRegistry: RunRegistry;
   readonly approvals: ApprovalGateway;
@@ -29,6 +30,29 @@ export interface RunFinalizerDependencies {
    */
   readonly failureLayer: { readonly current?: RunFailureLayer };
 }
+
+/**
+ * 每个 run 才知道的那三样 —— 工厂把它们和进程级依赖拼起来。
+ */
+export interface RunFinalizerBinding {
+  readonly runId: string;
+  readonly hub: RunHub;
+  readonly failureLayer: { readonly current?: RunFailureLayer };
+}
+
+/**
+ * 由组合根提供的 finalizer 工厂。
+ *
+ * 为什么要这层间接:finalizer 是 per-run 的(它持 runId / hub / failureLayer),
+ * 所以只能由 coordinator 在运行期建。但 §7.2 要求 coordinator **拿不到**
+ * `RunSettlingLedger` —— 让它直接 new RunFinalizer 就等于让它手里有那个类型,
+ * 能力收窄立刻失效。工厂把 `RunSettlingLedger` 关在组合根一侧:
+ * coordinator 只拿到一个「给我这三样、还你一个 finalizer」的函数。
+ *
+ * 这正是宪章 §7.2「组合根注入同一个 RunLedger 实例(C8),两个窄接口只是它的两个视图」
+ * 在「finalizer 是 per-run」这个事实下的具体形态。
+ */
+export type RunFinalizerFactory = (binding: RunFinalizerBinding) => RunFinalizer;
 
 /** 失败收尾要知道的、只有调用方手上才有的事实。 */
 export interface RunFailureContext {

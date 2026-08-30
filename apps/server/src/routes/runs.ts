@@ -3,6 +3,7 @@ import { toErrorMessage } from "@eva/shared";
 
 import { AgentUnavailableError } from "../services/agent-factory.js";
 import { RunCoordinator } from "../services/runs/run-coordinator.js";
+import { RunFinalizer } from "../services/runs/run-finalizer.js";
 import { SessionBusyError } from "../services/runs/run-preparation.js";
 import { RunEventStream } from "../transports/sse/event-stream.js";
 
@@ -29,7 +30,17 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     runRegistry: app.services.runRegistry,
     workspaces: app.services.workspaces,
     planWeave: app.services.planWeave,
-    mcp: app.services.mcp
+    mcp: app.services.mcp,
+    // 终态的构造权留在这一侧(今天的组合根)。coordinator 只拿到这个工厂,
+    // 拿不到 RunSettlingLedger —— 于是「在 catch 里顺手 fail 一下」编译不过。
+    createFinalizer: (binding) =>
+      new RunFinalizer({
+        ...binding,
+        runLedger: app.services.runLedger,
+        session: app.services.session,
+        runRegistry: app.services.runRegistry,
+        approvals: app.services.approvals
+      })
   });
 
   app.post("/api/v1/runs/stream", async (request, reply) => {
