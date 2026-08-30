@@ -35,6 +35,7 @@
 | 22 | [S18 审批中心升级方案](./22-s18-approval-center.md) | S18 切片技术方案：thread 作用域 policy key、bash 安全直放、决策回写消息；含现状盘点与 r7 施工拆分（T27–T30） | ✅ |
 | 23 | [Eva 自动更新方案](./23-eva-auto-update.md) | Alma v0.0.986 更新链实证（差量预热/断点续传救援/手动触发 UX）× Cindy 自研链对照 → Eva 选型与 D1–D8 落地设计、发布 checklist、施工拆分 | ✅ |
 | 24 | [Eva Plan Gate × Plan Weave 方案](./24-eva-plan-gate-plan-weave.md) | Kimi Code plan mode（审批闸门/plan 文件/reminder）× Alma Plan Weave（workspace 文件任务图）→ Eva 两层拆分、数据模型、API、落地切片 | ✅ |
+| 25 | [Eva 简明架构总纲与渐进改造方案](./25-eva-simple-architecture-charter.md) | **Eva 自身**的架构收敛总纲：C1–C12 架构宪法、目标目录、Run 五阶段与「今天的主链长什么样」、状态所有权表（含代码位置）、7.1–7.23 每模块改造、可执行边界规则、Wave 0–6 迁移计划 | 📝 Review Draft |
 
 ## 你问的 5 个方面 → 对应文档
 

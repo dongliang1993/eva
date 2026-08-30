@@ -1,12 +1,15 @@
 # Eva 简明架构总纲与渐进改造方案
 
-> 状态：Review Draft
+> 状态：Review Draft（已逐条对账 2026-08-30 代码快照）
 >
 > 日期：2026-08-30
 >
-> 适用范围：`apps/server`、`packages/harness`、`packages/shared`、`apps/web`、`apps/desktop`、测试与架构文档
+> 适用范围：`apps/server`、`packages/harness`、`packages/shared`、`apps/web`、`apps/desktop`、`tests/`、构建产物与架构文档
 >
 > 目的：作为 Eva 下一阶段架构收敛的总纲、模块改造依据，以及交给其他工程师或模型进行二次评审的自包含材料。
+>
+> 事实纪律：本文出现的所有行数、文件数和「哪些地方违反了哪条规则」都是在 `7066701` 这个提交上实测得到的，
+> 不是估计。凡是**尚未实测**的判断，本文会写明「待核」。评审者可以直接复算：每条事实旁边都给了可执行的命令或路径。
 
 ---
 
@@ -14,9 +17,13 @@
 
 - 只评审总体方向：阅读 0、2、3、5、6、13、16；
 - 评审某个具体模块：先读 3 和 6，再读 7 中对应模块；
-- 评审可执行性：重点阅读 10、11、12、13；
-- 准备开始第一轮改造：阅读 5、7.2、8、11.4、12 的 Wave 0–1；
-- 检查是否过度设计：重点阅读 2.2、C6、C7、5.2、5.3。
+- 评审可执行性：重点阅读 **10.0**、10、11、12、13；
+- 准备开始第一轮改造：阅读 **5.0**、5、7.2、8、11.4、12 的 **12.0 与 Wave 0–1**；
+- 检查是否过度设计：重点阅读 2.2、**4.4**、C6、C7、5.2、5.3；
+- 只想知道「今天的代码长什么样」：只读 **1.2**、**5.0**、6 三节。
+
+如果只有十分钟，读这三处：**§1.2**（实测出来的九个问题，含「没有任何 linter」）、
+**§5.0**（今天一次 Run 要跨 7 个文件，问题全在第 1 个）、**§12.0**（施工规约五条）。
 
 本文中的“必须/禁止”表示目标架构的强约束；“应/建议”表示默认选择，偏离时需要在 Review 中说明理由；“可以/P3”表示可选优化。本文仍是 Review Draft，描述的是目标与迁移方案，不代表当前代码已经满足全部约束。
 
@@ -26,12 +33,18 @@
 
 Eva 不需要重写，也不需要替换 Fastify、Electron、React、SQLite 或 Vercel AI SDK。当前架构的基础方向是成立的：桌面壳、内嵌服务、Agent Harness、Shared 契约和 Web 前端已经有清楚的进程边界；真正的问题是随着能力增长，**应用编排、模块所有权、公开边界和当前架构文档没有同步收敛**。
 
-本方案的核心不是“把大文件切成小文件”，而是建立四条长期有效的约束：
+本方案的核心不是“把大文件切成小文件”，而是建立五条长期有效的约束：
 
 1. **协议层只翻译协议，应用层显式编排流程。**
 2. **每份状态只有一个所有者和一个事实源。**
 3. **跨模块只能通过公开能力协作，不能穿透到对方的 Repository 或内部文件。**
 4. **每一次 Run 都能通过统一标识和事件账本还原因果链。**
+5. **以上四条必须由脚本执行，而不是靠 Review 记得。**
+
+第 5 条是本次对账新增的，也是最容易被低估的一条。实测发现 Eva 目前**没有任何 linter、
+没有 CI、没有 `lint` script**（§1.2、§10.0）—— 也就是说前四条约束目前没有任何强制手段。
+如果不先补上执行机制，本文会变成第 99 篇「写得对但没人遵守」的架构文档，
+而这恰好是它想解决的问题本身。因此 Wave 0 的第一件事不是拆代码，是建立 `pnpm lint:arch` 与 CI。
 
 目标架构采用“**仓库级单向依赖 + Server 内按业务模块垂直切分 + Harness 作为独立执行内核**”。不引入重量级 DDD 框架，不追求为每个类创建接口，也不建设全局 Event Bus。
 
@@ -67,14 +80,22 @@ Eva 不需要重写，也不需要替换 Fastify、Electron、React、SQLite 或
 
 ### 1.2 当前复杂度热点
 
-以下数字是 2026-08-30 的代码快照，用于说明问题，不作为永久 KPI：
+以下数字是 `7066701` 提交上的实测值，用于说明问题，不作为永久 KPI：
 
-- `apps/server/src/routes/runs.ts` 约 575 行；
-- `packages/harness/src/agents/agent.ts` 约 926 行；
-- `apps/desktop/electron/main.ts` 约 750 行；
-- Server 的 18 个 Route 文件中，约 10 个会直接访问 `app.infra.db` 或创建 Repository；
-- Web 中 Sidebar、Memory Settings、Provider Settings、Trajectory View、Message Bubble 等文件达到 300–700 行；
-- `docs/architecture` 与 `docs/plans` 合计近百篇、三万余行，研究、历史计划、目标架构和当前事实混在一起。
+| 现象 | 实测值 | 复算方式 |
+|---|---|---|
+| Run 编排入口过载 | `apps/server/src/routes/runs.ts` 575 行 | `wc -l` |
+| Agent 主循环过载 | `packages/harness/src/agents/agent.ts` 926 行 | `wc -l` |
+| 桌面主进程过载 | `apps/desktop/electron/main.ts` 750 行，9 个职责段 | 文件内 `// ---- 段落分隔 ----` 注释 |
+| Route 越过模块边界 | 18 个 route 文件中 **10 个**直接访问 `app.infra.db` 或 `new XxxRepository()`；扣掉 `index.ts` 与 `static.ts` 这两个非业务文件后，比例是 **10/16** | `grep -ln 'infra\.db\|Repository(' apps/server/src/routes/*.ts` |
+| Web 组件过载 | `memory-settings` 664、`sidebar` 642、`provider-settings` 592、`derive-trajectory` 536、`trajectory-view` 456、`message-bubble` 382 行 | `wc -l` |
+| 测试无法按模块定位 | `tests/` 下 **93 个测试文件全部平铺**，唯一子目录是 `helpers/` | `ls tests \| wc -l` |
+| 文档需要考古 | `docs/**/*.md` 共 **98 篇 32201 行**，研究、历史计划、目标架构和当前事实混在一起 | `find docs -name '*.md' \| xargs cat \| wc -l` |
+| 工作区里有陈旧代码副本 | `apps/desktop/.server-deploy/src/` 是一份 **93 个 `.ts` 文件的 server 源码副本**（打包中间产物，已 gitignore 但留在磁盘上），停在 migration `0025`，没有 `run_events`、没有 plan-weave | `diff -q apps/server/src/routes/runs.ts apps/desktop/.server-deploy/src/routes/runs.ts` |
+| **没有任何边界检查工具** | 仓库内 **无 ESLint / Biome / oxlint / dependency-cruiser 配置，无 `.github/`，无任何 `lint` script** | `ls -a; ls .github; grep -rn '"lint"' package.json apps/*/package.json` |
+
+最后一行是本节最重要的一条，它决定了后文 §10 的性质：**Eva 目前没有任何自动化手段阻止依赖方向被破坏**，
+所有边界都只靠 Review 与自觉维持。
 
 文件变大本身不是根因。根因是同一个文件同时承担多个“变化原因”。例如一次 Run 的 HTTP Handler 同时知道：
 
@@ -100,13 +121,29 @@ Eva 不需要重写，也不需要替换 Fastify、Electron、React、SQLite 或
 
 设计上希望依赖是 `routes -> services -> repositories`，但 Route 可以直接访问 DB，模块也可以导入其他模块的内部文件。目录表达了意图，编译器和 CI 没有执行这个意图。
 
+这一条不是「执行得不够严」，而是**执行机制根本不存在**：实测仓库里没有 ESLint / Biome / dependency-cruiser
+任何一种配置，没有 `.github/`，`package.json` 里也没有 `lint` script（§1.2 末行）。`tsconfig` 的 `strict`
+只能保证类型正确，管不了「谁不许 import 谁」。
+
+因此**任何以「加一条 lint 规则」为收尾动作的改造计划，在 Eva 上都隐含了一项没被算进去的前置工程**。
+§10 与 §12 Wave 0 必须把这项前置工程显式列出来，否则整个方案会停留在纸面约定，
+而纸面约定正是根因 B 本身。
+
 #### 根因 C：运行期状态很多，但所有权没有统一表达
 
 Run Registry、Run Ledger、Run Hub、Message Recorder、Approval Gateway、Run Event Recorder 都是合理概念，但如果不明确哪一个回答哪类问题，阅读者会误以为它们是重复状态，修改者也容易从错误的投影反推业务事实。
 
-#### 根因 D：文档没有区分当前事实、设计决策和历史研究
+#### 根因 D：文档与测试都没有可预期的入口
 
-当前文档既记录外部产品研究，又记录 Eva 的目标架构、旧计划和已实现状态。新读者首先需要做文档考古，才能判断代码为什么是现在这样。
+**文档**：当前文档既记录外部产品研究，又记录 Eva 的目标架构、旧计划和已实现状态。新读者首先需要做文档考古，
+才能判断代码为什么是现在这样。最尖锐的一处是 `docs/architecture/README.md` —— 它是整个架构目录的默认入口，
+而它的标题是《Alma 架构拆解 · Agent 开发学习手册》，第一句写着「目标读者：想自己复刻一个 Alma 类 AI 桌面助手的
+开发者」。一个新人打开 Eva 的架构文档，读到的第一句话会让他以为这个仓库是**另一个产品的逆向研究笔记**。
+
+**测试**：`tests/` 下 93 个文件完全平铺。想知道「Plan Weave 的并发不变量在哪测的」只能靠猜文件名
+（答案是 `plan-weave-store.test.ts`，而 `plan-weave-loop.test.ts`、`plan-weave-api.test.ts`、
+`plan-weave-tools.test.ts` 是另外三层）。§9.1「新手阅读测试」的第 5 条要求「找到相应测试」，
+按当前布局这条无法通过 —— 测试布局和文档布局是同一个根因的两个面：**没有一个可预期的入口。**
 
 ---
 
@@ -375,7 +412,22 @@ interface EvaFailure {
 
 采用“仓库按运行时分包，Server 内按业务能力垂直切分”。
 
-不要求一次性迁移到以下结构。它描述的是最终稳定形态，新模块直接遵守，旧模块逐步靠拢。
+下面是最终稳定形态。**本轮改造已批准物理搬迁到这个结构**（不是「新模块遵守、旧模块慢慢靠拢」），
+但搬迁按 Wave 分批进行，每批自成一个可提交、可回滚的单元。
+
+搬迁期间允许新旧路径共存，规则只有三条，必须严格执行：
+
+1. **旧路径只能退化成一行 re-export shim**，不允许出现「两个都有实现」的状态：
+
+   ```ts
+   // apps/server/src/services/session.ts   —— 搬迁期 shim,勿在此新增任何代码
+   export * from "../modules/sessions/index.js";
+   ```
+
+2. **shim 的数量必须单调下降**，且在它所属 Wave 结束时清零。加一个 shim 就必须同时登记它的清除 Wave。
+3. **纯移动与逻辑修改必须是不同的 commit。** 一个 `git mv` + import 改写的 commit 里不允许夹带任何
+   行为变化；反过来，逻辑重构的 commit 里不允许夹带文件移动。这条是本轮改造能否被 review 的关键 ——
+   混在一起的 diff 无法判断「行为有没有变」，而本轮的前提正是「不影响任何现有功能」。
 
 ```text
 apps/
@@ -445,9 +497,56 @@ modules/runs/
 
 禁止新增笼统的 `utils.ts`、`helpers.ts`、`common.ts` 作为临时收纳箱。
 
+### 4.4 本仓库判例：哪些大文件该拆，哪些不该拆
+
+§9.4 给了通用判据，但通用判据在具体文件上还是会吵架。以下是对当前几个最大文件的**已决判例**，
+直接照用，不要在每次 Review 里重新辩论一遍：
+
+| 文件 | 行数 | 判决 | 理由 |
+|---|---|---|---|
+| `apps/server/src/routes/runs.ts` | 575 | **必须拆** | 同时承担 HTTP、SSE、会话、模型、能力装配、审批、子代理、观测、收尾九类变化原因 |
+| `packages/harness/src/agents/agent.ts` | 926 | **必须拆** | loop 推进、恢复策略、终态汇总、遥测发射四类变化原因缠在一个 `run()` 里 |
+| `apps/desktop/electron/main.ts` | 750 | **必须拆** | 文件自己用 `// ---- 段落 ----` 划出了 9 个互不相关的区块，等于自证多职责 |
+| `apps/web/.../sidebar.tsx` | 642 | **必须拆** | 数据获取、重命名/删除命令、搜索、列表投影、右键菜单、纯展示混在一个组件 |
+| `apps/web/.../memory-settings/index.tsx` | 664 | **必须拆** | 表单、列表、统计聚合、危险操作四类职责同文件 |
+| `apps/server/src/db/schema.ts` | 467 | **不拆亦可** | 纯 schema 声明，单一变化原因；按领域分文件是 P2 的可读性优化，不是解耦要求 |
+| `apps/web/.../derive-trajectory.ts` | 536 | **不拆亦可** | 单一纯投影器，无副作用、无 IO；拆成多个 projector 只在事件族继续增长时才划算 |
+| `packages/harness/src/context/runtime-compact.ts` | 471 | **不拆亦可** | 单一算法族（估算 + 压缩），有完整单测覆盖 |
+
+判例的意义是：**「行数超标」永远不是拆分理由，「同一文件里有两个会因不同原因而改动的东西」才是。**
+新增大文件时，把它放进上表并给出判决，而不是留给下一个读者去猜。
+
 ---
 
 ## 5. 核心 Run 生命周期
+
+### 5.0 今天的主链长什么样（先看现状，再看目标）
+
+「发送一条消息」这条主链目前要跨 **7 个文件**才能读完，按真实调用顺序：
+
+| # | 文件 | 它在这条链上干什么 |
+|---|---|---|
+| 1 | `apps/server/src/routes/runs.ts` | 建 runId、注册 registry/hub、定义审批与 plan review 闭包、按顺序调用下面全部、收尾与错误映射 |
+| 2 | `services/runs/run-preparation.ts` | `prepareRunInput`（会话互斥、落用户消息、定 `modelId`、绑 workspace）与 `prepareRunContext`（compact、历史转换、记忆上下文） |
+| 3 | `services/agent-factory.ts` | `build()`：解析 chat/tool 模型槽位 → 装工具集 → 组 prompt sections → `createAgent` |
+| 4 | `packages/harness/src/agents/agent.ts` | `createAgent` 装工具管道（planGate → approval → cap → timing），`Agent.run()` 驱动 `streamText` 主循环 |
+| 5 | `services/runs/assistant-message-recorder.ts` | 把流式事件投影成 `EvaUIMessage` 并落库 |
+| 6 | `services/runs/run-ledger.ts` | `start / patchRouting / settle / fail`：`runs` 表的终态 |
+| 7 | `services/runs/run-hub.ts` + `transports/sse/event-stream.ts` | 扇出给订阅者、SSE 帧编码与心跳 |
+
+这 7 个文件本身职责都算清楚，**问题全部集中在第 1 个**：它是唯一知道全部另外 6 个的地方，
+所以任何新能力都会继续往它里面加。§9.2 的五文件预算在这条链上是超标的，超标的原因不是文件多，
+而是第 1 个文件同时是协议适配器和业务总控。
+
+目标是把第 1 个文件拆成「协议适配器 + 编排者」两个，其余保持不动：
+
+| # | 目标文件 | 责任 |
+|---|---|---|
+| 1 | `modules/runs/run-routes.ts` | 只做 schema 校验、SSE 连接、调用用例、错误 → HTTP 状态码 |
+| 2 | `modules/runs/run-coordinator.ts` | 五阶段骨架，不含任何一个阶段的细节 |
+| 3 | `modules/runs/run-runtime-builder.ts` | 显式装配 Skill / Memory / Plan / MCP / Subagent |
+| 4 | `packages/harness/.../agent.ts` | 只剩 façade 与主循环骨架 |
+| 5 | `modules/runs/run-finalizer.ts` | settle / fail / rollback / end / cleanup 的唯一出口 |
 
 ### 5.1 目标主链
 
@@ -478,13 +577,22 @@ sequenceDiagram
 
 五个阶段及其责任：
 
-| 阶段 | 责任 | 明确不做 |
-|---|---|---|
-| Open | 会话互斥、创建/重试消息、绑定 Workspace、创建 Run 事实 | 不解析模型、不装 Agent |
-| Prepare | 解析模型、选择 Skill、准备 Memory/Plan/MCP、构造 Agent Runtime | 不开启 SSE、不落 assistant 终态 |
-| Execute | 驱动 Harness、发布事件、更新消息投影 | 不决定 HTTP 错误码 |
-| Complete | 完成 assistant message、usage、Run 终态、end frame | 不重复执行业务准备 |
-| Fail/Dispose | 结构化失败、必要回滚、取消 pending、释放资源 | 不吞掉原始 cause |
+| 阶段 | 责任 | 明确不做 | 今天对应的代码 |
+|---|---|---|---|
+| Open | 会话互斥、创建/重试消息、绑定 Workspace、**选定 `modelId`**、创建 Run 台账行 | 不解析 provider 绑定、不装 Agent | `prepareRunInput` + `runLedger.start` |
+| Prepare | 把 `modelId` 解析成 provider 绑定、选择 Skill、准备 Memory/Plan/MCP、构造 Agent Runtime、构造模型可见历史 | 不开启 SSE、不落 assistant 终态 | `agents.build` + `prepareRunContext` |
+| Execute | 驱动 Harness、发布事件、更新消息投影 | 不决定 HTTP 错误码 | `for await (agent.stream)` + `AssistantMessageRecorder` |
+| Complete | 完成 assistant message、usage、Run 终态、end frame | 不重复执行业务准备 | `messageRecorder.finish` + `runLedger.settle` |
+| Fail/Dispose | 结构化失败、必要回滚、取消 pending、释放资源 | 不吞掉原始 cause | `catch` / `finally` 块 |
+
+Open 阶段的措辞需要格外精确，因为这里有一个容易改错的地方：**「选定 `modelId`」属于 Open，「把 `modelId`
+解析成 provider 绑定」属于 Prepare。** retry 分支的模型来源是 `body.modelId ?? sessions.model`
+（见 `prepareRunInput`），这个决定必须留在 Open —— 它依赖被重试消息所在的会话记录，Prepare 阶段读不到。
+把它一起搬进 Prepare 会让 retry 丢掉「沿用被重试那轮的模型」这个语义。
+
+同样地，`runLedger.start()` 必须留在**模型解析之前**（现状即如此，T48 的刻意设计）：provider 配错、
+模型不可用时也要留下一行 `failure_layer=routing` 的台账。重构时若为了「阶段更干净」把建台账挪到
+Prepare 之后，routing 失败就会变成查不到的 Run。
 
 ### 5.2 RunCoordinator 不应成为新 God Object
 
@@ -526,28 +634,39 @@ return agentFactory.build({
 
 ## 6. 状态所有权与事实源
 
-| 领域 | 唯一事实源 | 内存状态/投影 | 唯一写入者 |
-|---|---|---|---|
-| Session 基本信息 | `sessions` | Sidebar 查询结果 | Session Module |
-| 消息与分支 | `messages.message` + parent/slot/depth | Streaming message builder | Session/Message Module |
-| Run 持久化终态 | `runs` | 当前请求的 `RunScope` | Runs Module |
-| Run 是否在本进程可控制 | `RunRegistry` | UI running 状态 | Runs Module |
-| Run 调试事实 | `run_events` | Trajectory projection | Observability Module |
-| 审批决定 | `approval_requests` | pending deferred promise、审批卡片 | Approval Module |
-| Approval policy | `settings.security.allowAlwaysPolicies` | 进程内 key set | Approval Module，经 Settings Module 写回 |
-| Provider 配置 | `providers` | LanguageModel cache | Provider Module |
-| 应用设置 | `settings` | 每 Run 设置快照 | Settings Module |
-| Skill Catalog | 已加载的 `SKILL.md` 文件集合 | 当前进程 catalog | Skills Module |
-| Session Skill 选择 | `session_skill_selections` | 每 Run selection snapshot | Skills Module |
-| Memory 搜索事实 | `memories` + embeddings/FTS | recall context | Memory Module |
-| 人类可读 Memory | `~/.eva/MEMORY.md`、daily files | prompt section | Memory Module |
-| Workspace | `workspaces` | 当前 Session 绑定结果 | Workspace Module |
-| Plan Gate | `plans` + workspace gate file | run-scoped gate state | Plan Gate Module |
-| Plan Weave | workspace `.eva/plan-weave` | ready 推导、锁内快照 | Plan Weave Module |
-| 后台子代理任务状态 | `background_tasks` | live runner | Subagent Module；child message/run 仍由各自模块写入 |
-| MCP Server 配置 | `mcp_servers` | live connections + tool definitions | MCP Module |
-| Usage | `usage_records` / Run usage 快照 | UI 聚合 | Usage Module |
-| SSE | 无持久化权威 | Run Hub replay buffer | Transport projection only |
+表里多一列「今天的代码位置」—— 没有这一列，读者知道了「谁拥有」却仍然找不到文件，
+这张表就只是一张概念表，起不到定位作用。
+
+| 领域 | 唯一事实源 | 内存状态/投影 | 唯一写入者 | 今天的代码位置 |
+|---|---|---|---|---|
+| Session 基本信息 | `sessions` | Sidebar 查询结果 | Session Module | `services/session.ts`、`db/repositories/session-repository.ts` |
+| 消息与分支 | `messages.message` + parent/slot/depth | Streaming message builder | Session/Message Module | `services/message-tree.ts`、`db/repositories/message-repository.ts` |
+| Run 持久化终态 | `runs` | 当前请求的 `RunScope` | Runs Module | `services/runs/run-ledger.ts`、`db/repositories/run-repository.ts` |
+| Run 是否在本进程可控制 | `RunRegistry`（进程内，**不落库**） | UI running 状态 | Runs Module | `services/run-registry.ts` |
+| Run 调试事实 | `run_events` | Trajectory projection | Observability Module | `services/observability/run-recorder.ts`、`db/repositories/run-event-repository.ts` |
+| 审批决定 | `approval_requests` | pending deferred promise、审批卡片 | Approval Module | `services/approval-gateway.ts`、`db/repositories/approval-repository.ts` |
+| Approval policy | `settings.security.allowAlwaysPolicies` | 进程内 key set | Approval Module，经 Settings Module 写回 | `services/approval-policy-store.ts` |
+| Provider 配置 | `providers` | LanguageModel cache | Provider Module | `services/providers/provider-repository.ts`；缓存在 `services/agent-factory.ts` |
+| 应用设置 | `settings` | 每 Run 设置快照 | Settings Module | `services/settings/app-settings.ts` |
+| Skill Catalog | 已加载的 `SKILL.md` 文件集合 | 当前进程 catalog（`infra.skills`） | Skills Module | `deps.ts` 的 `loadSkills`、`packages/harness/src/skills/loader.ts` |
+| Session Skill 选择 | `session_skill_selections` | 每 Run selection snapshot | Skills Module | `services/skills/select-run-skills.ts`、`db/repositories/session-skill-selection-repository.ts` |
+| Memory 搜索事实 | `memories` + embeddings/FTS | recall context | Memory Module | `services/memory/`、`db/repositories/memory-repository.ts` |
+| 人类可读 Memory | `~/.eva/MEMORY.md`、daily files | prompt section | Memory Module | `services/memory/memory-file-store.ts` |
+| Workspace | `workspaces` | 当前 Session 绑定结果 | Workspace Module | `services/workspaces/workspace-store.ts` |
+| Plan Gate | `plans` + `<ws>/.eva/plan-gate/` | run-scoped gate state | Plan Gate Module | `services/plan-gate/service.ts`、`db/repositories/plan-repository.ts` |
+| Plan Weave | `<ws>/.eva/plan-weave/` | ready 推导、锁内快照 | Plan Weave Module | `services/plan-weave/plan-file-store.ts` |
+| 后台子代理任务状态 | `background_tasks` | live runner | Subagent Module；child message/run 仍由各自模块写入 | `services/subagents/sqlite-task-store.ts` |
+| MCP Server 配置 | `mcp_servers` | live connections + tool definitions | MCP Module | `services/mcp/mcp-registry.ts`、`db/repositories/mcp-server-repository.ts` |
+| Usage | `usage_records` / Run usage 快照 | UI 聚合 | Usage Module | `db/repositories/usage-record-repository.ts`、`services/session-usage.ts` |
+| SSE | 无持久化权威 | Run Hub 扇出集合 | Transport projection only | `services/runs/run-hub.ts`、`transports/sse/event-stream.ts` |
+
+其中两条不变量在重构里最容易被「顺手」破坏，单独点名：
+
+- **`RunRegistry` 刻意不持有 `sessionId`。** 审批的归属键是 `runId`（`ApprovalGateway.cancelByRun`）。
+  一旦 registry 知道了会话，下一个人就会把它当归属源用，`runId` 与 `sessionId` 会各自长出一套取消语义。
+  代码注释已经写明这一点，重构时不要为了「方便查会话」加这个字段。
+- **`RunHub` 与 `RunRegistry` 已经同寿，且 hub 已经是 registry entry 的私有字段**，只通过 `hubFor(runId)`
+  暴露。它们不是两份重复状态，不需要合并，也不要拆开。
 
 规则：
 
@@ -639,7 +758,8 @@ modules/runs/
 6. **P1**：Route 收敛为 schema、connection、use case、error mapping；
 7. **P2**：将 `runPhase` 替换为显式状态转换；
 8. **P2**：为 `RunScope.dispose` 添加幂等、部分初始化和异常清理测试；
-9. **P3**：如果 Run Hub 与 Registry 始终同寿，可将 Hub 作为 Registry entry 的内部细节，减少公开概念。
+9. **P3**：把「`RunRegistry` 不持有 `sessionId`」「Hub 与 Registry 同寿」写成 registry 的单测断言 ——
+   这两条现在只活在代码注释里，注释挡不住下一次「顺手加个字段」。
 
 ### 7.3 Sessions、Messages 与 Message Tree
 
@@ -989,9 +1109,19 @@ Server Subagent：
 
 #### 当前问题
 
-- 单个 schema 文件承载所有领域表；
+- 单个 schema 文件承载所有领域表（467 行）；
 - Repository 在 DB 目录集中，但调用方可以绕过模块 API；
-- 时间格式存在 epoch ms 与 ISO text 两种，需要靠注释理解。
+- 时间在库里有两种表示，跨表对齐时要手动换算。
+
+关于时间，需要说得比「有两种格式」更准确，否则会改错方向。实测：`schema.ts` 里
+`text("..._at")` 共 24 处、`integer("..._at")` 0 处；唯一使用 epoch ms 的是 `run_events` 的
+`occurred_at_ms` 与 `duration_ms`。也就是说**列名自带 `_ms` 后缀，单位并不需要靠注释才能知道**，
+命名本身是合格的。
+
+真正的问题是另一件事：`runs.created_at`（ISO text）与 `run_events.occurred_at_ms`（int）
+**无法直接放在一起排序或做区间过滤**。调试时想回答「这个 Run 的第一条 ledger 事件比 Run 创建晚了多久」，
+必须在调用处手写一次换算。所以改造动作不是「定义具名类型免得在调用处猜单位」，而是
+「给 ledger 与产品表之间提供一个统一的时间投影，让换算只存在一处」。
 
 #### 目标职责
 
@@ -1006,7 +1136,8 @@ Server Subagent：
 1. **P1**：建立“表 -> 模块所有者”清单；
 2. **P2**：根据领域拆分 schema 文件，但不改变 migration 语义；
 3. **P2**：禁止 Route 直接导入 schema 或 DB；
-4. **P2**：为时间单位定义具名类型/转换函数，不在调用处猜；
+4. **P2**：在 Observability 模块内提供 `runs`（ISO text）与 `run_events`（epoch ms）之间唯一的时间投影函数，
+   Trajectory 与导出都走它；不在各调用处重复手写换算。新增列继续保持「epoch ms 必带 `_ms` 后缀」的命名约定；
 5. **P2**：跨模块事务由应用用例协调，事务句柄通过窄 Port 传入；
 6. **P3**：Repository 命名统一为 Store 或 Repository，选定一种后逐步收敛，不同时混用多个同义词。
 
@@ -1106,8 +1237,18 @@ Shared 只保存**跨进程、跨 package 的线协议契约**：
 
 #### 改造动作
 
-1. **P1**：保持 `committed` 与 `streaming` 分离的性能设计；
-2. **P2**：将 `useChat` 拆为 `useRunController`、`useThreadMessages` 和组合 hook；
+1. **P1**：保持 `committed` 与 `streaming` 分离的性能设计 —— 这是已经验证过的性能结构，
+   任何重构都不得把两者合并回一个 state；
+2. **P2**：将 `useChat`（358 行、25 处 hook 调用）按下面的切分拆开，
+   `chat-page.tsx` 目前有 27 处 hook 调用，拆完后应显著下降：
+
+   | 目标文件 | 从 `useChat` 里拿走什么 |
+   |---|---|
+   | `use-run-controller.ts` | `sendMessage` / `regenerate` / `stopStreaming` / `attachRun` 与 409 重挂逻辑 |
+   | `use-thread-messages.ts` | `loadSession` / `committed` / `siblingIdsById` / `switchVersion`（React Query 拥有服务端状态） |
+   | `stream-reducer.ts` | 纯函数：`(state, RunStreamEvent) => state`，无 React 依赖，可被 §11.5 直接喂事件序列测试 |
+   | `use-chat.ts` | 只剩组合：把上面三者接起来，对外保持现有返回值形状不变 |
+
 3. **P2**：`run-stream-client` 只做协议解析，不更新 React 状态；
 4. **P2**：Sidebar 拆为数据 controller、列表投影和纯展示组件；
 5. **P2**：Message Bubble 按 part renderer registry 拆分，但 registry 保持显式；
@@ -1130,7 +1271,18 @@ Shared 只保存**跨进程、跨 package 的线协议契约**：
 
 #### 改造动作
 
-1. **P2**：Settings 大组件按“表单/列表/测试连接/危险操作”拆分；
+1. **P2**：Settings 大组件按「表单 / 列表 / 测试连接 / 危险操作」拆分。三个最大的文件与目标切分：
+
+   | 当前文件 | 行数 | 拆成 |
+   |---|---|---|
+   | `memory-settings/index.tsx` | 664 | `memory-stats.tsx`（统计聚合展示）、`memory-list.tsx`、`memory-editor.tsx`、`memory-danger-zone.tsx`（清空/重建索引） |
+   | `provider-settings.tsx` | 592 | `provider-list.tsx`、`provider-form.tsx`、`provider-connection-test.tsx`、`provider-model-discovery.tsx` |
+   | `mcp-settings.tsx` | 336 | `mcp-server-list.tsx`、`mcp-server-form.tsx`、`mcp-server-state-badge.tsx` |
+
+   `sidebar.tsx`（642 行）虽然不在 Settings 下，同批处理：拆成
+   `use-thread-list.ts`（数据 + 重命名/删除命令）、`thread-search.tsx`、`thread-list.tsx`、
+   `thread-context-menu.tsx`、`sidebar.tsx`（只剩布局）；
+
 2. **P2**：表单校验与 API DTO 转换提取为纯函数；
 3. **P2**：Trajectory projector 按 run/step/tool/subagent 事件族拆分；
 4. **P2**：虚拟化和 prepend scroll compensation 保留在展示层，不进入投影规则；
@@ -1170,6 +1322,23 @@ apps/desktop/electron/
   updater-download.ts
 ```
 
+`main.ts` 自己已经用注释把 750 行划成 9 个区块，改造就是把这些区块原样搬出去 ——
+这是本次全部改造里最机械、最低风险的一项：
+
+| `main.ts` 当前区块 | 大致行段 | 目标文件 |
+|---|---|---|
+| State | 23–37 | 留在 `main.ts`（仅进程级单例引用） |
+| Shell Environment | 44–85 | `shell-env.ts` |
+| System Proxy | 86–137 | `system-proxy.ts` |
+| Port Discovery | 138–159 | `server-supervisor.ts` |
+| Server Lifecycle | 160–309 | `server-supervisor.ts` |
+| Window State Memory | 310–375 | `window-state.ts` |
+| Window | 376–484 | `window-manager.ts` |
+| IPC Handlers | 485–527 | `ipc-handlers.ts`（按 namespace 分组，与 `preload.ts` 一一对应） |
+| App Lifecycle（含单实例锁、deep link、tray、快捷键） | 528–750 | `app-lifecycle.ts` + `protocol-handler.ts` + `tray.ts` |
+
+拆完后 `main.ts` 只剩「按顺序调用上面这些」，即启动序列本身 —— 那正是新人最想先看到的一页。
+
 #### 改造动作
 
 1. **P1**：提取 Server Process Supervisor，集中 spawn/health/restart/shutdown；
@@ -1183,7 +1352,17 @@ apps/desktop/electron/
 
 #### 当前问题
 
-研究、历史快照、目标设计和当前事实共用 `docs/architecture` 阅读入口。
+研究、历史快照、目标设计和当前事实共用 `docs/architecture` 阅读入口。具体到可以直接动手修的三处：
+
+1. **`docs/architecture/README.md` 是整个架构目录的默认入口，但它讲的是另一个产品。**
+   标题《Alma 架构拆解 · Agent 开发学习手册》，开头写「目标读者：想自己复刻一个 Alma 类 AI 桌面助手的开发者」，
+   正文是 22 篇 Alma 逆向研究的阅读顺序表。Eva 自身的设计（14、15、24、25 篇）夹在其中，没有区分标记。
+   新人从这里进入，第一印象是「这是一份竞品研究仓库」。
+2. **编号即历史。** `00`–`25` 的编号顺序是写作顺序，不是阅读顺序，也不表达「哪篇还有效」。
+   `16`–`21` 是对 `00`–`05` 的修订，靠各篇开头的「v2 修订框」互相指路。
+3. **AGENTS.md 是目前唯一准确的当前事实文档**，但它是给 AI 读的操作手册（按 T/S 任务号组织），
+   不是给人读的架构导览 —— 实测出现 12 个唯一任务编号（`T9 T11 T16 T24 T25 T43 T44 T45a T45b T46 S7 S27`），
+   §13.4 要求「无需理解 T/S 历史任务编号」，AGENTS.md 自己违反这条。
 
 #### 目标结构
 
@@ -1205,12 +1384,97 @@ docs/
 #### 改造动作
 
 1. **P0**：本文件作为 Review Draft，不宣称已经实现；
-2. **P1**：建立 `docs/current` 三份当前事实文档；
-3. **P1**：根 README 只链接 current、开发命令和核心入口；
-4. **P2**：稳定设计决定写 ADR，不把完整讨论复制到代码注释；
-5. **P2**：现有 Alma 研究和历史 Plans 移入 archive，保留但不作为阅读入口；
-6. **P2**：每个复杂模块提供一页 README：目的、公开 API、状态、主流程、失败策略、禁止依赖；
-7. **P3**：CI 检查 current 文档中的关键路径链接仍然存在。
+2. **P0**：给 `docs/architecture/README.md` 顶部加一段三行说明：这个目录里 `00`–`21` 是 **Alma 竞品研究**，
+   `22`–`25` 是 **Eva 自身设计**，当前事实请看 `docs/current/`。这是成本最低、收益最大的一处改动，
+   在 `docs/current` 建好之前先做；
+3. **P1**：建立 `docs/current` 三份当前事实文档（architecture / run-lifecycle / data-ownership）；
+   其中 data-ownership 直接由本文 §6 的表演进而来，architecture 由 §5.0 的主链导览演进而来；
+4. **P1**：根 README 只链接 current、开发命令和核心入口；
+5. **P1**：把 AGENTS.md 里按任务编号叙述的内容改写成按模块叙述，任务编号只保留在 `docs/plans/`；
+   AGENTS.md 与 `docs/current/` 之一必须是另一个的摘要，不允许两份各自演化；
+6. **P2**：稳定设计决定写 ADR，不把完整讨论复制到代码注释；
+7. **P2**：Alma 研究（`00`–`21`）整体移入 `docs/archive/research/`，历史 Plans 移入 `docs/archive/plans/`，
+   保留但不作为阅读入口；
+8. **P2**：每个复杂模块提供一页 README：目的、公开 API、状态、主流程、失败策略、禁止依赖；
+9. **P3**：CI 检查 current 文档中的关键路径链接仍然存在。
+
+### 7.22 测试布局
+
+#### 当前问题
+
+`tests/` 下 93 个测试文件完全平铺，唯一子目录是 `helpers/`。后果有三个，都直接打在本文的目标上：
+
+- **找不到测试**（违反 §9.1 第 5 条）：给定一个模块，无法在不 `grep` 的前提下列出它的测试；
+  反过来给定一个测试文件名，也看不出它测的是 harness 还是 server 还是 web。
+- **看不出覆盖缺口**：`plan-weave-*` 有 4 个文件，`search`、`usage` 的路由测试各只有 1 个，
+  但平铺列表里这种不均衡完全不可见。
+- **一个测试可以随便碰任何东西**：文件位置不表达归属，测试因此变成绕过模块边界的合法后门 ——
+  它可以直接 `new DrizzleXxxRepository(db)` 去断言别的模块的表，而这正是 §10 想禁止的行为。
+
+#### 目标职责
+
+测试目录结构镜像被测代码的模块结构，一眼能看出「谁测谁」。同时按 §11 的四类测试分层，
+让「快测试」和「要起 SQLite / Fastify 的慢测试」可以分开跑。
+
+```text
+tests/
+  helpers/
+  unit/                       # §11.1 纯规则:无 DB、无网络、无 Fastify
+    harness/
+    server/
+    web/
+  contract/                   # §11.2 Port 契约:同一套断言跑 in-memory 与 Drizzle 两种实现
+  usecase/                    # §11.3 应用用例:fake ports
+  lifecycle/                  # §11.4 生命周期集成:真实 SQLite + fake model
+  projection/                 # §11.5 前端投影
+```
+
+#### 改造动作
+
+1. **P1**：整体 `git mv` 到上述结构，**只移动不改内容**，单独一个 commit，让 `git log --follow` 可用；
+   移动后 `pnpm test` 必须一次通过 —— 若不通过，说明有测试依赖了相对路径，那本身是要修的问题；
+2. **P1**：`vitest.config.ts` 增加 `unit` / `lifecycle` 两个 project 或 workspace 分组，
+   使「改一行纯函数」不必等 SQLite 用例；
+3. **P2**：每个模块目录下加一行 `README.md` 或在模块自身 README 的 `## Tests` 段落里指明测试位置，
+   双向可达；
+4. **P2**：约定「测试只能从被测模块的公开入口导入」，例外必须在文件头注释写明理由 ——
+   测试是边界的最后一个漏洞，堵不住它，§10 的规则会被测试大面积绕过；
+5. **P3**：给 `lifecycle/` 建立共享 fixture（建库、fake model、fake provider），
+   目前这部分逻辑在多个测试里各写一遍。
+
+### 7.23 构建产物与陈旧代码副本
+
+#### 当前问题
+
+`apps/desktop/.server-deploy/src/` 是一份 **93 个 `.ts` 文件的 server 源码副本**，由 `pnpm deploy`
+在打包链路里生成（`AGENTS.md` 打包链路一节）。它已经在 `.gitignore` 里，但**留在磁盘上、留在工作区里**，
+且内容已经过期：停在 migration `0025`，没有 `run_events`、没有 plan-weave、没有 plan-gate。
+
+实测影响是有界的但真实：
+
+- `rg`（以及绝大多数编辑器搜索）尊重 `.gitignore`，**看不到它** —— 这是好消息；
+- `grep -rn 'registerRunRoutes' .` 这类不认 gitignore 的命令**会返回它**，
+  实测 `apps/desktop` 下命中 6 处，其中包含一份过期的 `routes/runs.ts`。
+  新人按最朴素的方式搜索代码，有一定概率读到一份「没有轨迹台账的 Eva」。
+
+`apps/desktop/release/` 下还有一份 `Eva.app` 完整构建产物（含两个版本的 dmg/zip），同样在磁盘上。
+
+#### 目标职责
+
+**构建中间产物不得与源码同名同形地放在 `apps/*/` 下面。** 它们既不是源码也不是资源，
+只是打包过程的临时物；一个新人不应该需要先学会「哪些目录是假的」才能开始读代码。
+
+#### 改造动作
+
+1. **P1**：把 `pnpm deploy` 的输出目标从 `apps/desktop/.server-deploy` 改到仓库根的
+   `.build/server-deploy`（或 `node_modules/.cache` 下），与源码树彻底分开；
+   打包脚本、`electron-builder.yml`、`electron.vite.config.ts` 里的路径同步改；
+2. **P1**：在 `.vscode/settings.json` 里加 `search.exclude` 与 `files.watcherExclude`，
+   覆盖 `**/.build/**`、`**/release/**` —— 对不认 gitignore 的工具兜底；
+3. **P2**：给 `check-release-artifacts.mjs` 加一步：产物目录若出现 `.ts` 源码文件则报错，
+   防止将来又有人把源码副本塞进产物目录；
+4. **P2**：README 的目录说明里明确列出「哪些顶层目录是产物、不要读」；
+5. **P3**：`apps/desktop/release/` 的历史版本产物定期清理，只留最近一个版本。
 
 ---
 
@@ -1238,26 +1502,36 @@ interface CausalContext {
 
 ### 8.2 标准 Run 阶段
 
-产品状态不必增加大量新枚举，但调试事件应能表达：
+Eva 已经有一套失败分层词表，**不要再并列发明第二套**。现状（`db/schema.ts`）：
 
-```text
-accepted
-preparing
-routing
-context_building
-executing
-persisting
-completed | failed | aborted
+```ts
+export const runFailureLayers = [
+  "routing",       // provider / 模型 / skill 解析
+  "model",         // 模型调用本身失败
+  "tool",          // 工具执行失败
+  "context",       // 上下文构造或溢出
+  "orchestration", // 编排失败,例如 max-steps 撞顶
+  "unknown"
+] as const;
 ```
 
-每个阶段记录：
+这套词表回答的是「**失败发生在哪一层**」。而 §5.1 的五阶段回答的是「**执行到了哪一步**」。
+两者是不同的问题，必须保持两套且各自单一：
 
-- start/end；
-- duration；
-- outcome；
-- error layer/code；
-- 关键输入摘要；
-- 关键输出摘要。
+| 维度 | 词表 | 谁写 | 落在哪 |
+|---|---|---|---|
+| 执行到哪一步 | `Open / Prepare / Execute / Complete / Fail` | RunCoordinator | `run_events` 的阶段事件 |
+| 失败在哪一层 | `runFailureLayers` | 失败点最近的模块 | `runs.failure_layer` + `run_failed` 事件 |
+
+规范性要求：
+
+- **阶段名与失败层名不得互相取值。** 现状里 `routing` 与 `context` 同时是 `runPhase` 的取值和
+  `failure_layer` 的取值（`routes/runs.ts` 的 `runPhase: "routing" | "context"`），
+  这是两套词表已经开始混用的证据。改造时 `runPhase` 应当替换为 §5.1 的五阶段枚举，
+  由 Coordinator 在阶段切换时记录；失败层继续由 `runFailureLayers` 表达。
+- 新增失败层必须改 `runFailureLayers` 并补 migration，**不允许用字符串字面量绕过枚举**。
+- 每个阶段记录：start / end / duration / outcome / 关键输入摘要 / 关键输出摘要；
+  失败时额外记录 layer 与 code。
 
 ### 8.3 四类信息严格区分
 
@@ -1376,25 +1650,63 @@ Run、Approval、Background Task、Plan Gate、Plan Weave Block 均应通过具�
 
 ## 10. 可自动执行的架构规则
 
-建议使用 ESLint `no-restricted-imports`、package exports、TypeScript project references 或 dependency-cruiser 执行以下规则：
+### 10.0 先说清一件事：执行机制目前不存在
 
-1. `routes/**` 不得导入 `db/**` 和 `repositories/**`；
-2. `packages/harness` 不得导入 `apps/**`；
-3. `packages/shared` 不得导入 Server、Harness、Web 或 Node 平台实现；
-4. `apps/web` 不得导入 Server/Harness；
-5. 模块间只能从目标模块 public entry 导入；
-6. Domain 文件不得导入 Fastify、Drizzle、React、Electron、Node fs；
-7. Repository 只能在组合根或所属模块 Adapter 创建；
-8. SSE Adapter 不得修改产品业务状态；
-9. 跨模块不得直接更新对方拥有的表；
-10. 新增持久化状态字段必须在 data ownership 文档声明所有者；
-11. 新增 Run 终态必须补 lifecycle integration test；
-12. 新增工具 wrapper 必须补执行顺序和 timing 归属测试；
-13. package 根入口不得无审查扩大 `export *`；
-14. 禁止新增无所有者的全局 mutable state；
-15. 禁止通过错误字符串匹配决定 HTTP 或业务状态。
+实测（§1.2 末行）：仓库里**没有 ESLint、没有 Biome、没有 oxlint、没有 dependency-cruiser、
+没有 `.github/`、没有任何 `lint` script**。所以本节不是「补几条 lint 规则」，
+而是**从零建立第一道自动化边界检查**。这项工程必须显式排进 Wave 0，不能挂在别的 Wave 尾巴上。
 
-这些规则应分阶段启用：先对新代码 warning，再修复存量，最后升级为 error。不要一次打开导致全仓库噪声。
+同时要克制：给一个零 lint 配置的仓库直接引入 ESLint 全家桶（parser、plugin、typed-lint、
+CI 缓存）本身就是一次不小的改造，而且会立刻产出成百条与架构无关的风格告警，
+把真正要看的边界违规淹掉 —— 那等于用一个新的复杂度去换旧的复杂度，违背本文的目标。
+
+**因此选定最小可行方案**：写一个不依赖任何 lint 框架的脚本 `scripts/check-architecture.mjs`，
+它只做一件事 —— 按下表的允许/禁止清单扫描 import 语句，违规则非零退出。
+入口是 `pnpm lint:arch`，并加进 `pnpm test` 之前的必跑步骤。等这条规则真的开始拦住人之后，
+再讨论是否值得升级到 dependency-cruiser。
+
+### 10.1 已经成立的规则：加锁，不需要修
+
+以下四条**实测已经满足**，脚本的作用是防止回退，第一天就可以设为 error，零噪声：
+
+| 规则 | 实测结果 | 复算命令 |
+|---|---|---|
+| `packages/harness` 不得导入 `apps/**`、Fastify、Drizzle、better-sqlite3 | 0 命中 | `grep -rn 'apps/\|fastify\|drizzle\|better-sqlite3' packages/harness/src` |
+| `packages/shared` 不得导入 `node:*`、Fastify、Drizzle、Harness | 0 命中 | `grep -rn 'from "node:\|@eva/harness\|fastify\|drizzle' packages/shared/src` |
+| `apps/web` 不得导入 `@eva/harness` | 0 命中 | `grep -rn '@eva/harness' apps/web/src` |
+| `apps/web` 不得导入 server 源码 | 0 命中 | 同上，扫 `apps/server` |
+
+把这四条锁上是本次改造里**投入产出比最高的一步**：几十行脚本，永久保住三条最重要的进程边界。
+
+### 10.2 尚未成立的规则：先 warning，随 Wave 收敛为 error
+
+| # | 规则 | 现状 | 收敛于 |
+|---|---|---|---|
+| 1 | `routes/**` 不得导入 `db/**`、`repositories/**`、`schema` | **10/16 个业务 route 违反** | Wave 2 |
+| 2 | 模块间只能从目标模块公开入口导入 | 大量跨模块深层导入 | Wave 4 |
+| 3 | Repository 只能在组合根或所属模块 Adapter 内创建 | route 与 `run-preparation.ts` 都在 `new` | Wave 2–4 |
+| 4 | Domain 文件不得导入 Fastify、Drizzle、React、Electron、`node:fs` | 待核，需先划出 domain 文件集合 | Wave 4 |
+| 5 | package 根入口不得无审查 `export *` | `packages/harness/src/index.ts` 有 21 条 `export *` | Wave 3 |
+| 6 | 测试只能从被测模块公开入口导入 | 普遍直接 `new DrizzleXxxRepository` | Wave 4（见 §7.22） |
+
+### 10.3 无法由脚本判定、必须进 Review checklist 的规则
+
+以下几条本质是语义约束，静态扫 import 判不出来，**不要为了「自动化」把它们硬塞进脚本**，
+写进 PR 模板即可：
+
+1. SSE Adapter 不得修改产品业务状态；
+2. 跨模块不得直接更新对方拥有的表；
+3. 新增持久化状态字段必须在 §6 的表里声明所有者；
+4. 新增 Run 终态必须补 lifecycle 集成测试；
+5. 新增工具 wrapper 必须补执行顺序与 timing 归属测试；
+6. 禁止新增无所有者的全局 mutable state；
+7. 禁止通过错误字符串匹配决定 HTTP 或业务状态。
+
+### 10.4 启用节奏
+
+1. Wave 0：脚本落地，只启用 §10.1 的四条（error）与 §10.2 的第 1 条（warning）；
+2. 每个 Wave 结束时，把该 Wave 负责收敛的规则从 warning 升为 error；
+3. **规则升为 error 之前不允许宣布该 Wave 完成** —— 否则边界会在下一个 Wave 期间重新腐化。
 
 ---
 
@@ -1480,42 +1792,89 @@ request
 
 ## 12. 渐进迁移计划
 
-### Wave 0：冻结边界继续恶化
+### 12.0 通用施工规约
 
-目标：不改产品行为，先建立基线。
+这套规约对每个 Wave 都成立，比任何单个 Wave 的内容更重要：
 
-- 本文进入 Review；
-- 为核心生命周期补 characterization tests；
-- 新 Route 禁止直接访问 DB；
-- 新模块必须声明状态所有者；
-- 架构改造 PR 不混入产品新功能；
-- 记录当前 typecheck/test/build 基线。
+1. **行为不变是硬前提。** 本轮改造不允许顺带修 bug、不允许顺带改产品语义。
+   发现的 bug 单独开 issue，在架构改造之外修。
+2. **纯移动 commit 与逻辑 commit 分开**（§4.1 第 3 条）。纯移动 commit 的验收标准是
+   `pnpm typecheck && pnpm test` 全绿且 `git diff --stat` 只有路径变化。
+3. **每个 Wave 结束时**：该 Wave 负责的 shim 清零、该 Wave 负责的 §10.2 规则升为 error、
+   `pnpm typecheck`／`pnpm test`／`pnpm build`／`pnpm web:build` 全绿。三者缺一不算完成。
+4. **Wave 之间可以停。** 每个 Wave 结束时仓库都处在一个比开始时更好、且完全自洽的状态 ——
+   如果中途要去做产品需求，停在任何一个 Wave 边界都不留烂尾。
+5. **先做机械低风险的，再做需要判断的。** Wave 0 里两项纯移动（测试目录、构建产物）
+   零逻辑风险却立刻改善可读性，优先做掉。
 
-退出条件：核心 Run 行为有足够测试保护，评审者同意本总纲的方向。
+### Wave 0：建立执行机制与基线（不改一行业务逻辑）
+
+目标：把「靠自觉」换成「靠脚本」，并把最机械的可读性问题清掉。
+
+**必须先做，因为后面每个 Wave 的退出条件都依赖它：**
+
+- 落地 `scripts/check-architecture.mjs` + `pnpm lint:arch`（§10.0 选定的最小可行方案，
+  不引入 ESLint 全家桶）；启用 §10.1 的四条为 error、§10.2 第 1 条为 warning；
+- 建立 CI（当前**没有** `.github/`）：至少跑 `lint:arch` + `typecheck` + `test`；
+- 为 Run 主链补 characterization tests：send / retry / abort / 断连重连 / 审批 pending /
+  模型不可用 503 / agent error 七条路径。**这些测试是后面所有重构的安全网，
+  没有它们就没有「行为不变」的判据**；
+- 记录基线：当前 `pnpm test` 用例数与耗时、`typecheck` 通过状态、各产物构建时间。
+
+**同批做掉的两项纯移动（各自独立 commit，零逻辑改动）：**
+
+- `tests/` 按 §7.22 的结构 `git mv`，并给 `vitest.config.ts` 分组；
+- 构建产物按 §7.23 迁出 `apps/desktop/`，同步改打包脚本与 `.vscode/settings.json`。
+
+退出条件：`pnpm lint:arch` 在 CI 里能拦住一次故意写错的 import；七条主链路径都有测试；
+`tests/` 与产物目录已就位。
+
+### Wave 0.5：文档止血（半天，可与 Wave 0 并行）
+
+目标：让新人第一眼看到的不是竞品研究。
+
+- `docs/architecture/README.md` 顶部加三行分区说明（§7.21 动作 2）；
+- 根 `README.md` 明确列出哪些顶层目录是产物、不要读。
+
+退出条件：一个不了解 Eva 的人打开 `docs/` 能在 1 分钟内判断「该读哪篇」。
 
 ### Wave 1：Run 主链收敛
 
-目标：让一次 Run 可以从一个应用入口阅读。
+目标：让一次 Run 可以从一个应用入口阅读 —— 即 §5.0 那张「7 个文件」的表变成「5 个文件」。
 
-- 提取 RunScope；
-- 提取 RunApprovalChannel；
-- 提取 RunRuntimeBuilder；
-- 提取 RunFinalizer；
-- 建立 RunCoordinator；
-- Route 只保留 HTTP/SSE 适配。
+按这个顺序提取，**每一步单独 commit 且测试全绿**（顺序不是随意的：先把状态与清理收进 Scope，
+后面的提取才不需要再操心资源释放）：
 
-退出条件：`runs.ts` 不再直接访问 DB 或装配业务能力；所有现有 Run tests 通过。
+1. `RunScope`：持有 recorder、reportGateway、planGateState、controller、hub 绑定，
+   提供幂等 `dispose()`；把 `routes/runs.ts` 现有的 `try/catch/finally` 语义原样搬进去；
+2. `RunApprovalChannel`：搬走三个审批闭包（`requestApproval`、`subagentRequestApproval`、
+   `requestPlanReview`）与两个 `lookup*Decision`。注意保持现有短路顺序：
+   **bash 只读直放 → plan 文件直放 → policy 命中 → 才弹窗**，顺序变了会改变产品行为；
+3. `RunRuntimeBuilder`：搬走 skill 选择、memory section、plan gate 装配、MCP 工具、
+   plan weave 工具、subagent runner 的装配；
+4. `RunFinalizer`：搬走 `messageRecorder.finish` + `runLedger.settle/fail` + 会话回滚 +
+   `end` 帧 + `cancelByRun`，成为终态的唯一出口；
+5. `RunCoordinator`：只剩五阶段骨架；
+6. `run-routes.ts`：只剩 schema 校验、SSE 连接、调用用例、错误 → 状态码映射
+   （409 SessionBusy / 503 AgentUnavailable / 400 其他）。
+
+退出条件：`runs.ts` 不再直接访问 DB 或装配业务能力；§5.0 的主链在 5 个文件内读完；
+Wave 0 的七条 characterization tests 一条不改地通过 —— **它们不许为了适配新结构而修改断言**。
 
 ### Wave 2：组合根与 Route 边界
 
-目标：让设计依赖方向成为可执行事实。
+目标：让「Route 只是协议适配器」从愿望变成脚本能验证的事实。
 
-- 完整 AppApi/组合根；
-- Threads、Providers、MCP、Memory、Trajectory Route 移除 DB 访问；
-- 引入 restricted import lint；
-- 建立模块 public API。
+- 建立 `AppApi`：按业务能力暴露 `runs / sessions / approvals / providers / settings / memory /
+  workspaces / plans / mcp / observability / search / usage`，Route 只拿到它；
+- 逐个 route 清掉 DB 访问，**按违规量从小到大做**（先 `models.ts` 1 处、`settings.ts` 2 处，
+  最后 `threads.ts` 20 余处）—— 前面几个便宜的 route 会把 `AppApi` 的形状试出来，
+  再动 `threads.ts` 时就不用返工；
+- 同批清掉 `run-preparation.ts` 里自建的三个 Repository（Session / Message / Run）；
+- `app.infra` 不再向 route 暴露 `db` 与 `encryptor`。
 
-退出条件：Route 对 DB/Repository 的直接 import 为零。
+退出条件：`pnpm lint:arch` 里 §10.2 第 1、3 条升为 error 且全仓库通过 ——
+即 `grep -ln 'infra\.db\|Repository(' apps/server/src/routes/*.ts` 输出为空。
 
 ### Wave 3：Harness 内核收敛
 
@@ -1529,46 +1888,72 @@ request
 
 退出条件：Agent 主文件只保留 façade 和主循环骨架；recovery/tool pipeline 可独立测试。
 
-### Wave 4：业务模块垂直化
+### Wave 4：业务模块垂直化（本轮唯一的大搬迁）
 
-目标：每种能力有明确所有者和公开入口。
+目标：`services/` + `db/repositories/` 的横向分层，换成 `modules/<能力>/` 的纵向切分。
 
-- Sessions/Messages；
-- Approvals；
-- Providers/Settings；
-- Memory/Compact；
-- Workspaces；
-- Plans；
-- Subagents；
-- MCP；
-- Observability/Search/Usage。
+**每个模块一批，每批两个 commit**（§4.1 第 3 条）：
 
-每次只迁移一个模块，保持 API 兼容，不进行全仓库大搬家。
+- commit A：`git mv` 把该模块的 service、repository、route 归拢到 `modules/<name>/`，
+  旧路径退化为一行 shim，import 改写。**零逻辑改动。**
+- commit B：收敛该模块的公开入口（`index.ts` 只导出用例与 Query API，不导出 Repository），
+  删除 commit A 留下的 shim。
 
-退出条件：跨模块不再导入内部 Repository，data ownership 与代码一致。
+建议顺序 —— **依赖少的先搬**，这样后搬的模块搬过去时它的依赖已经在新位置了：
+
+| 批次 | 模块 | 为什么在这个位置 |
+|---|---|---|
+| 1 | `settings` | 几乎无依赖，是很多模块的下游，先就位 |
+| 2 | `providers` | 只依赖 settings + crypto |
+| 3 | `workspaces` | 独立，且 fs 工具装配依赖它 |
+| 4 | `sessions`（含 messages、message-tree） | 主链核心，依赖前三者 |
+| 5 | `approvals`（含 policy） | 依赖 sessions |
+| 6 | `memory` + `compact` | 两个模块，同批但各自独立入口 |
+| 7 | `plan-gate`、`plan-weave` | **必须保持两个模块**，见 §7.10；不要因为名字像就合并 |
+| 8 | `subagents` | 依赖 sessions / approvals / observability |
+| 9 | `mcp` | 独立性高，但工具装配挂在 runtime builder 上 |
+| 10 | `observability` + `search` + `usage` | 三个只读投影模块 |
+| 11 | `runs` | **最后搬**：它依赖上面全部，先搬会导致 shim 大爆炸 |
+
+`db/schema.ts` 与 `db/migrations/` **不搬**（migration 语义不能动，见 §7.15）；
+schema 按领域拆文件是可选的 P2，与本次搬迁解耦。
+
+退出条件：`apps/server/src/services/` 与 `apps/server/src/routes/` 目录消失或只剩 `index.ts`；
+shim 数为 0；§10.2 第 2、3、6 条升为 error。
 
 ### Wave 5：Web 与 Desktop 阅读性
 
-目标：表现层同样遵守单向数据流和单一变化原因。
+目标：表现层同样遵守单向数据流和单一变化原因。具体拆分目标见 §7.18、§7.19、§7.20 三张表。
 
-- 拆分 useChat controller/reducer；
-- 收敛大型 Settings/Sidebar/Trajectory 文件；
-- 拆分 Desktop main 的 supervisor/window/lifecycle；
-- 保持用户体验与性能不回退。
+- 按 §7.18 表拆 `useChat` → `use-run-controller` / `use-thread-messages` / `stream-reducer`；
+  **先抽出纯函数 `stream-reducer` 并补 §11.5 的事件序列测试，再动 React 部分** ——
+  有了这层测试，后面改 hook 才有「投影行为没变」的判据；
+- 按 §7.19 表拆四个大组件（memory-settings / provider-settings / mcp-settings / sidebar）；
+- 按 §7.20 映射表把 `main.ts` 的 9 个区块搬成 8 个文件，`main.ts` 只剩启动序列。
+  这是纯移动，风险最低，可以先做；
+- **性能不回退是硬约束**：`committed`/`streaming` 分离、`memo` 边界、虚拟化阈值、
+  `useStickToBottom` 的 `scrollTop` 直写（不是 `scrollIntoView`）都不得改动。
+  这些是已经验证过的结论，不是随手写成这样的。
 
-退出条件：主页面和 Desktop 启动流程各有清晰阅读入口，关键投影测试通过。
+退出条件：主页面和 Desktop 启动流程各有清晰阅读入口；`stream-reducer` 有独立测试；
+手动验证流式渲染帧率与滚动行为无回退。
 
 ### Wave 6：文档成为当前事实
 
 目标：新工程师不需要从研究文档中寻找真实架构。
 
-- 建立 `docs/current`；
-- 建立 ADR；
-- 历史研究和计划归档；
-- 更新 AGENTS.md；
-- 做一次新手阅读测试。
+- 建立 `docs/current/` 三份：`architecture.md`（由本文 §5.0 演进）、`run-lifecycle.md`（由 §5.1 演进）、
+  `data-ownership.md`（由 §6 的表演进）；
+- 建立 ADR 目录，把本文 §3 的 C1–C12 各自落成一篇可被引用、可被推翻的 ADR；
+- Alma 研究（`docs/architecture/00`–`21`）整体移入 `docs/archive/research/`；历史 plans 同理；
+- AGENTS.md 改写为按模块叙述，任务编号只留在 `docs/plans/`（§7.21 动作 5）；
+- **本文归档**：`25-eva-simple-architecture-charter.md` 在 Wave 6 结束时移入
+  `docs/archive/plans/`。它是一份迁移方案，迁移完成后继续留在阅读入口，
+  本身就会变成新的「目标与现状混写」—— 那正是根因 D。
+- 做一次真正的新手阅读测试（§9.1 六问），**找一个没参与本轮改造的人**，记录他卡在哪里。
 
-退出条件：current 文档与代码一致，历史材料不再出现在默认阅读路径。
+退出条件：current 文档与代码一致；`docs/architecture/` 下不再有 Alma 研究；
+新手阅读测试六问全部在 §13.4 的时限内答出。
 
 ---
 
@@ -1576,13 +1961,18 @@ request
 
 ### 13.1 结构验收
 
-- Route 对 DB/Repository 直接依赖为 0；
+- **`pnpm lint:arch` 存在、在 CI 里跑、且 §10.1 与 §10.2 的规则全部为 error** ——
+  这一条排在最前面：其余各条如果没有脚本守着，下一个季度就会重新腐化；
+- Route 对 DB/Repository 直接依赖为 0（可复算：`grep -ln 'infra\.db\|Repository(' .../routes/*.ts` 为空）；
+- 搬迁期 shim 数为 0；
 - Server 的业务写入均通过所属模块公开命令；
 - Harness 不依赖 Eva Server 实现；
 - Web 不依赖 Server/Harness 内部实现；
-- 每张业务表有明确所有者；
+- 每张业务表有明确所有者（§6 表与代码一致）；
 - 组合根可以完整展示具体依赖图；
-- 核心模块只有一个公开入口。
+- 核心模块只有一个公开入口；
+- `tests/` 按模块与测试类型分层，能从模块反查测试、从测试反查模块；
+- `apps/` 下不存在构建中间产物或源码副本。
 
 ### 13.2 Run 主链验收
 
@@ -1661,6 +2051,13 @@ request
 10. 哪些验收标准无法客观验证，需要改写？
 11. 是否存在本方案未处理的并发、事务或崩溃恢复边界？
 12. 是否存在为了“架构正确”而牺牲本地优先、可调试性或交付速度的地方？
+13. §10.0 选择「手写一个不依赖 lint 框架的 `check-architecture.mjs`」而不是直接上
+    dependency-cruiser 或 ESLint，这个取舍在规则涨到 20 条以后是否还成立？临界点在哪？
+14. §12 Wave 4 的搬迁顺序（settings → providers → workspaces → sessions → approvals →
+    memory/compact → plans → subagents → mcp → 只读投影 → runs）是否漏了某条依赖，
+    导致某一批会产生大量 shim？
+15. 本文自身在 Wave 6 归档（§12 Wave 6 最后一条）—— 这个自我退场安排是否有必要，
+    还是应该演进成 `docs/current/` 的一部分长期保留？
 
 评审输出建议分为：
 
@@ -1674,7 +2071,7 @@ request
 
 ## 16. 最终原则摘要
 
-如果只记住本总纲中的十句话，应当是：
+如果只记住本总纲中的十一句话，应当是：
 
 1. Route 只翻译协议。
 2. Application 显式编排流程。
@@ -1685,4 +2082,8 @@ request
 7. 核心控制流用直接调用，事件只做旁路投影。
 8. 一次 Run 的资源全部进入 RunScope。
 9. 一个 `runId` 必须能够还原完整因果链。
-10. 架构的最终评判标准是：一个不熟悉项目的人能否快速、正确地读懂和修改它。
+10. **没有脚本执行的架构约定，等于没有约定。**
+11. 架构的最终评判标准是：一个不熟悉项目的人能否快速、正确地读懂和修改它。
+
+第 10 条是唯一一条关于「怎么让前 9 条活下去」的。Eva 已经有 98 篇、32201 行架构文档，
+再多一篇不会改变任何事；能改变事情的是 Wave 0 里那个几十行的脚本。
