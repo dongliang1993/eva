@@ -17,13 +17,12 @@ files:
   - "!scripts"
   - "!build"
   - "!release"
-  - "!.server-deploy"
 extraResources:
   - from: ../../apps/server/dist/
     to: server/dist/
     filter:
       - "**/*"
-  - from: .server-deploy/node_modules/
+  - from: ../../.build/server-deploy/node_modules/
     to: server/node_modules/
     filter:
       - "**/*"

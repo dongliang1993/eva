@@ -8,6 +8,11 @@
  *   - Eva-<ver>-arm64.dmg (+.blockmap) ← 新用户安装器
  *   - latest-mac.yml                 ← feed 清单(version/sha512/size)
  *
+ * 另外查一件与更新链无关、但同样只能在 pack 之后查的事:**打包产物里不许有 .ts 源码**
+ * (宪章 §7.23)。历史事故是 `apps/desktop/.server-deploy/src/` —— `pnpm deploy` 会把整个
+ * server 包(含 src/)复制出来,只要有人把 `from:` 从 `node_modules/` 放宽到包根,
+ * 一份过期的 server 源码副本就会随 Eva.app 发出去,并在用户机器上冒充源码。
+ *
  * 用法: node scripts/check-release-artifacts.mjs [releaseDir]
  * 退出码: 0 齐全;1 缺文件。
  */
@@ -72,6 +77,52 @@ if (missing === 0) {
     console.error(`✗ latest-mac.yml 的 files 里没有 Eva-${version}-arm64.zip`);
     missing++;
   }
+}
+
+/**
+ * 产物目录不得含 .ts 源码(§7.23 动作 3)。
+ *
+ * 只扫解包后的 `mac-arm64/Eva.app/Contents/Resources`(dmg/zip 里面看不见,得等 electron-builder
+ * 留下的未压缩目录)。`node_modules` 整棵跳过 —— 第三方包带 `.d.ts` / `src/*.ts` 是常态
+ * (实测 1264 个),把它们算进来这条检查第一天就是红的,等于没有。
+ */
+const unpackedResources = path.join(releaseDir, "mac-arm64", "Eva.app", "Contents", "Resources");
+
+const findSourceTs = (dir, out = []) => {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry.name === "node_modules") continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) findSourceTs(full, out);
+    else if (entry.name.endsWith(".ts")) out.push(full);
+  }
+  return out;
+};
+
+if (fs.existsSync(unpackedResources)) {
+  const strays = findSourceTs(unpackedResources);
+  if (strays.length > 0) {
+    console.error(
+      `\n✗ 产物里出现 ${strays.length} 个 .ts 文件 —— 打包产物只该有编译结果,不该有源码副本:`
+    );
+    for (const f of strays.slice(0, 10)) {
+      console.error(`    ${path.relative(unpackedResources, f)}`);
+    }
+    if (strays.length > 10) console.error(`    …还有 ${strays.length - 10} 个`);
+    console.error(
+      "  多半是 electron-builder.yml 的 extraResources 把 `from:` 从 node_modules/ 放宽到了包根。"
+    );
+    missing++;
+  } else {
+    console.log("✓ 产物目录无 .ts 源码副本");
+  }
+} else {
+  console.log("ℹ 未找到 mac-arm64/Eva.app,跳过「产物无源码副本」检查");
 }
 
 if (missing > 0) {

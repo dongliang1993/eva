@@ -192,8 +192,10 @@ pnpm desktop:pack # Pack the desktop app for distribution
 > `'["electron"]'` 这种字符串 pnpm 不认，会让编译被静默跳过）。升级 Node 后若测试大面积
 > 报 `NODE_MODULE_VERSION` 不匹配，跑 `pnpm rebuild -r better-sqlite3`。
 
-打包链路（T11 起）：`pack` = web build → server build → `pnpm deploy .server-deploy`
-（server 的 prod node_modules，供 external 依赖）→ `electron-rebuild`（better-sqlite3 按
+打包链路（T11 起）：`pack` = web build → server build → `pnpm deploy .build/server-deploy`
+（server 的 prod node_modules，供 external 依赖；输出落**仓库根的 `.build/`**，不落 `apps/desktop/`——
+它带一份 server 的 `src/` 副本，放在源码树里会被不认 gitignore 的 `grep -rn` 搜出来冒充源码，
+宪章 §7.23）→ `electron-rebuild`（better-sqlite3 按
 Electron ABI）→ electron-vite。产物：`Eva.app/Contents/Resources/{app.asar, server/dist,
 server/node_modules, web/dist}`。用户数据与技能在 `~/.eva/`（`~/.eva/skills/<name>/SKILL.md`
 是打包态技能唯一可写位置；dev 态额外扫 monorepo 根 `skills/`）。单实例锁在多开时聚焦已有窗口。

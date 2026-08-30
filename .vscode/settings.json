@@ -1,0 +1,24 @@
+{
+  // 构建产物与依赖不进搜索/监听 —— 对不认 .gitignore 的工具兜底。
+  //
+  // 为什么需要这条:`grep -rn X .` 这类命令不认 gitignore,会返回产物目录里的
+  // 陈旧代码副本。历史上 apps/desktop/.server-deploy/ 是一份 93 个 .ts 文件的
+  // server 源码副本(停在 migration 0025),新人搜 registerRunRoutes 会拿到一份
+  // 「没有轨迹台账的 Eva」。产物已迁到 .build/,这里再加一道排除。
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.build": true,
+    "**/dist": true,
+    "**/dist-electron": true,
+    "**/release": true,
+    "**/.refrences": true,
+    "pnpm-lock.yaml": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.build/**": true,
+    "**/dist/**": true,
+    "**/dist-electron/**": true,
+    "**/release/**": true
+  }
+}

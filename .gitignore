@@ -9,7 +9,8 @@ coverage
 dist-electron/
 release/
 apps/desktop/preload.js
-.server-deploy/
+# 构建中间产物统一落仓库根的 .build/,不再散在 apps/*/ 里冒充源码目录
+.build/
 .eva/
 *.dmg
 .codex/
