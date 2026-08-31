@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  applyRunEvent,
   chatProjectionReducer,
   initialChatProjection,
+  runStreamedAction,
   type ChatProjection
 } from "../../../apps/web/src/features/threads/stream-reducer.js";
 import { UiMessageBuilder } from "../../../packages/shared/src/index.js";
@@ -17,6 +17,13 @@ import type {
 // §11.5 事件序列测试:投影是纯函数,所以每条性质都能用一串固定事件喂出来。
 // 这层测试是后面拆 hook 的判据 —— hook 怎么改,这里的断言都不许变。
 // ---------------------------------------------------------------------------
+
+/** run controller 的 onEvent 就是这两步:喂累积器 → 投影。 */
+const applyRunEvent = (
+  state: ChatProjection,
+  builder: UiMessageBuilder,
+  event: RunAgentStreamEvent
+): ChatProjection => chatProjectionReducer(state, runStreamedAction(builder, event));
 
 const userMessage = (id: string, text: string): EvaUIMessage => ({
   id,

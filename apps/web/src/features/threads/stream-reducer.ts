@@ -160,19 +160,18 @@ export const chatProjectionReducer = (
 };
 
 /**
- * 把一个流事件喂给累积器,再投影出新 state —— run controller 的 onEvent 唯一实现,
- * 也是 §11.5 事件序列测试的入口。
+ * 把一个流事件喂给累积器,再折成一个投影 action —— run controller 的 onEvent
+ * 唯一实现,也是 §11.5 事件序列测试的入口。
  *
  * 累积器留在外面而不是进 state,有两个不能绕的理由:一是 `UiMessageBuilder` 是
  * server/web 共用的唯一实现(在 shared 里),前端不能有第二份;二是它是可变累积器,
  * 放进 `useReducer` 会被 StrictMode 的双跑推两次,同一段文本出现两遍。
  */
-export const applyRunEvent = (
-  state: ChatProjection,
+export const runStreamedAction = (
   builder: UiMessageBuilder,
   event: RunAgentStreamEvent
-): ChatProjection => {
+): ChatProjectionAction => {
   builder.push(event);
 
-  return chatProjectionReducer(state, { type: "run/streamed", message: builder.snapshot() });
+  return { type: "run/streamed", message: builder.snapshot() };
 };
