@@ -77,6 +77,9 @@ const isDeepVerticalModuleImport = (spec) => {
  * level "warning" = 现状违反,随对应 Wave 收敛后改成 error(§10.2)。
  *
  * from       : 规则适用的路径前缀(仓库相对,POSIX 分隔符)
+ * matchFile  : 可选,在 from 收集到的文件里再筛一层(仓库相对路径上匹配)。
+ *              用于「按文件名而不是按目录」界定范围 —— Wave 4 之后 route 文件散落在
+ *              各 modules/<name>/ 里,只写 from 会把整个模块都算进来
  * forbid     : 命中即违规的 import 说明符判定函数
  * forbidText : 可选,源文本级规则 —— 只用于**稳定的、不会漂移的表达式**
  *              (例如 Fastify decorator 名 `app.infra.db`,或 import 语句里的具体类名)。
@@ -141,8 +144,11 @@ const RULES = [
   {
     id: "routes-only-app-api",
     level: "error",
-    since: "§10.2 第 1 条,Wave 2 收敛(2026-08-30)",
-    from: ["apps/server/src/routes"],
+    since: "§10.2 第 1 条,Wave 2 收敛(2026-08-30);Wave 4 后扩到 modules/*/…route.ts(2026-08-31)",
+    from: ["apps/server/src/routes", "apps/server/src/modules"],
+    // Wave 4 把 route 文件搬进了各自模块,只扫 src/routes/ 的话这条规则从那天起
+    // 就只在看一个 index.ts —— 名义上还在,实际什么都不拦。
+    matchFile: /^apps\/server\/src\/(?:routes\/|modules\/[^/]+\/[a-z-]*route\.ts$)/,
     why:
       "Route 只能经 app.api 拿东西(宪法 C2)。禁的不只是 app.infra.db —— " +
       "整个 app.infra 与 app.services 都不该出现在 route 里:前者是原始句柄(db/encryptor)," +
@@ -156,13 +162,16 @@ const RULES = [
   {
     id: "repository-only-in-composition-root",
     level: "error",
-    since: "§10.2 第 3 条,Wave 2 收敛(2026-08-30)",
-    from: ["apps/server/src/routes", "apps/server/src/services/runs"],
+    since: "§10.2 第 3 条,Wave 2 收敛(2026-08-30);Wave 4 后扫各模块的 route 文件(2026-08-31)",
+    // Wave 4 之前这里还写着 services/runs —— 那个目录已经不存在,规则等于只在看
+    // src/routes/index.ts。route 文件现在在 modules/<name>/ 里,按文件名筛。
+    from: ["apps/server/src/routes", "apps/server/src/modules"],
+    matchFile: /^apps\/server\/src\/(?:routes\/|modules\/[^/]+\/[a-z-]*route\.ts$)/,
     why:
-      "Repository 只能在组合根(src/api/、src/services/index.ts、src/deps.ts)或所属模块的 " +
-      "Adapter 内创建。route 与 run-preparation.ts 曾经各自 new,于是「谁拥有这张表」" +
-      "这个问题没有答案。本条目前只覆盖已收敛的两处;services/ 下按模块自建的那些," +
-      "要等 Wave 4 划出模块边界后才能判定是否越界(§10.2 第 3 条写的是 Wave 2–4)",
+      "Route 不许 new Repository(宪法 C2/C8)—— 它一 new 就同时是协议适配器和数据的 owner。" +
+      "范围是 route 文件;模块内部按能力自建 Repository 目前**不受本条约束**," +
+      "那部分债还在(2026-08-31 实测:src/modules 下 17 个文件在 new Repository," +
+      "其中若干 new 的是别的模块的)",
     forbidText: [
       { pattern: /\bnew\s+[A-Za-z]*Repository\s*\(/g, label: "new XxxRepository(" }
     ]
@@ -170,14 +179,17 @@ const RULES = [
   {
     id: "routes-no-db",
     level: "error",
-    since: "§10.2 第 1 条,Wave 2 收敛(2026-08-30)",
-    from: ["apps/server/src/routes"],
+    since: "§10.2 第 1 条,Wave 2 收敛(2026-08-30);Wave 4 后扩到 modules/*/…route.ts(2026-08-31)",
+    from: ["apps/server/src/routes", "apps/server/src/modules"],
+    matchFile: /^apps\/server\/src\/(?:routes\/|modules\/[^/]+\/[a-z-]*route\.ts$)/,
     why: "Route 只翻译协议(宪法 C2)。直接访问 DB 就是它同时在当业务总控",
     forbid: (spec) =>
       /(^|\/)db\//.test(spec) ||
       spec.includes("repositories/") ||
-      /(^|\/)schema(\.js)?$/.test(spec) ||
       spec.startsWith("drizzle-orm")
+    // 原来还有一条「说明符以 schema 结尾就算违规」—— 那是 route 只可能在 src/routes/
+    // 时代的写法。模块可以有自己的 Zod schema 文件(plan-weave/schema.ts),
+    // 而 db/schema 本来就被上面那条 `db/` 命中,所以那条只会误伤。
   },
   {
     id: "vertical-module-public-entry",
@@ -275,7 +287,10 @@ if (LIST_ONLY) {
   console.log("Eva 架构边界规则:\n");
   for (const rule of RULES) {
     console.log(`  [${rule.level.toUpperCase()}] ${rule.id}  (${rule.since})`);
-    console.log(`      范围: ${rule.from.join(", ")}`);
+    console.log(
+      `      范围: ${rule.from.join(", ")}` +
+        (rule.matchFile ? `  (只看匹配 ${rule.matchFile} 的文件)` : "")
+    );
     console.log(`      理由: ${rule.why}\n`);
   }
   process.exit(0);
@@ -287,6 +302,7 @@ for (const rule of RULES) {
   for (const fromDir of rule.from) {
     for (const file of collect(path.join(ROOT, fromDir))) {
       const relFile = rel(file);
+      if (rule.matchFile && !rule.matchFile.test(relFile)) continue;
       if (rule.exempt?.includes(relFile)) continue;
       if (rule.forbid) {
         for (const { spec, line } of importsOf(file)) {
