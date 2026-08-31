@@ -33,14 +33,14 @@
 | 03 | [后端 API 与数据库](./03-backend-api-database.md) | 内嵌 HTTP 服务、路由全景、WebSocket 协议、SQLite schema | ✅ |
 | 04 | [模型适配与 Agent 内核](./04-model-adapter-agent-harness.md) | Provider 抽象、agent loop、工具系统、子代理、Skill/MCP/插件、权限、prompt 组装 | ✅ |
 | 05 | [记忆系统与周边子系统](./05-memory-subsystems.md) | 分层记忆、语义检索、自动归档、Activity Recorder、Cron/心跳/情感、TTS/STT、多通道 | ✅ |
-| 06 | [复刻路线图](./06-replication-roadmap.md) | 技术选型建议、MVP 切片计划、每步验收标准 | ✅ |
+| 06 | 复刻路线图 | 技术选型建议、MVP 切片计划、每步验收标准 | 🗑 文件早已删除（内容并入 11 / 15） |
 | 07 | [扩展研究主题](./07-beyond.md) | 你提的 5 个方面之外，还值得研究的 N 个方向 | ✅ |
 | 08 | [并行与多 Agent 编排](./08-parallel-multi-agent.md) | 并行 tool、fork-join 子代理、编排模式沉淀为 skill、最小 fork-join 内核 | ✅ |
 | 09 | [扩展槽位宿主](./09-extension-host.md) | manifest/exposes.json、UI 槽 + agentPlugin 能力槽、EH 架构、webview SDK、S6 落地 | ✅ |
 | 10 | [前端工程约束](./10-frontend-conventions.md) | 目录切分（features/shared/slots）、kebab 文件名 + 标识符约定、复用边界决策树、ESLint | ✅ |
 | 11 | [落地计划](./11-landing-plan.md) | one-by-one 任务拆分（S0–S17 Phase A–E + v2 增量 S18–S24）、决策固化、验收标准、依赖图（v2 重排关键路径 S18→S19→S7→S6→S9→S11） | ✅ |
 | 12 | [SDK 选型调研] | Claude Agent SDK vs Vercel AI SDK 调研（结论并入 11 §1.1，未单列文档） | ✅ |
-| 13 | [work-mi 复用评估](./13-work-mi-reuse-assessment.md) | work-mi monorepo 可复用性评估：技术栈对位、切片覆盖度、harness 改造、复用决策 | ✅ |
+| 13 | work-mi 复用评估 | work-mi monorepo 可复用性评估：技术栈对位、切片覆盖度、harness 改造、复用决策 | 🗑 文件早已删除（评估结论已落地为本仓库） |
 | 14 | [Eva 技术架构](./14-eva-architecture.md) | 基于 Alma × WeaveLynx 取舍的目标架构：12 条设计原则、Session/Run 领域模型、流式协议、数据架构、不做清单 | ✅ |
 | 15 | [Eva 执行手册](./15-eva-execution-playbook.md) | 按当前进度校准的施工手册：每阶段做什么/怎么做/验收/坑、文档→任务地图、依赖图 | ✅ |
 | 16 | [v2 增量总览](./16-alma-v2-delta.md) | v0.0.175 → v0.0.990 变化总表：过期结论清单、新增子系统地图、各区块差异索引 | ✅ |
