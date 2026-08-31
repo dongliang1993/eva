@@ -1351,6 +1351,9 @@ Shared 只保存**跨进程、跨 package 的线协议契约**：
 
 ### 7.18 Web：Threads 与 Streaming
 
+> 已在 Wave 5 落地（2026-08-31）：`useChat` 358 → 111 行，投影在 `stream-reducer.ts`。
+> 落地形态与三处偏差见 §12 Wave 5 的收尾记录。
+
 #### 当前问题
 
 - `useChat` 同时管理请求、session、stream、message commit、retry、abort、attach；
@@ -1388,6 +1391,9 @@ Shared 只保存**跨进程、跨 package 的线协议契约**：
 
 ### 7.19 Web：Settings、Trajectory 与 Workspaces
 
+> 已在 Wave 5 落地（2026-08-31）：memory / provider / mcp / sidebar 四个大组件按下表拆完；
+> Trajectory 那几条（P2 的 3–6、Workspace Picker）还没动。见 §12 Wave 5 的收尾记录。
+
 #### 当前问题
 
 - Memory Settings、Provider Settings、MCP Settings 文件较大；
@@ -1421,6 +1427,9 @@ Shared 只保存**跨进程、跨 package 的线协议契约**：
 6. **P3**：为关键页面建立 Story/fixture 或轻量组件测试，展示空、加载、错误和部分流式状态。
 
 ### 7.20 Desktop
+
+> 已在 Wave 5 落地（2026-08-31）：`main.ts` 750 → 96 行，只剩启动序列；
+> 下表的 9 个区块各自成文件（多出一个 `tray.ts`）。P3 的状态机测试还没做。
 
 #### 当前问题
 
@@ -2227,6 +2236,40 @@ shim 数为 0；§10.2 第 2、3、6 条升为 error。
 
 退出条件：主页面和 Desktop 启动流程各有清晰阅读入口；`stream-reducer` 有独立测试；
 手动验证流式渲染帧率与滚动行为无回退。
+
+> **Wave 5 已结束（2026-08-31）。** 三张表全部落地，共四个 commit：
+>
+> | 目标 | 落地形态 | 行数 |
+> |---|---|---|
+> | §7.20 `main.ts` | 9 个区块搬成 9 个文件，`main.ts` 只剩启动序列（`9f309a6`，纯移动） | 750 → 96 |
+> | §7.18 `useChat` | `stream-reducer`（纯投影 + 19 条事件序列测试，`75060a0`）→ `use-run-controller` / `use-thread-messages` / `use-chat-handlers`（`061aa00`） | 358 → 111 |
+> | §7.19 三个设置页 | memory 拆 5 块、provider 拆 5 块、mcp 拆 3 块（`6619f72`） | 664 → 203、592 → 113、336 → 75 |
+> | §7.19 `sidebar` | `use-thread-list`（数据 + 分组投影）/ `thread-list` / `thread-group-header` / `thread-context-menu` / `workspace-add-popover`（`3e5b224`） | 642 → 133 |
+>
+> 退出条件逐条：
+>
+> - **阅读入口** —— Desktop 启动读 `electron/main.ts` 一页；一次对话的读写读
+>   `use-chat.ts` 一页（投影在 `stream-reducer.ts`，在飞与历史各一个 hook）。
+> - **`stream-reducer` 有独立测试** —— `tests/web/streaming/stream-reducer.test.ts`，
+>   §11.5 六条性质各有断言；用例数 742 → **761**（只增不减）。
+> - **性能硬约束未被触碰** —— `chat-view.tsx`、`committed-messages.tsx`、
+>   `use-stick-to-bottom.ts` 四个 wave 5 commit 一行未改（`git diff --name-only` 可验）；
+>   `committed` 的数组引用在整轮流式中不变这一条，现在由测试逐帧 `toBe` 钉住，
+>   不再只靠约定。
+> - **帧率与滚动的手动验证还没做** —— 这一条需要跑起来看，留给下次开 dev 时确认；
+>   上面那条 `toBe` 断言覆盖的是「重渲染边界没变」，不等于实测帧率。
+>
+> 三处与 charter 表格的偏差：
+>
+> 1. §7.18 表把 `loadSession` 划给 `use-thread-messages`，实际留在 `use-chat.ts` ——
+>    它要同时用 `attachRun`（在飞侧）与 `syncFromServer`（历史侧），放进任一侧
+>    都会让两个子 hook 互相依赖。
+> 2. §7.19 的 `memory-danger-zone.tsx` 目前只有「重建索引」，charter 提的「清空」
+>    当前 UI 没有入口，没有凭空加。
+> 3. §7.18 表里的 `thread-search` 没有对应实现 —— 侧栏至今没有搜索框。
+>    另外多出两个 charter 没列的小文件：`provider-toggle.tsx`（表单与模型行共用的开关）、
+>    `use-chat-handlers.ts`（拆出 `UseChatHandlers` 类型，避免 run-controller 反向
+>    import `use-chat` 成环）。
 
 ### Wave 6：文档成为当前事实
 
