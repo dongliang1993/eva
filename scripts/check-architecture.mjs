@@ -3,7 +3,7 @@
  * Eva 架构边界检查 —— 唯一的自动化边界执行器。
  *
  * 为什么是一个手写脚本，而不是 ESLint / dependency-cruiser:
- * 见 docs/architecture/25-eva-simple-architecture-charter.md §10.0。
+ * 见 docs/archive/plans/25-eva-simple-architecture-charter.md §10.0(已归档的改造总纲)。
  * 简版理由:这个仓库此前没有任何 lint 配置,直接引入 ESLint 全家桶会立刻产出
  * 成百条与架构无关的风格告警,把真正要看的边界违规淹掉。等规则涨到 20 条以上、
  * 或者需要跨文件类型推导时,再讨论升级(§15 问题 13)。

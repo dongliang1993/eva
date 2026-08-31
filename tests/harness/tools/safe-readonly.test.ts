@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isSafeReadOnlyCommand } from "../../../packages/harness/src/tools/safe-readonly.js";
 
 /**
- * T29:bash 只读命令直放(docs/plans/r7/T29 §2.1)。
+ * T29:bash 只读命令直放(docs/archive/plans/r7/T29 §2.1)。
  * 判定哲学与 risk.ts 相反:宁可漏放(多弹一次审批),不可错放(写了文件没弹窗)。
  */
 describe("isSafeReadOnlyCommand 直放(白名单)", () => {

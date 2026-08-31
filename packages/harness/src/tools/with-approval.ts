@@ -11,7 +11,7 @@ const deniedMessage = (toolName: string): string =>
   + "Do not retry the same call. Explain what you wanted to do and ask the user how to proceed.";
 
 /**
- * 危险工具的审批闸门(docs/architecture/14 §4.4)。
+ * 危险工具的审批闸门。
  *
  * 为什么包在 execute 外层而不用 SDK 的 toolApproval 两轮调用:两轮调用需要手工
  * 缝 assistant(tool-call) + tool(approval-response) 消息序列,缝错会重复正文甚至

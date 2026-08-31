@@ -1,18 +1,23 @@
-# docs/plans
+# docs/plans —— 在建的施工计划
 
-## 在用
-- `r10/` —— S20 usage_records 补全（T40–T41）。入口：[`r10/00-overview.md`](./r10/00-overview.md)
-- `r11/` —— S25 工具发现与 Skill 渐进披露加固（T42–T44）。入口：[`r11/00-overview.md`](./r11/00-overview.md)
-- `r12/` —— S26 Plan Gate 闸门 × 审批决策协议 × Plan Weave 任务图（T45a/T45b/T46）。入口：[`r12/00-overview.md`](./r12/00-overview.md)
-- `r13/` —— S27 Agent 轨迹 ledger 与会话内轨迹页（T47–T54）。方案：[`2026-08-26-agent-observability-design.md`](./2026-08-26-agent-observability-design.md)；入口：[`r13/00-overview.md`](./r13/00-overview.md)
+**新一轮的方案与任务拆分放这里。** 一轮做完就整体移进
+[`docs/archive/plans/`](../archive/plans/)，别留在这里当"半个事实源"。
 
-## 已完成（保留作施工记录）
-- `r9/` —— S19 AutoCompact 步中压缩 + 工具数安全网（T36–T39），已落地（`e063466`/`95b6910`/`76dc545`/`ebbf870`）。
-- `r4/` —— 第四轮 spec（T15–T16）。
-- `r3/` —— 第三轮（T11–T14），已全部合并（`bbc0d83`..`fadfc35`）。
-- `r2/` —— 第二轮（T5–T10），已全部合并（`fb0b071`..`bebdd12`）。
-- `r1/` —— 第一轮重构（T0–T4），已全部合并（`0350f30`..`689ac33`）。
-  `r1/FINDINGS.md` 是**持续累积**的流水账，R4 期间继续往里写。
+当前：**没有在建的轮次**（架构改造 Wave 0–6 已于 2026-08-31 收尾）。
 
-## 历史（决策记录，不再更新，勿照此实现）
-- `2026-04-05-claude-code-style-compaction-design.md` —— 压缩策略设计，已实现于 `services/compact.ts`
+## 这个目录与别处的分工
+
+| 想知道 | 去哪 |
+|---|---|
+| 今天的代码长什么样 | [`docs/current/`](../current/) |
+| 某个设计为什么这样定 | [`docs/adr/`](../adr/) |
+| 某个 `T44` / `S27` 编号指的是什么 | [`docs/archive/plans/`](../archive/plans/) |
+| Alma 竞品研究 | [`docs/archive/research/`](../archive/research/) |
+
+## 写新计划的两条约定
+
+1. **任务编号（`T…` / `S…`）只在这里出现。** 代码注释、AGENTS.md、`docs/current/`
+   都不该拿编号当理解前提 —— 那些地方要写「为什么」，编号留给考古
+   （[ADR 0012](../adr/0012-comments-explain-invariants.md)）。
+2. **计划是目标，不是事实。** 落地后把当前事实更新进 `docs/current/`，
+   稳定决策写成 ADR，然后把这一轮归档。

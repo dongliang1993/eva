@@ -15,7 +15,7 @@ import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/inde
 import { AssistantMessageRecorder } from "../../../apps/server/src/modules/runs/index.js";
 
 /**
- * T30:审批决策回写消息 part(docs/plans/r7/T30)。
+ * T30:审批决策回写消息 part(docs/archive/plans/r7/T30)。
  * decide 时消息还在在飞 builder、拿不到;写入点必须选在 finish 落库前查回写
  * (§1.2 时序约束)。事实源是 approval_requests 行,不是 SSE 事件(§坑 3)。
  */

@@ -324,7 +324,7 @@ describe("启动清扫:遗留 pending 审批", () => {
 });
 
 /**
- * T29:bash 只读命令直放(docs/plans/r7/T29)。
+ * T29:bash 只读命令直放(docs/archive/plans/r7/T29)。
  * 短路由 harness 的 withApproval 做(requestApproval 不被调),台账由 server 的
  * requestApproval 回调做(autoApprove 落 granted)—— 两处用同一个 isSafeReadOnlyCommand。
  */

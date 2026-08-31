@@ -14,7 +14,7 @@ import {
 const config = { LOG_LEVEL: "info", PORT: 8082, HOST: "127.0.0.1", DB_PATH: "" } as never;
 
 /**
- * T28:policy 记忆短路(docs/plans/r7/T28)。
+ * T28:policy 记忆短路(docs/archive/plans/r7/T28)。
  * 放行链序:T14 白名单 → policy 短路 → ask(弹卡片)。短路命中 = 不发 approval_request、
  * 不进 pending Map、台账照记 granted + reason=policy:<key>。
  */

@@ -1,13 +1,14 @@
 import { classifyToolRisk } from "../tools/risk.js";
 
 /**
- * thread 作用域 policy key 生成器(T27,方案 docs/architecture/22 §3.1)。
+ * thread 作用域 policy key 生成器。
  *
  * 把「始终允许」从全局 per-tool 白名单细化成「这条命令 × 这个会话」。
  * 形态对齐 Alma(`main:28077-28100`):scope=`thread:<id>`,bash 产精确 key
  * `command:<cmd>` + 粗 key `:all` 两级回退;命中任一且值为 allow_always 则直放。
  *
- * 单一事实来源(r7 §3 契约 1):纯函数、无 IO、不读 settings、不缓存。
+ * 这是 policy 的**单一事实来源**:纯函数、无 IO、不读 settings、不缓存 ——
+ * 一旦它开始读状态,「命中了吗」在不同调用点就会给出不同答案。
  */
 
 export interface PolicyKeyInput {

@@ -13,7 +13,7 @@
 | `packages/harness/src/agents/` | `tests/harness/agent/` |
 | `packages/harness/src/tools/` | `tests/harness/tools/` |
 | `packages/harness/src/context/` \| `skills/` \| `subagents/` \| `models/` \| `approval/` | 同名子目录 |
-| `apps/server/src/services/<module>/` | `tests/server/<module>/` |
+| `apps/server/src/modules/<module>/` | `tests/server/<module>/` |
 | `apps/web/src/features/<feature>/` | `tests/web/<feature>/` |
 | `packages/shared/src/` | `tests/shared/` |
 | `apps/desktop/electron/` | `tests/desktop/` |
@@ -26,13 +26,13 @@
 
 `plan-gate/` 与 `plan-weave/` **刻意是两个目录**：Plan Gate 是会话级审批闸门，
 Plan Weave 是 workspace 级文件任务图，事实源不共享。合成一个 `plans/` 会让读者
-把它们看成一个系统 —— 见 `docs/architecture/25-eva-simple-architecture-charter.md` §7.10。
+把它们看成一个系统 —— 见 [`docs/current/data-ownership.md`](../docs/current/data-ownership.md)。
 
 ## 为什么不按「单元 / 集成 / 契约」分桶
 
 试过，不合身：
 
-- **按速度分桶没有价值。** 实测整套 735 个用例跑完 **约 5 秒**，耗时大头是 vite collect
+- **按速度分桶没有价值。** 实测整套用例（当前 761 个）跑完 **约 5 秒**，耗时大头是 vite collect
   (约 23 秒)而不是用例执行。「改一行纯函数不必等 SQLite 用例」这个问题在 Eva 上不存在 ——
   in-memory SQLite 本来就快。
 - **`contract/` 与 `usecase/` 当前成员为零。** 仓库里还没有双实现 Port 契约测试，

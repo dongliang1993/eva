@@ -16,7 +16,7 @@ const readSource = (rel: string): string =>
   readFileSync(new URL(`../../../${rel}`, import.meta.url), "utf8");
 
 /**
- * T31:退役 alwaysAllowTools(docs/plans/r7/00-overview.md §3 契约 1 —— policy key 是单一事实来源)。
+ * T31:退役 alwaysAllowTools(docs/archive/plans/r7/00-overview.md §3 契约 1 —— policy key 是单一事实来源)。
  * 旧白名单被 allowAlwaysPolicies 完全覆盖(语义 = thread:global:all),留着就是第二个事实源。
  */
 describe("T31 grant 选 key(后端单一事实来源)", () => {
