@@ -1,12 +1,13 @@
 import path from "node:path";
 
-import type { FastifyInstance } from "fastify";
 import pino from "pino";
 import { loadSkills, loadSoulSection } from "@eva/harness";
 
-import { loadConfig, type AppConfig } from "./config.js";
+import { loadConfig } from "./config.js";
 import {
-  initializeDatabase
+  getDefaultDbPath,
+  initDb,
+  migrateDb
 } from "./db/index.js";
 import { DrizzleRunRepository, interruptToolExecutions } from "./modules/runs/index.js";
 import { failStaleTasks } from "./modules/subagents/index.js";
@@ -18,7 +19,7 @@ import {
 } from "./modules/observability/index.js";
 import { loadAppSettings } from "./modules/settings/index.js";
 import { findMonorepoRoot } from "./infrastructure/monorepo-root.js";
-import { syncMcpConfigFile } from "./modules/mcp/index.js";
+import { migrateMcpServersToFile } from "./modules/mcp/index.js";
 import { secretKeyPath, userSkillsDir } from "./paths.js";
 import {
   AesGcmEncryptor,
@@ -26,12 +27,16 @@ import {
   type Encryptor,
 } from "./infrastructure/crypto/encryptor.js";
 import { loadSecretKey } from "./infrastructure/crypto/secret-key.js";
-import type { AppInfrastructure, AppServices } from "./types/common.js";
+import type { AppInfrastructure } from "./types/common.js";
 
 export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   const config = loadConfig();
   const logger = pino({ level: config.LOG_LEVEL });
-  const db = initializeDatabase(config, logger);
+  // 先开库不迁移:MCP 数据搬家必须在 0034 删表**之前** —— initializeDatabase
+  // 内部会跑 migrateDb,表一删迁移就无表可搬,用户配置(含 env 密钥)会静默丢。
+  const db = initDb({ dbPath: config.DB_PATH || getDefaultDbPath() });
+  migrateMcpServersToFile(db, logger);
+  migrateDb(db);
   const observer = createPinoObserver(logger);
   const workspaceRoot = findMonorepoRoot(process.cwd());
 
@@ -61,9 +66,9 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
     logger.info("SOUL.md loaded");
   }
 
-  // ~/.eva/mcp.json → mcp_servers 表（file-origin）。运行时只读表，不读文件。
-  // 这里只同步配置，不建连接 —— 连接留给第一个 run 触发（没配 MCP 的用户零开销）。
-  syncMcpConfigFile(db, logger);
+  // MCP 存储迁移:旧 mcp_servers 表(含 env/headers 密钥值)一次性写进
+  // ~/.eva/mcp.json 后由 0034 迁移删表。已经在开库后、migrateDb 前跑过;
+  // 表已删(二次启动)是幂等空转。文件已存在时不覆盖 —— 文件是新事实源。
 
   // 进程重启时把上次没跑完的 run 收成 error —— 否则崩溃留下的 running 行会永远挂着。
   interruptToolExecutions(db);
@@ -125,7 +130,3 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
     soulSection
   };
 };
-
-export const getConfig = (app: FastifyInstance): AppConfig => app.infra.config;
-
-export const getServices = (app: FastifyInstance): AppServices => app.services;

@@ -11,7 +11,7 @@
 
 ## 持久化事实源（SQLite，`~/.eva/eva.db`）
 
-15 张 drizzle 表（另有 `messages_fts` 与 `memory_embeddings` 两张虚表在迁移里建），
+14 张 drizzle 表（另有 `messages_fts` 与 `memory_embeddings` 两张虚表在迁移里建），
 `db/schema.ts` 是唯一定义处，迁移在 `db/migrations/`（**不按模块拆**：migration 语义不能动）。
 
 | 领域 | 事实源 | 投影 / 内存态 | 唯一写入者 | 代码位置 |
@@ -29,7 +29,6 @@
 | 工作区 | `workspaces` | 当前会话的绑定结果 | Workspaces | `modules/workspaces/{workspace-store.ts,workspace-repository.ts}` |
 | Plan Gate | `plans` + `<ws>/.eva/plan-gate/` | run-scoped gate state | Plan Gate | `modules/plan-gate/{service.ts,plan-repository.ts}` |
 | 后台子代理任务 | `background_tasks` | live runner | Subagents（子 message/run 仍归各自模块写） | `modules/subagents/sqlite-task-store.ts` |
-| MCP server 配置 | `mcp_servers` | 活动连接 + 工具定义 | MCP | `modules/mcp/{mcp-registry.ts,mcp-server-repository.ts}` |
 | Token 用量 | `usage_records` | UI 聚合 | Usage | `modules/usage/usage-record-repository.ts` |
 | 历史压缩 | `session_compactions` | 每轮压缩后的历史 | Compact | `modules/compact/session-compaction-repository.ts` |
 | 跨会话检索 | `messages` 的 `search_text`（可重建索引投影） | — | Search | `modules/search/message-search-repository.ts` |
@@ -40,7 +39,7 @@
 |---|---|---|---|
 | 人类可读记忆 | `~/.eva/MEMORY.md`、`~/.eva/memory/YYYY-MM-DD.md` | Memory | **用户可以直接编辑** —— 这是它存在的理由；每轮注入 prompt（8 KB 上限） |
 | Skill 目录 | `~/.eva/skills/<name>/SKILL.md`（dev 态另扫 monorepo 根 `skills/`） | 用户 / 安装包 | 进程启动时加载成 catalog |
-| MCP 导入 | `~/.eva/mcp.json` | 用户 | 只在启动时导入 file-origin 条目，**运行时事实源是 `mcp_servers` 表** |
+| MCP server 配置 | `~/.eva/mcp.json` | MCP（UI 增删改经 store 写回；用户也可直接编辑） | **唯一事实源**，无 DB 表；条目名即 id；env/headers 明文随配置回传（本机信任域）；写盘 tmp→rename 原子写。旧 `mcp_servers` 表由启动迁移 `migrateMcpServersToFile` 搬进文件后经 0031 删表 |
 | Plan Weave | `<workspace>/.eva/plan-weave/{plan.json,state.json,results/}` | Plan Weave | 有意进 git（人可直接改、可追踪）；写盘全部 tmp→fsync→rename |
 | Plan Gate 文件 | `<workspace>/.eva/plan-gate/<planId>/current.md` | Plan Gate | `.eva/.gitignore` 只忽略 `plan-gate/` |
 | 加密密钥 | `~/.eva/.secret-key`（0600） | 首次启动生成 | **删了就永久解不开已存的 apiKey**（要在设置里重新输入） |
@@ -54,7 +53,7 @@
 | `RunHub`（扇出） | Runs | 与 registry 同寿，是 registry entry 的私有字段，只通过 `hubFor(runId)` 暴露。不是重复状态，别合并也别拆 |
 | `LanguageModel` 缓存 | Runs / `agent-factory` | key = (kind, providerId, baseURL, modelId, apiKey)；temperature 是调用参数不进 key。provider/settings 变更调 `agents.invalidate()` |
 | Skill catalog | Skills（`infra.skills`） | 进程启动加载；改了 `SKILL.md` 要重启 |
-| MCP 连接与工具定义 | MCP | 坏掉的 server 降级成 `state: "error"`，**永不让对话失败** |
+| MCP 连接与工具定义 | MCP | 坏掉的 server 降级成 `state: "error"`，**永不让对话失败**；连接状态不落 `mcp.json`（重启重算） |
 | pending 审批的 promise | Approvals | 只有 `stop` / 用户决策 / 进程重启能收；SSE 断连**不**取消 |
 | Plan Gate run state | Plan Gate | execute 期 getter，不是 build 期快照 —— 否则「中途 enter」和「approve 后同 run 解除」都不成立 |
 | SSE 订阅者集合 | Transport | 纯投影，没有持久化权威 |

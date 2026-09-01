@@ -25,7 +25,6 @@ import {
 import { DrizzleSessionRepository } from "../modules/sessions/index.js";
 import {
   createMcpApi,
-  McpServerRepository,
   type McpApi,
 } from "../modules/mcp/index.js";
 import {
@@ -76,7 +75,7 @@ export const buildAppApi = (infra: AppInfrastructure, services: AppServices): Ap
     policies: services.approvalPolicies
   }),
   mcp: createMcpApi({
-    servers: new McpServerRepository(infra.db),
+    store: services.mcpStore,
     registry: services.mcp
   }),
   memory: createMemoryApi({

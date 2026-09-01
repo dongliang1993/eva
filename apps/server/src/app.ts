@@ -67,5 +67,12 @@ export const buildApp = async () => {
   await registerRoutes(app);
   services.memoryAutomation?.start();
 
+  // MCP 预热在后台跑,不挡 listen:慢 server 握手最长 15s,串行等待的话
+  // 进程要等它才起得来。失败只记日志(连接结果本来就在 registry 状态里),
+  // run 侧的 ensureConnected 幂等,没赶上首连的 run 照样自己补。
+  void services.mcp.ensureConnected().catch((error: unknown) => {
+    infra.logger.error({ err: error }, "MCP 启动预热失败");
+  });
+
   return app;
 };

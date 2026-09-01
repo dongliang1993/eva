@@ -13,7 +13,7 @@ import type {
   RunRegistry,
 } from "../modules/runs/index.js";
 import type { Encryptor } from "../infrastructure/crypto/encryptor.js";
-import type { McpRegistry } from "../modules/mcp/index.js";
+import type { McpConfigStore, McpRegistry } from "../modules/mcp/index.js";
 import type { ApprovalGateway } from "../modules/approvals/index.js";
 import type { ApprovalPolicyStore } from "../modules/approvals/index.js";
 import type { SessionService } from "../modules/sessions/index.js";
@@ -40,6 +40,8 @@ export interface AppServices {
   approvalPolicies: ApprovalPolicyStore;
   runRegistry: RunRegistry;
   workspaces: WorkspaceStore;
+  /** mcp.json 的唯一 store 实例 —— api 与 registry 共享,避免两个实例各写各的。 */
+  mcpStore: McpConfigStore;
   mcp: McpRegistry;
   /** Optional only so focused route fixtures need not construct a background worker. */
   memoryAutomation?: MemoryAutomationService | undefined;

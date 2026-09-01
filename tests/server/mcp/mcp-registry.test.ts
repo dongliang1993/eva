@@ -1,39 +1,34 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  closeDb,
-  initDb,
-  migrateDb,
-  type AppDatabase
-} from "../../../apps/server/src/db/index.js";
-import {
-  McpServerRepository,
-  type McpServerRow
-} from "../../../apps/server/src/modules/mcp/index.js";
-import { McpServerClient } from "../../../apps/server/src/modules/mcp/index.js";
+import { McpConfigStore, McpServerClient } from "../../../apps/server/src/modules/mcp/index.js";
 import {
   McpRegistry,
-  type McpConnection
+  type McpConnection,
+  type McpServerFields
 } from "../../../apps/server/src/modules/mcp/index.js";
 import { startFakeMcpServer } from "../../helpers/fake-mcp-server.js";
 
 const logger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });
 
-let db: AppDatabase;
-let repo: McpServerRepository;
+let dir: string;
+let store: McpConfigStore;
+let registry: McpRegistry;
 
 beforeEach(() => {
-  db = initDb({ dbPath: ":memory:" });
-  migrateDb(db);
-  repo = new McpServerRepository(db);
+  dir = mkdtempSync(path.join(tmpdir(), "eva-mcp-registry-"));
+  store = new McpConfigStore(path.join(dir, "mcp.json"));
 });
 
 afterEach(() => {
-  closeDb(db);
+  rmSync(dir, { recursive: true, force: true });
 });
 
-const addServer = (name: string, over: Partial<McpServerRow> = {}) =>
-  repo.create(`id-${name}`, "manual", {
+const addServer = (name: string, over: Partial<McpServerFields> = {}) =>
+  store.create({
     name,
     transport: "stdio",
     command: "irrelevant-in-tests",
@@ -97,7 +92,7 @@ describe("McpRegistry", () => {
   it("ensureConnected 并发调两次只连一次", async () => {
     addServer("a");
     const connect = vi.fn(async () => fakeConnection(["read_x"]));
-    const registry = new McpRegistry(repo, logger(), connect);
+    registry = new McpRegistry(store, logger(), connect);
 
     await Promise.all([registry.ensureConnected(), registry.ensureConnected()]);
     await registry.ensureConnected();
@@ -107,7 +102,7 @@ describe("McpRegistry", () => {
 
   it("listTools 返回带 mcp__ 前缀的工具", async () => {
     addServer("km");
-    const registry = new McpRegistry(repo, logger(), async () =>
+    registry = new McpRegistry(store, logger(), async () =>
       fakeConnection(["read_doc", "write_doc"])
     );
 
@@ -124,8 +119,8 @@ describe("McpRegistry", () => {
     addServer("good");
     addServer("bad");
 
-    const registry = new McpRegistry(repo, logger(), async (row) => {
-      if (row.name === "bad") {
+    registry = new McpRegistry(store, logger(), async (server) => {
+      if (server.name === "bad") {
         throw new Error("spawn npx ENOENT");
       }
       return fakeConnection(["read_ok"]);
@@ -145,7 +140,7 @@ describe("McpRegistry", () => {
   it("disabled 的 server 不连接，状态是 disabled", async () => {
     addServer("off", { enabled: false });
     const connect = vi.fn(async () => fakeConnection(["read_x"]));
-    const registry = new McpRegistry(repo, logger(), connect);
+    registry = new McpRegistry(store, logger(), connect);
 
     await registry.ensureConnected();
 
@@ -156,7 +151,7 @@ describe("McpRegistry", () => {
 
   it("describe 里带工具摘要与免审批标记，供 UI 展示", async () => {
     addServer("km", { autoApproveTools: ["write_doc"] });
-    const registry = new McpRegistry(repo, logger(), async () =>
+    registry = new McpRegistry(store, logger(), async () =>
       fakeConnection(["read_doc", "write_doc"])
     );
 
@@ -171,7 +166,7 @@ describe("McpRegistry", () => {
     const row = addServer("km");
     const closed: string[] = [];
     let generation = 0;
-    const registry = new McpRegistry(repo, logger(), async () => {
+    registry = new McpRegistry(store, logger(), async () => {
       generation += 1;
       const tag = `gen${generation}`;
       return fakeConnection([`read_${tag}`], () => closed.push(tag));
@@ -191,8 +186,8 @@ describe("McpRegistry", () => {
     addServer("a");
     addServer("b");
     const closed: string[] = [];
-    const registry = new McpRegistry(repo, logger(), async (row) =>
-      fakeConnection(["read_x"], () => closed.push(row.name))
+    registry = new McpRegistry(store, logger(), async (server) =>
+      fakeConnection(["read_x"], () => closed.push(server.name))
     );
 
     await registry.ensureConnected();

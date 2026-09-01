@@ -41,6 +41,14 @@ const serverInputSchema = z.discriminatedUnion("transport", [
 
 type ServerInput = z.infer<typeof serverInputSchema>;
 
+/** body 是否是「只启停」的形状:{enabled: boolean} 且不含其它字段。 */
+const isEnableOnlyBody = (body: unknown): body is { enabled: boolean } =>
+  typeof body === "object" &&
+  body !== null &&
+  !Array.isArray(body) &&
+  typeof (body as { enabled?: unknown }).enabled === "boolean" &&
+  Object.keys(body).every((key) => key === "enabled");
+
 const toFields = (input: ServerInput): McpServerFields =>
   input.transport === "stdio"
     ? {
@@ -94,30 +102,19 @@ export const registerMcpServerRoutes = (app: FastifyInstance): void => {
         return { error: "MCP server not found" };
       }
 
-      // 来自 mcp.json 的条目：内容以文件为准，UI 只能启停。
-      // 这是业务规则(不是校验失败),错误信息要解释为什么,所以不走全局 ZodError handler。
-      if (existing.origin === "file") {
-        const body = request.body;
-        const isEnabledOnly = (
-          body !== null &&
-          typeof body === "object" &&
-          !Array.isArray(body) &&
-          (body as { enabled?: unknown }).enabled !== undefined &&
-          typeof (body as { enabled?: unknown }).enabled === "boolean" &&
-          Object.keys(body).every((key) => key === "enabled")
-        );
+      // 列表行的开关就发 {enabled},不必带全量配置 —— 单独放行。
+      if (isEnableOnlyBody(request.body)) {
+        const toggled = await app.api.mcp.setEnabled(id, request.body.enabled);
 
-        if (!isEnabledOnly) {
-          reply.code(400);
-          return {
-            error: "来自 mcp.json 的 server 只能启用/停用；要改配置请编辑 ~/.eva/mcp.json"
-          };
+        if (!toggled) {
+          reply.code(404);
+          return { error: "MCP server not found" };
         }
 
-        return (await app.api.mcp.setEnabled(id, (body as { enabled: boolean }).enabled))!;
+        return toggled;
       }
 
-      // 手动 server：校验交给全局 ZodError handler(400 + firstIssue)。
+      // 完整配置:校验交给全局 ZodError handler(400 + firstIssue)。
       const input = serverInputSchema.parse(request.body ?? {});
       const result = await app.api.mcp.update(id, toFields(input));
 
@@ -137,13 +134,6 @@ export const registerMcpServerRoutes = (app: FastifyInstance): void => {
     if (!existing) {
       reply.code(404);
       return { error: "MCP server not found" };
-    }
-
-    if (existing.origin === "file") {
-      reply.code(400);
-      return {
-        error: "来自 mcp.json 的 server 不能在这里删除；请从 ~/.eva/mcp.json 里移除后重启"
-      };
     }
 
     await app.api.mcp.delete(id);

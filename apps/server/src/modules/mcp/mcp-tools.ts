@@ -1,9 +1,8 @@
 import { buildJsonSchemaTool, type AgentTool } from "@eva/harness";
-import type { McpToolSummary } from "@eva/shared";
+import type { McpServerConfig, McpToolParam, McpToolSummary } from "@eva/shared";
 
-import type { McpServerRow } from "./mcp-server-repository.js";
 import type { McpToolDescriptor } from "./mcp-client.js";
-import type { McpLogger } from "./mcp-config-file.js";
+import type { McpLogger } from "./mcp-config-store.js";
 
 /**
  * 工具名长度上限。OpenAI 的函数名上限是 64 字符，是各家里最紧的一档。
@@ -14,7 +13,7 @@ const MAX_TOOL_NAME_LENGTH = 64;
 /**
  * server 名字的合法形状。
  * 它直接进工具名（`mcp__<name>__<tool>`），大写与空格会让工具名不可预测 ——
- * 所以在入口就拒绝，而不是悄悄改写。文件同步与 REST 共用这一条规则。
+ * 所以在入口就拒绝，而不是悄悄改写。
  */
 export const MCP_SERVER_NAME_PATTERN = /^[a-z0-9_-]+$/;
 
@@ -42,10 +41,58 @@ export interface McpToolInvoker {
  * 其余一律需审批 —— MCP server 是第三方代码，能发 HTTP、能改文件、能花钱。
  */
 const isAutoApproved = (
-  server: McpServerRow,
+  server: McpServerConfig,
   descriptor: McpToolDescriptor,
 ): boolean =>
   descriptor.readOnly || server.autoApproveTools.includes(descriptor.name);
+
+/** JSON Schema 的 type 值 → 展示文本。数组折成 "a | b"，缺失按 "(unknown)"。 */
+const schemaTypeToText = (type: unknown): string => {
+  if (typeof type === "string") {
+    return type;
+  }
+
+  if (Array.isArray(type) && type.every((t): t is string => typeof t === "string")) {
+    return type.join(" | ");
+  }
+
+  return "(unknown)";
+};
+
+/**
+ * inputSchema.properties → 参数摘要（声明序）。
+ * 只做展示用的一层拍平；枚举等更深的 schema 信息不进 UI 契约 —— 真有需要再说。
+ */
+const toParams = (inputSchema: unknown): readonly McpToolParam[] => {
+  if (typeof inputSchema !== "object" || inputSchema === null) {
+    return [];
+  }
+
+  const record = inputSchema as Record<string, unknown>;
+  const properties = record["properties"];
+
+  if (typeof properties !== "object" || properties === null) {
+    return [];
+  }
+
+  const required = new Set(
+    Array.isArray(record["required"])
+      ? record["required"].filter((r): r is string => typeof r === "string")
+      : []
+  );
+
+  return Object.entries(properties as Record<string, unknown>).map(([name, prop]) => {
+    const detail =
+      typeof prop === "object" && prop !== null ? (prop as Record<string, unknown>) : {};
+
+    return {
+      name,
+      type: schemaTypeToText(detail["type"]),
+      required: required.has(name),
+      description: typeof detail["description"] === "string" ? detail["description"] : ""
+    };
+  });
+};
 
 /**
  * MCP 工具 → AgentTool。
@@ -54,7 +101,7 @@ const isAutoApproved = (
  * MCP 工具只是又一批带标记的工具。
  */
 export const toAgentTools = (
-  server: McpServerRow,
+  server: McpServerConfig,
   invoker: McpToolInvoker,
   logger: McpLogger,
 ): readonly AgentTool[] => {
@@ -93,13 +140,14 @@ export const toAgentTools = (
   return tools;
 };
 
-/** 给 UI 看的工具摘要（含免审批标记）。 */
+/** 给 UI 看的工具摘要（含参数表与免审批标记）。 */
 export const toToolSummaries = (
-  server: McpServerRow,
+  server: McpServerConfig,
   invoker: McpToolInvoker,
 ): readonly McpToolSummary[] =>
   invoker.tools.map((descriptor) => ({
     name: descriptor.name,
     description: descriptor.description,
     autoApproved: isAutoApproved(server, descriptor),
+    params: toParams(descriptor.inputSchema),
   }));

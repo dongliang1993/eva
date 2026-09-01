@@ -6,7 +6,7 @@ import {
   DrizzleRunRepository,
   RunRegistry,
 } from "../modules/runs/index.js";
-import { McpRegistry, McpServerRepository } from "../modules/mcp/index.js";
+import { McpConfigStore, McpRegistry } from "../modules/mcp/index.js";
 import type { AppInfrastructure, AppServices } from "../types/common.js";
 import {
   ApprovalGateway,
@@ -21,6 +21,8 @@ import { MemoryAutomationService } from "../modules/memory/index.js";
 
 export const buildAppServices = (infra: AppInfrastructure): AppServices => {
   const workspaces = new WorkspaceStore(new DrizzleWorkspaceRepository(infra.db));
+  // store 只建一次:api(写路径)与 registry(读路径)必须看同一个 ~/.eva/mcp.json。
+  const mcpStore = new McpConfigStore();
 
   return {
     agents: new AgentFactory(infra),
@@ -39,6 +41,7 @@ export const buildAppServices = (infra: AppInfrastructure): AppServices => {
       logger: infra.logger
     }),
     // T46:任务图状态在 workspace 文件里,service 只认 workspaceId —— 无 DB 表。
-    mcp: new McpRegistry(new McpServerRepository(infra.db), infra.logger)
+    mcpStore,
+    mcp: new McpRegistry(mcpStore, infra.logger)
   };
 };

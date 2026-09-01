@@ -6,8 +6,9 @@ import {
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
-import type { McpServerRow } from "./mcp-server-repository.js";
-import type { McpLogger } from "./mcp-config-file.js";
+import type { McpServerConfig } from "@eva/shared";
+
+import type { McpLogger } from "./mcp-config-store.js";
 
 /**
  * 单次工具调用的超时。MCP server 是外部进程/服务，卡住不能拖死 agent loop。
@@ -49,7 +50,7 @@ interface PreparedTransport {
   readStderrTail(): string;
 }
 
-const prepareTransport = (row: McpServerRow): PreparedTransport => {
+const prepareTransport = (row: McpServerConfig): PreparedTransport => {
   if (row.transport === "stdio") {
     if (!row.command) {
       throw new Error("stdio server 缺少 command");
@@ -193,7 +194,7 @@ export class McpServerClient {
    * @throws 连接失败或握手失败时抛出，错误原文交给调用方展示（如 "spawn npx ENOENT"）
    */
   static async connect(
-    row: McpServerRow,
+    row: McpServerConfig,
     logger: McpLogger,
     transport?: Transport,
   ): Promise<McpServerClient> {

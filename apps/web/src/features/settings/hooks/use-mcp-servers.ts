@@ -12,7 +12,7 @@ const MCP_KEY = ["mcp-servers"] as const;
 
 interface UpdateInput {
   readonly id: string;
-  /** file-origin 条目只能传 { enabled }；manual 传完整配置。 */
+  /** 列表行开关只传 { enabled }；编辑表单传完整配置。 */
   readonly body: McpServerInput | { readonly enabled: boolean };
 }
 

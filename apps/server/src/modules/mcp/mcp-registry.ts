@@ -1,12 +1,8 @@
 import type { AgentTool } from "@eva/harness";
-import type { McpServerStatus } from "@eva/shared";
+import type { McpServerConfig, McpServerStatus } from "@eva/shared";
 
-import type {
-  McpServerRepository,
-  McpServerRow
-} from "./mcp-server-repository.js";
 import { McpServerClient } from "./mcp-client.js";
-import type { McpLogger } from "./mcp-config-file.js";
+import type { McpLogger, McpConfigStore } from "./mcp-config-store.js";
 import { toAgentTools, toToolSummaries, type McpToolInvoker } from "./mcp-tools.js";
 
 /** registry 眼里的一条连接：能列工具、能调用、能关。 */
@@ -18,7 +14,10 @@ export interface McpConnection extends McpToolInvoker {
  * 建立连接的方式。默认走真实的 MCP 协议；测试注入假连接。
  * 把它做成参数而不是内部 new —— registry 关心的是"连上了/没连上"，不关心怎么连的。
  */
-export type McpConnect = (row: McpServerRow, logger: McpLogger) => Promise<McpConnection>;
+export type McpConnect = (
+  server: McpServerConfig,
+  logger: McpLogger
+) => Promise<McpConnection>;
 
 const defaultConnect: McpConnect = (row, logger) => McpServerClient.connect(row, logger);
 
@@ -42,7 +41,7 @@ export class McpRegistry {
   private attempted = false;
 
   constructor(
-    private readonly repo: McpServerRepository,
+    private readonly store: McpConfigStore,
     private readonly logger: McpLogger,
     private readonly connect: McpConnect = defaultConnect
   ) { }
@@ -65,11 +64,11 @@ export class McpRegistry {
   listTools(): readonly AgentTool[] {
     const tools: AgentTool[] = [];
 
-    for (const row of this.repo.listAll()) {
-      const connection = this.connections.get(row.id);
+    for (const server of this.store.listAll()) {
+      const connection = this.connections.get(server.id);
 
       if (connection) {
-        tools.push(...toAgentTools(row, connection, this.logger));
+        tools.push(...toAgentTools(server, connection, this.logger));
       }
     }
 
@@ -77,21 +76,20 @@ export class McpRegistry {
   }
 
   /**
-   * 每个 server 的连接状态。
-   * 调用方应先 `ensureConnected()` —— 否则 enabled 但还没连过的 server 只能报
-   * "未连接"，那对用户是个没信息量的答案。
+   * 每个 server 的连接状态。只读不连 —— 启动预热(见 app.ts)或首个 run 负责建连接。
+   * 预热没跑完就调它的话,enabled 但还没连过的 server 报"未连接"。
    */
   describe(): readonly McpServerStatus[] {
-    return this.repo.listAll().map((row) => this.statusOf(row));
+    return this.store.listAll().map((server) => this.statusOf(server));
   }
 
   /** 配置变更后重连单个 server（先关旧连接）。disabled 则只断开。 */
   async reconnect(id: string): Promise<McpServerStatus> {
     await this.disconnect(id);
 
-    const row = this.repo.findById(id);
+    const server = this.store.findById(id);
 
-    if (!row) {
+    if (!server) {
       return {
         id,
         name: id,
@@ -102,14 +100,14 @@ export class McpRegistry {
       };
     }
 
-    if (!row.enabled) {
-      this.statuses.delete(row.id);
-      return this.statusOf(row);
+    if (!server.enabled) {
+      this.statuses.delete(server.id);
+      return this.statusOf(server);
     }
 
-    await this.connectOne(row);
+    await this.connectOne(server);
 
-    return this.statusOf(row);
+    return this.statusOf(server);
   }
 
   /** 关闭并忘掉一个 server 的连接（删除 / 停用时用）。 */
@@ -141,40 +139,40 @@ export class McpRegistry {
   }
 
   private async connectAll(): Promise<void> {
-    const enabled = this.repo.listEnabled();
+    const enabled = this.store.listEnabled();
 
     if (enabled.length === 0) {
       return;
     }
 
     // 并发连接：一个慢 server 不该拖住其它人的首个 run
-    await Promise.allSettled(enabled.map((row) => this.connectOne(row)));
+    await Promise.allSettled(enabled.map((server) => this.connectOne(server)));
   }
 
-  private async connectOne(row: McpServerRow): Promise<void> {
+  private async connectOne(server: McpServerConfig): Promise<void> {
     try {
-      const connection = await this.connect(row, this.logger);
+      const connection = await this.connect(server, this.logger);
 
-      this.connections.set(row.id, connection);
-      this.statuses.set(row.id, {
-        id: row.id,
-        name: row.name,
+      this.connections.set(server.id, connection);
+      this.statuses.set(server.id, {
+        id: server.id,
+        name: server.name,
         state: "connected",
         toolCount: connection.tools.length,
-        tools: toToolSummaries(row, connection),
+        tools: toToolSummaries(server, connection),
         connectedAt: new Date().toISOString()
       });
 
       this.logger.info(
-        { server: row.name, toolCount: connection.tools.length },
+        { server: server.name, toolCount: connection.tools.length },
         "MCP server 已连接"
       );
     } catch (error) {
       const message = toErrorMessage(error);
 
-      this.statuses.set(row.id, {
-        id: row.id,
-        name: row.name,
+      this.statuses.set(server.id, {
+        id: server.id,
+        name: server.name,
         state: "error",
         toolCount: 0,
         tools: [],
@@ -182,19 +180,19 @@ export class McpRegistry {
       });
 
       // 只记不抛：MCP 不可用绝不能让对话失败
-      this.logger.error({ err: error, server: row.name }, "MCP server 连接失败");
+      this.logger.error({ err: error, server: server.name }, "MCP server 连接失败");
     }
   }
 
-  private statusOf(row: McpServerRow): McpServerStatus {
-    if (!row.enabled) {
-      return { id: row.id, name: row.name, state: "disabled", toolCount: 0, tools: [] };
+  private statusOf(server: McpServerConfig): McpServerStatus {
+    if (!server.enabled) {
+      return { id: server.id, name: server.name, state: "disabled", toolCount: 0, tools: [] };
     }
 
     return (
-      this.statuses.get(row.id) ?? {
-        id: row.id,
-        name: row.name,
+      this.statuses.get(server.id) ?? {
+        id: server.id,
+        name: server.name,
         state: "error",
         toolCount: 0,
         tools: [],

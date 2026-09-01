@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { McpServerRow } from "../../../apps/server/src/modules/mcp/index.js";
+import type { McpServerConfig } from "../../../packages/shared/src/index.js";
 import type { McpToolDescriptor } from "../../../apps/server/src/modules/mcp/index.js";
 import {
   mcpToolName,
@@ -11,20 +11,16 @@ import {
 
 const TOOL_CALL_OPTIONS = { messages: [], toolCallId: "c1", context: {} };
 
-const server = (over: Partial<McpServerRow> = {}): McpServerRow => ({
-  id: "s1",
+const server = (over: Partial<McpServerConfig> = {}): McpServerConfig => ({
+  id: "km",
   name: "km",
-  origin: "manual",
   transport: "stdio",
   command: "x",
   args: [],
   env: {},
-  url: null,
   headers: {},
   autoApproveTools: [],
   enabled: true,
-  createdAt: "now",
-  updatedAt: "now",
   ...over,
 });
 
@@ -160,7 +156,7 @@ describe("toAgentTools", () => {
 });
 
 describe("toToolSummaries", () => {
-  it("给 UI 的摘要带 autoApproved 标记", () => {
+  it("给 UI 的摘要带 autoApproved 标记与参数表", () => {
     const summaries = toToolSummaries(
       server({ autoApproveTools: ["b"] }),
       invoker([
@@ -175,17 +171,69 @@ describe("toToolSummaries", () => {
         name: "a",
         description: "Search the knowledge base",
         autoApproved: true,
+        // inputSchema.properties/required 派生成参数表(声明序)
+        params: [
+          { name: "q", type: "string", required: true, description: "" }
+        ],
       },
       {
         name: "b",
         description: "Search the knowledge base",
         autoApproved: true,
+        params: [{ name: "q", type: "string", required: true, description: "" }],
       },
       {
         name: "c",
         description: "Search the knowledge base",
         autoApproved: false,
+        params: [{ name: "q", type: "string", required: true, description: "" }],
       },
     ]);
+  });
+
+  it("params:required 缺席时全部可选;数组 type 折成 a | b;描述透传", () => {
+    const [summary] = toToolSummaries(
+      server(),
+      invoker([
+        descriptor({
+          inputSchema: {
+            type: "object",
+            properties: {
+              pageId: {
+                type: "number",
+                description: "Targets a specific page by ID."
+              },
+              dblClick: { type: "boolean", description: "Set to true for double clicks." },
+              either: { type: ["string", "null"] }
+            }
+          }
+        }),
+      ]),
+    );
+
+    expect(summary.params).toEqual([
+      {
+        name: "pageId",
+        type: "number",
+        required: false,
+        description: "Targets a specific page by ID."
+      },
+      {
+        name: "dblClick",
+        type: "boolean",
+        required: false,
+        description: "Set to true for double clicks."
+      },
+      { name: "either", type: "string | null", required: false, description: "" }
+    ]);
+  });
+
+  it("params:inputSchema 不是对象形状 → 空参数表", () => {
+    const [summary] = toToolSummaries(
+      server(),
+      invoker([descriptor({ inputSchema: undefined })]),
+    );
+
+    expect(summary.params).toEqual([]);
   });
 });
