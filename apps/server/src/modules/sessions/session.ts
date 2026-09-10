@@ -20,7 +20,6 @@ export interface MessagePosition {
 }
 
 /** 会话历史的最大条数 —— 超过这个量必然已经 compact 过。 */
-const HISTORY_LIMIT = 2000;
 
 /** 会话标题取用户首句的前 N 字。 */
 const TITLE_LENGTH = 50;
@@ -89,10 +88,9 @@ export class SessionService {
     sessionId: string,
     leafId?: string
   ): ModelHistory {
-    const all = this.messages.findBySessionId(sessionId, { limit: HISTORY_LIMIT });
     const session = this.sessions.findById(sessionId);
     const activeLeaf = leafId ?? session?.activeLeafId ?? null;
-    const chain = buildActiveChain(all, activeLeaf);
+    const chain = activeLeaf ? this.messages.findAncestors(sessionId, activeLeaf) : [];
 
     if (chain.length === 0) {
       // activeLeaf 指向不存在的 id → 空会话语义(不抛,调用方拿到空列表)。
@@ -106,9 +104,8 @@ export class SessionService {
     }
 
     const coveredIdx = chain.findIndex((m) => m.id === compaction.coveredUntilMessageId);
-    const tail = coveredIdx >= 0
-      ? chain.slice(coveredIdx + 1)
-      : chain.slice(-compaction.preservedTailMessageCount);
+    if (coveredIdx < 0) return { messages: chain.map(m => m.message) };
+    const tail = chain.slice(coveredIdx + 1);
 
     return {
       summary: compaction.summary,
@@ -126,7 +123,9 @@ export class SessionService {
     position: MessagePosition,
     runId?: string
   ): StoredMessage {
-    const stored = this.append(sessionId, message, position, runId);
+    const stored = this.messages.findById(message.id)
+      ? this.messages.updateContent(message)
+      : this.append(sessionId, message, position, runId);
     this.sessions.updateTimestamp(sessionId);
 
     return stored;
@@ -165,8 +164,7 @@ export class SessionService {
     let parent: StoredMessage | undefined;
 
     if (session?.activeLeafId !== null && session?.activeLeafId !== undefined) {
-      const leaf = this.messages.findBySessionId(sessionId, { limit: HISTORY_LIMIT })
-        .find((m) => m.id === session.activeLeafId);
+      const leaf = this.messages.findById(session.activeLeafId);
       if (leaf) parent = leaf;
     }
 

@@ -173,19 +173,6 @@ function groupParts(parts: readonly EvaUIMessagePart[]): readonly PartGroup[] {
 }
 
 function MessageBubbleImpl({ message, isStreaming, isLastAssistant }: MessageBubbleProps) {
-  // S7:runtime 注入的子代理通知。DB 的 role 枚举只有 user/assistant,所以它以 user
-  // 落库 —— 必须先于 user 分支拦掉,否则会渲染成右对齐的用户气泡(像用户自己说的话)。
-  const noticeKind = message.metadata?.noticeKind;
-  if (noticeKind !== undefined) {
-    return (
-      <SubagentNotice
-        kind={noticeKind}
-        description={message.metadata?.noticeDescription}
-        text={uiMessageText(message)}
-      />
-    );
-  }
-
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -304,50 +291,6 @@ function ThinkBlock({ text }: { readonly text: string }) {
  * ("Background subagent <id> (<desc>) served:")剥掉 —— 那是写给模型的方向词,
  * 对人读是噪音。
  */
-function SubagentNotice({
-  kind,
-  description,
-  text
-}: {
-  readonly kind: "subagent_reported" | "subagent_settled";
-  readonly description?: string | undefined;
-  readonly text: string;
-}) {
-  // 剥掉注入前缀("Background subagent <id> (<desc>) reported:" / "finished and ... more."),
-  // 只留子代理真正交付的那段内容。
-  const body = text.replace(
-    /^Background subagent \S+ \(.*?\) (?:reported:|finished and will do no further work unless you send it more\.)\s*\n?\n?/,
-    ""
-  );
-
-  const title =
-    description !== undefined && description.length > 0
-      ? `「${description}」 ${kind === "subagent_reported" ? "已回报" : "已结束"}`
-      : kind === "subagent_reported"
-        ? "子代理已回报"
-        : "子代理已结束";
-
-  return (
-    <DisclosureRow
-      icon={<FileText size={14} className="shrink-0" />}
-      title={title}
-      trailing={
-        kind === "subagent_reported" ? (
-          <CheckCircle2 size={14} className="text-success" />
-        ) : undefined
-      }
-    >
-      <div className="rounded-md border border-border bg-terminal/30 p-3">
-        {body.length > 0 ? (
-          <StreamMarkdown content={body} />
-        ) : (
-          <StreamMarkdown content={text} />
-        )}
-      </div>
-    </DisclosureRow>
-  );
-}
-
 /**
  * 流式的 assistant 文本经 rAF 字符泵平滑输出; 静态文本直接渲染。
  * 拆两个子组件避免在条件里调用 hook(rules-of-hooks)。

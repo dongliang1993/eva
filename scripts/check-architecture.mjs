@@ -168,33 +168,6 @@ const RULES = [
     ]
   },
   {
-    id: "run-ledger-terminal-state",
-    level: "error",
-    since: "§7.2,Wave 1 落地",
-    from: ["apps/server/src"],
-    why:
-      "Run 的终态只有一个出口。RunLedger 具体类同时带着 start/patchRouting 与 settle/fail —— " +
-      "拿到它就等于拿到开第二个终态出口的能力。别处只能用两个窄视图 " +
-      "RunOpeningLedger / RunSettlingLedger(宪法 C6 能力收窄,不是 Port)",
-    // 只认「从 run-ledger 模块 import 了 RunLedger 这个名字」。\b 保证 RunOpeningLedger /
-    // RunSettlingLedger 不被误伤(两者都不含 "RunLedger" 这个完整词)。
-    // 这是 import 名级判定,不是符号级:改类名是刻意行为,应该同步改这条规则。
-    forbidText: [
-      {
-        pattern: /import\s+(?:type\s+)?\{[^}]*\bRunLedger\b[^}]*\}\s*from\s*["'][^"']*run-ledger(?:\.js)?["']/g,
-        label: "import { RunLedger }",
-        multiline: true
-      }
-    ],
-    exempt: [
-      // 组合根:它就是那个 new 出唯一实例、再把两个视图分发下去的地方(C8)。
-      "apps/server/src/services/index.ts",
-      // AppServices 的类型声明。app.services.runLedger 的具体类型在这里定,
-      // 组合根照它注入;它不调用任何方法。
-      "apps/server/src/types/common.ts"
-    ]
-  },
-  {
     id: "routes-no-db",
     level: "error",
     since: "§10.2 第 1 条,Wave 2 收敛(2026-08-30)",

@@ -9,11 +9,11 @@ describe("migration 0021 subagents", () => {
     const sqlite = (db as unknown as { $client: import("better-sqlite3").Database }).$client;
     const cols = sqlite.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
     expect(cols).toContain("parent_tool_call_id");
-    const bt = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='background_tasks'").all();
+    const bt = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='subagent_tasks'").all();
     expect(bt.length).toBe(1);
 
     // 0022:description(卡片标题与通知文本都要它)。
-    const btCols = sqlite.prepare("PRAGMA table_info(background_tasks)").all().map(c => c.name);
+    const btCols = sqlite.prepare("PRAGMA table_info(subagent_tasks)").all().map(c => c.name);
     expect(btCols).toContain("description");
 
     closeDb(db as AppDatabase);

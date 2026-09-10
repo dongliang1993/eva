@@ -1,0 +1,118 @@
+// Temporary diagnostic probes: assertions describe the observed defects, not desired behavior.
+import { afterEach, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
+import { createAgent } from "../packages/harness/src/agents/agent.js";
+import { buildTool } from "../packages/harness/src/tools/build-tool.js";
+import { initDb, migrateDb, closeDb } from "../apps/server/src/db/index.js";
+import { DrizzleRunRepository } from "../apps/server/src/modules/runs/run-repository.js";
+import { DrizzleSessionRepository } from "../apps/server/src/modules/sessions/session-repository.js";
+import { DrizzleMessageRepository } from "../apps/server/src/modules/sessions/message-repository.js";
+import { SessionService } from "../apps/server/src/modules/sessions/session.js";
+import { prepareRunInput } from "../apps/server/src/modules/runs/run-preparation.js";
+import { compactSession } from "../apps/server/src/modules/compact/compact.js";
+import { createUserUIMessage } from "../packages/shared/src/index.js";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createEditTool } from "../packages/harness/src/tools/fs/edit-tool.js";
+
+afterEach(() => vi.restoreAllMocks());
+const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 5, text: 5, reasoning: 0 } };
+const textResponse = (finishReason: "length" | "stop") => ({ stream: simulateReadableStream({ chunks: [
+  { type: "stream-start", warnings: [] }, { type: "text-start", id: "t" },
+  { type: "text-delta", id: "t", delta: "partial" }, { type: "text-end", id: "t" },
+  { type: "finish", finishReason: { unified: finishReason, raw: finishReason }, usage },
+] }) });
+
+it("diagnostic: max-output continuation loses original user task", async () => {
+  const prompts: unknown[] = [];
+  const agent = createAgent({ model: new MockLanguageModelV4({ doStream: async (o) => {
+    prompts.push(o.prompt); return textResponse(prompts.length === 1 ? "length" : "stop");
+  } }), maxSteps: 5 });
+  for await (const _ of agent.stream({ messages: [{ role: "user", content: "ORIGINAL_TASK_8491" }] })) {}
+  expect(prompts).toHaveLength(2);
+  expect(JSON.stringify(prompts[0])).toContain("ORIGINAL_TASK_8491");
+  expect(JSON.stringify(prompts[1])).not.toContain("ORIGINAL_TASK_8491");
+});
+
+it("diagnostic: additionalTools bypass approval pipeline", async () => {
+  const approve = vi.fn(async () => false);
+  const execute = vi.fn(async () => "mutated");
+  let n = 0;
+  const agent = createAgent({ requestApproval: approve, maxSteps: 3, model: new MockLanguageModelV4({ doStream: async () => ++n === 1 ? {
+    stream: simulateReadableStream({ chunks: [
+      { type: "stream-start", warnings: [] },
+      { type: "tool-call", toolCallId: "tc", toolName: "mutate", input: "{}" },
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage },
+    ] }),
+  } : textResponse("stop") }) });
+  const extra = buildTool({ name: "mutate", description: "mutate", inputSchema: z.object({}), needsApproval: true, execute });
+  for await (const _ of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [extra] })) {}
+  expect(execute).toHaveBeenCalledOnce();
+  expect(approve).not.toHaveBeenCalled();
+});
+
+it("diagnostic: simultaneous preparation admits two runs for one session", async () => {
+  const db = initDb({ dbPath: ":memory:" }); migrateDb(db);
+  try {
+    const sessions = new DrizzleSessionRepository(db), messages = new DrizzleMessageRepository(db), runs = new DrizzleRunRepository(db);
+    sessions.create({ id: "s" });
+    const deps = { db, sessions, messages, runs, session: new SessionService(sessions, messages), workspaces: {}, logger: { warn() {} } } as any;
+    const start = async (id: string) => {
+      const input = await prepareRunInput(deps, { sessionId: "s", text: id, modelId: "p:m" }, id);
+      runs.start({ id, sessionId: input.sessionId, userMessageId: input.userMessageId });
+    };
+    await Promise.all([start("a"), start("b")]);
+    expect(runs.findBySessionId("s").filter(r => r.status === "running")).toHaveLength(2);
+  } finally { closeDb(db); }
+});
+
+it("diagnostic: terminal result can be overwritten", () => {
+  const db = initDb({ dbPath: ":memory:" }); migrateDb(db);
+  try {
+    new DrizzleSessionRepository(db).create({ id: "s" });
+    const runs = new DrizzleRunRepository(db);
+    runs.start({ id: "r", sessionId: "s" });
+    runs.settle("r", { status: "completed", finishReason: "stop" });
+    runs.settle("r", { status: "error", error: "late failure" });
+    expect(runs.findById("r")?.status).toBe("error");
+    expect(runs.findById("r")?.finishReason).toBe("stop");
+  } finally { closeDb(db); }
+});
+
+it("diagnostic: compaction includes inactive and subagent messages", async () => {
+  const db = initDb({ dbPath: ":memory:" }); migrateDb(db);
+  try {
+    new DrizzleSessionRepository(db).create({ id: "s" });
+    const messages = new DrizzleMessageRepository(db);
+    for (const id of ["active", "inactive", "child", "tail"]) messages.create({
+      sessionId: "s", message: createUserUIMessage(id, id),
+      ...(id === "child" ? { parentToolCallId: "child-tool" } : {}),
+    });
+    const summarize = vi.fn(async () => "summary");
+    await compactSession(db, { sessionId: "s", keepRecentMessages: 1, summarize });
+    expect(summarize.mock.calls[0][0].map((m: any) => m.id)).toEqual(["active", "inactive", "child"]);
+  } finally { closeDb(db); }
+});
+
+it("diagnostic: two edit calls can pass stat checks then overwrite each other", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "eva-review-"));
+  try {
+    const file = path.join(dir, "f.txt"); await fs.writeFile(file, "A B");
+    const original = fs.writeFile.bind(fs);
+    let count = 0; let release!: () => void;
+    const gate = new Promise<void>(r => { release = r; });
+    vi.spyOn(fs, "writeFile").mockImplementation(async (...args: any[]) => {
+      if (args[0] === file) { if (++count === 2) release(); await gate; }
+      return original(...args as Parameters<typeof fs.writeFile>);
+    });
+    const edit = createEditTool({ workRoot: dir });
+    const results = await Promise.all([
+      edit.tool.execute!({ path: "f.txt", before: "A", after: "X" }, { toolCallId: "a", messages: [] }),
+      edit.tool.execute!({ path: "f.txt", before: "B", after: "Y" }, { toolCallId: "b", messages: [] }),
+    ]);
+    expect(results.every(r => String(r).startsWith("Edited"))).toBe(true);
+    expect(await fs.readFile(file, "utf8")).not.toBe("X Y");
+  } finally { vi.restoreAllMocks(); await fs.rm(dir, { recursive: true, force: true }); }
+});

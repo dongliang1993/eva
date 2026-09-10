@@ -5,7 +5,7 @@ export type MemoryCategory =
   | "decision"
   | "knowledge";
 
-export type MemoryOrigin = "manual" | "tool_saved";
+export type MemoryOrigin = "manual" | "tool_saved" | "auto_extracted";
 
 export interface MemoryEntry {
   readonly id: string;

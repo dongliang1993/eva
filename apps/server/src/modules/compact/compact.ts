@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { isDynamicToolPart, isTextPart, toolPartOutput } from "@eva/shared";
 
 import type { AppDatabase } from "../../db/index.js";
-import { DrizzleMessageRepository } from "../sessions/index.js";
+import { DrizzleMessageRepository, DrizzleSessionRepository } from "../sessions/index.js";
 import { SessionCompactionRepository } from "./session-compaction-repository.js";
 import type { StoredMessage } from "../../db/repositories/types.js";
 import {
@@ -130,6 +130,7 @@ export interface CompactResult {
 export interface CompactOptions {
   readonly sessionId: string;
   readonly keepRecentMessages?: number;
+  readonly leafId?: string;
   readonly trigger?: string;
   /** 缺省用确定性拼接。注入而非内建 —— compact 不认识模型,只认识"给我一段摘要"。 */
   readonly summarize?: SummarizeMessages;
@@ -152,7 +153,8 @@ export const compactSession = async (
   const messageRepo = new DrizzleMessageRepository(db);
   const compactionRepo = new SessionCompactionRepository(db);
 
-  const allMessages = messageRepo.findBySessionId(sessionId, { limit: 2000 });
+  const leafId = options.leafId ?? new DrizzleSessionRepository(db).findById(sessionId)?.activeLeafId;
+  const allMessages = leafId ? messageRepo.findAncestors(sessionId, leafId) : [];
 
   if (allMessages.length <= keepRecentMessages) {
     return {
@@ -169,7 +171,9 @@ export const compactSession = async (
   const coveredUntilMessage = covered[covered.length - 1]!;
 
   // Check for existing compaction — use its summary as base for incremental compact
-  const existing = compactionRepo.findBySessionId(sessionId);
+  const candidate = compactionRepo.findBySessionId(sessionId);
+  const existing = candidate && allMessages.some(m => m.id === candidate.coveredUntilMessageId)
+    ? candidate : undefined;
   const existingSummary = existing?.summary;
 
   // Only summarize messages that are NEW since last compaction

@@ -12,18 +12,12 @@ interface SubagentCardProps {
   readonly toolCall: ToolCallInfo;
 }
 
-/** subagent 工具后台派发时输出里的任务号(如 "Started subagent t_abc (...)")。 */
-const extractTaskId = (output: string): string | undefined => {
-  const match = output.match(/subagent (t_[A-Za-z0-9_]+)/);
-  return match?.[1];
-};
-
 /**
  * subagent 调用的渲染 —— DeepSeek 扁平披露行:任务名(description)为标题,
  * 右侧状态点(running/done/failed),展开看回报与过程。无边框无底色。
  *
  * 数据两源:
- * - 流式中:当轮的 subagent_update / subagent_report 按 parentToolCallId
+ * - 流式中:当轮的 subagent_update 按 parentToolCallId
  *   (== 本卡片的 toolCallId)累积进 store;
  * - 刷新/切换后:任务已落库,展开时经 store.loadForToolCall 走
  *   /subagent-messages 兜底取那棵子树。
@@ -47,9 +41,6 @@ function SubagentCardImpl({ toolCall }: SubagentCardProps) {
   const subagentType =
     state?.subagentType ??
     (toolCall.args.subagent !== undefined ? String(toolCall.args.subagent) : "explorer");
-
-  // 任务号从工具输出里取;前台派发切好(run_in_background=false)直接返回结论,没有任务号。
-  const taskId = toolCall.output ? extractTaskId(toolCall.output) : undefined;
 
   const handleToggleExpand = (): void => {
     // 首次展开(且刷新恢复态)才拉 /subagent-messages;live 在跑的不覆盖。
@@ -75,7 +66,6 @@ function SubagentCardImpl({ toolCall }: SubagentCardProps) {
           {description}
           <span className="ml-1.5 text-xs font-normal text-muted-foreground">
             {subagentType}
-            {taskId !== undefined ? ` · ${taskId}` : ""}
           </span>
         </>
       }
@@ -83,23 +73,7 @@ function SubagentCardImpl({ toolCall }: SubagentCardProps) {
       onToggle={handleToggleExpand}
     >
       <div className="space-y-3">
-        {state !== undefined && state.reports.length > 0 ? (
-          <div>
-            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Reported
-            </h4>
-            <div className="space-y-2">
-              {state.reports.map((report, index) => (
-                <div
-                  key={index}
-                  className="max-h-[300px] overflow-y-auto rounded-md border border-border bg-terminal/30 p-3"
-                >
-                  <StreamMarkdown content={report} />
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : state?.result ? (
+        {state?.result ? (
           <div>
             <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Result

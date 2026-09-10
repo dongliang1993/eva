@@ -1,5 +1,5 @@
 import { asc, desc, eq, sql } from "drizzle-orm";
-import { parseUIMessage, uiMessageSearchText } from "@eva/shared";
+import { parseUIMessage, uiMessageSearchText, type EvaUIMessage } from "@eva/shared";
 
 import type { AppDatabase } from "../../db/index.js";
 import { messages } from "../../db/schema.js";
@@ -26,7 +26,7 @@ const toStored = (row: typeof messages.$inferSelect): StoredMessage => ({
 });
 
 export class DrizzleMessageRepository implements IMessageRepository {
-  constructor(private readonly db: AppDatabase) {}
+  constructor(private readonly db: AppDatabase) { }
 
   create(input: CreateMessageInput): StoredMessage {
     const { message } = input;
@@ -55,6 +55,29 @@ export class DrizzleMessageRepository implements IMessageRepository {
     return toStored(
       this.db.select().from(messages).where(eq(messages.id, message.id)).get()!
     );
+  }
+
+  updateContent(message: EvaUIMessage): StoredMessage {
+    const row = this.db.update(messages).set({
+      message: JSON.stringify(message),
+      searchText: uiMessageSearchText(message)
+    }).where(eq(messages.id, message.id)).returning().get();
+    if (!row) throw new Error(`Message ${message.id} does not exist`);
+    return toStored(row);
+  }
+
+  findAncestors(sessionId: string, leafId: string): readonly StoredMessage[] {
+    const ancestors = sql`WITH RECURSIVE chain(id, parent_id) AS (
+      SELECT id, parent_id FROM messages
+      WHERE id = ${leafId} AND session_id = ${sessionId} AND parent_tool_call_id IS NULL
+      UNION
+      SELECT m.id, m.parent_id FROM messages m JOIN chain c ON m.id = c.parent_id
+      WHERE m.session_id = ${sessionId} AND m.parent_tool_call_id IS NULL
+    ) SELECT id FROM chain`;
+    return this.db.select().from(messages)
+      .where(sql`${messages.id} IN (${ancestors})`)
+      .orderBy(asc(messages.depth), asc(messages.createdAt), sql`rowid`)
+      .all().map(toStored);
   }
 
   findBySessionId(

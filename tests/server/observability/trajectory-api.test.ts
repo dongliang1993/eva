@@ -3,7 +3,7 @@ import Fastify from "../../../apps/server/node_modules/fastify/fastify.js";
 import type { FastifyInstance } from "../../../apps/server/node_modules/fastify";
 
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { backgroundTasks, runs, sessions } from "../../../apps/server/src/db/schema.js";
+import { runs, sessions } from "../../../apps/server/src/db/schema.js";
 import { RunEventRepository } from "../../../apps/server/src/modules/observability/index.js";
 import { registerLoopbackTokenHook } from "../../../apps/server/src/loopback.js";
 import { registerTrajectoryRoutes } from "../../../apps/server/src/modules/observability/index.js";
@@ -35,18 +35,14 @@ describe("trajectory API(T52)", () => {
 
   const seedRun = (
     runId: string,
-    sessionId: string,
-    options: { parentRunId?: string; backgroundTaskId?: string } = {}
+    sessionId: string
   ): void => {
     db.insert(sessions).values({ id: sessionId }).onConflictDoNothing().run();
     db.insert(runs)
       .values({
         id: runId,
         sessionId,
-        ...(options.parentRunId !== undefined ? { parentRunId: options.parentRunId } : {}),
-        ...(options.backgroundTaskId !== undefined
-          ? { backgroundTaskId: options.backgroundTaskId }
-          : {})
+        status: "completed"
       })
       .run();
   };
@@ -130,55 +126,6 @@ describe("trajectory API(T52)", () => {
     expect(new Set(collected.map((e) => e.id)).size).toBe(20);
   });
 
-  it("subRuns 不受 before* 影响;后台子 Run 事件不进 events,单 Run 接口可拉", async () => {
-    seedRun("parent", "s-1");
-    db.insert(backgroundTasks)
-      .values({
-        id: "task-1",
-        sessionId: "s-1",
-        parentToolCallId: "call-1",
-        subagentType: "explorer"
-      })
-      .run();
-    seedRun("child", "s-1", { parentRunId: "parent", backgroundTaskId: "task-1" });
-    seedEvents("parent", "s-1", 5, 1000);
-    seedEvents("child", "s-1", 7, 2000);
-
-    const first = await app.inject({
-      method: "GET",
-      url: "/api/v1/threads/s-1/trajectory?limit=2"
-    });
-    const body1 = first.json() as SessionTrajectoryResponse;
-    expect(body1.events).toHaveLength(2);
-    expect(body1.events.every((e) => e.runId === "parent")).toBe(true);
-    expect(body1.subRuns).toHaveLength(1);
-    expect(body1.subRuns[0]).toMatchObject({
-      runId: "child",
-      parentRunId: "parent",
-      backgroundTaskId: "task-1",
-      subagentType: "explorer",
-      parentToolCallId: "call-1",
-      eventCount: 7
-    });
-
-    // 带 before* 再查:subRuns 内容不变
-    const second = await app.inject({
-      method: "GET",
-      url: `/api/v1/threads/s-1/trajectory?limit=2&beforeOccurredAtMs=${body1.nextCursor?.beforeOccurredAtMs}&beforeRunId=${body1.nextCursor?.beforeRunId}&beforeSeq=${body1.nextCursor?.beforeSeq}`
-    });
-    const body2 = second.json() as SessionTrajectoryResponse;
-    expect(body2.subRuns).toEqual(body1.subRuns);
-
-    // 单 Run 接口拉子 Run 的全部事件
-    const childResponse = await app.inject({
-      method: "GET",
-      url: "/api/v1/runs/child/trajectory?limit=50"
-    });
-    const childBody = childResponse.json() as RunTrajectoryResponse;
-    expect(childBody.events).toHaveLength(7);
-    expect(childBody.events.every((e) => e.runId === "child")).toBe(true);
-  });
-
   it("单 Run 接口:beforeSeq 翻页正确;传 beforeOccurredAtMs 直接 400", async () => {
     seedRun("run-a", "s-1");
     seedEvents("run-a", "s-1", 25, 1000);
@@ -203,10 +150,10 @@ describe("trajectory API(T52)", () => {
   });
 
   it("session-log:行数 = 总事件 + 1,三元组稳定排序,两次导出 byte 相同", async () => {
-    seedRun("parent", "s-1");
-    seedRun("child", "s-1", { parentRunId: "parent" });
-    seedEvents("parent", "s-1", 30, 1000);
-    seedEvents("child", "s-1", 20, 1500); // 子 Run 也包含在导出里
+    seedRun("run-a", "s-1");
+    seedRun("run-b", "s-1");
+    seedEvents("run-a", "s-1", 30, 1000);
+    seedEvents("run-b", "s-1", 20, 1500);
 
     const url = "/api/v1/threads/s-1/session-log";
     const [first, second] = await Promise.all([
@@ -245,8 +192,8 @@ describe("trajectory API(T52)", () => {
     );
     expect(events).toEqual(sorted);
     // 每条都带 run_id + seq;不声称全会话 seq 连续(两条 Run 的 seq 都从 0 起)
-    expect(events.filter((e) => e.run_id === "child")).toHaveLength(20);
-    expect(events.filter((e) => e.run_id === "parent")).toHaveLength(30);
+    expect(events.filter((e) => e.run_id === "run-b")).toHaveLength(20);
+    expect(events.filter((e) => e.run_id === "run-a")).toHaveLength(30);
   });
 
   it("session/run 不存在 → 404", async () => {

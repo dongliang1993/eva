@@ -15,7 +15,7 @@ export const createSearchMemoryTool = (store: MemoryStore): AgentTool =>
       "Use this when the answer may depend on the user's identity, preferences, prior decisions, or durable project context.",
       "Use this when the user asks what you know about them, asks you to recall something from before, or references prior conversations.",
       "Use this before save_memory to check if a related memory already exists.",
-      "Do not imply you recalled long-term memory unless you actually used this tool.",
+      "Use facts from this tool or Relevant Memories already supplied in context; do not invent recollections.",
       "Returns matching memories with their IDs (use ID for updates/deletes)."
     ].join("\n"),
     inputSchema: searchMemorySchema,

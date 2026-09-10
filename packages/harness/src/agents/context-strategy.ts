@@ -20,6 +20,7 @@ export interface ContextStrategyOptions<TOOLS extends ToolSet = ToolSet> {
   /** 运行时固定前缀(context 消息)的条数,compact 不会动它们。 */
   readonly prefixMessageCount: number;
   /** compact 真的发生时回调,用来打 observer 事件。 */
+  readonly onPreparedMessages?: (messages: ModelMessage[]) => void;
   readonly onCompacted: (result: RuntimeCompactResult) => void;
   /**
    * T36: 取上一步真实 usage.inputTokens(getter 每步调一次取最新值,不是构造时快照)。
@@ -67,6 +68,8 @@ export const createPrepareStep = <TOOLS extends ToolSet>(
   if (compaction.changed) {
     options.onCompacted(compaction);
   }
+
+  options.onPreparedMessages?.(compaction.messages);
 
   const instructions: SystemModelMessage[] = [options.systemPrompt];
   const rest: ModelMessage[] = [];

@@ -9,10 +9,6 @@ import { buildApp } from "./app.js";
  * 就会留下孤儿进程（用户会看到 Eva 退出后 npx 还挂着）。
  */
 const installShutdownHooks = (app: FastifyInstance): void => {
-  app.addHook("onClose", async () => {
-    await app.services.mcp.dispose();
-  });
-
   let closing = false;
 
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
@@ -23,13 +19,20 @@ const installShutdownHooks = (app: FastifyInstance): void => {
     closing = true;
     app.log.info({ signal }, "shutting down");
 
+    const deadline = setTimeout(() => {
+      app.log.error("shutdown timed out; terminating process");
+      process.exit(1);
+    }, 10_000);
+    deadline.unref();
     try {
       await app.close();
     } catch (error) {
       app.log.error({ err: error }, "shutdown failed");
+      process.exitCode = 1;
     }
 
-    process.exit(0);
+    clearTimeout(deadline);
+    process.exit(process.exitCode ?? 0);
   };
 
   process.once("SIGTERM", () => shutdown("SIGTERM"));

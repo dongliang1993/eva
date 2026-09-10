@@ -27,22 +27,19 @@ const normalizeLogLevel = (
   }
 };
 
-/** 默认值。models 全为空 —— 主对话模型 per-run 选,tool/embedding 未配即降级。 */
+/** 默认值。models 全为空 —— 主对话模型 per-run 选,tool 未配即降级。 */
 const createDefaultSettings = (): AppSettings => ({
   models: {},
   chat: {
     temperature: 0.1,
-    autoCompact: true,
-    autoCompactTokenThreshold: 80_000,
-    autoCompactMessageThreshold: 30
   },
   memory: {
     enabled: true,
-    autoSummarize: false,
     autoRetrieve: true,
-    queryRewriting: false,
+    autoSummarize: false,
+    autoSummarizeMode: "review",
     maxRetrievedMemories: 5,
-    similarityThreshold: 0.4
+    maxRetrieveTokens: 1200,
   },
   security: {
     logLevel: "info",
@@ -94,7 +91,6 @@ export const loadAppSettings = (
         current.models = {
           ...current.models,
           ...(typeof parsed.tool === "string" ? { tool: parsed.tool } : {}),
-          ...(typeof parsed.embedding === "string" ? { embedding: parsed.embedding } : {})
         };
       } else if (key === "chat") {
         current.chat = { ...current.chat, ...parsed } as AppSettings["chat"];

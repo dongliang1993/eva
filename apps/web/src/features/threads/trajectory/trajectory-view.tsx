@@ -3,7 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Clock3, Download, Search } from "lucide-react";
 
 import { withLoopbackToken } from "../../../shared/api/auth";
-import { useRunTrajectory, useTrajectory, type TrajectoryState } from "./use-trajectory";
+import { useTrajectory, type TrajectoryState } from "./use-trajectory";
 import { buildDisplayList, type DisplayItem, type FoldState } from "./display-list";
 import type { TrajectoryRow } from "./derive-trajectory";
 import { LedgerRow, RunDivider } from "./ledger-row";
@@ -151,19 +151,12 @@ const rowMatches = (row: TrajectoryRow, query: string): boolean =>
 // 会话轨迹(T53 + T54)
 // ---------------------------------------------------------------------------
 
-function SessionTrajectory({
-  sessionId,
-  onOpenSubRun
-}: {
-  readonly sessionId: string;
-  readonly onOpenSubRun: (runId: string) => void;
-}) {
+function SessionTrajectory({ sessionId }: { readonly sessionId: string }) {
   const state = useTrajectory(sessionId, true);
   return (
     <TrajectoryBody
       state={state}
       sessionId={sessionId}
-      onOpenSubRun={onOpenSubRun}
     />
   );
 }
@@ -171,11 +164,9 @@ function SessionTrajectory({
 function TrajectoryBody({
   state,
   sessionId,
-  onOpenSubRun
 }: {
   readonly state: TrajectoryState;
   readonly sessionId?: string;
-  readonly onOpenSubRun?: (runId: string) => void;
 }) {
   const { rows, events, loading, loadingOlder, hasOlder, loadOlder, error } = state;
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -397,7 +388,6 @@ function TrajectoryBody({
           <Inspector
             row={selectedRow}
             snapshotPayload={snapshotPayload}
-            {...(onOpenSubRun !== undefined ? { onOpenSubRun } : {})}
             onClose={() => setSelectedKey(null)}
           />
         )}
@@ -407,50 +397,9 @@ function TrajectoryBody({
 }
 
 // ---------------------------------------------------------------------------
-// 子 Run 轨迹(T54:Subtool 展开。返回时父视图保持挂载,选中行不丢)
-// ---------------------------------------------------------------------------
-
-function RunTrajectory({ runId, onBack }: { readonly runId: string; readonly onBack: () => void }) {
-  const state = useRunTrajectory(runId);
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-1.5 text-xs">
-      <button
-        type="button"
-        onClick={onBack}
-        className="rounded-md border border-border px-2 py-0.5 hover:bg-accent/50"
-      >
-        ← 返回会话轨迹
-      </button>
-        <span className="text-muted-foreground">子 Run {runId.slice(0, 8)}</span>
-      </div>
-      <TrajectoryBody state={state} />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 会话内轨迹页(T53/T54)
+// 会话内轨迹页
 // ---------------------------------------------------------------------------
 
 export function TrajectoryView({ sessionId }: { readonly sessionId: string }) {
-  const [runOverride, setRunOverride] = useState<string | null>(null);
-
-  // 会话切换时退出子 Run 视图。
-  const [lastSessionId, setLastSessionId] = useState(sessionId);
-  if (sessionId !== lastSessionId) {
-    setLastSessionId(sessionId);
-    setRunOverride(null);
-  }
-
-  return (
-    <>
-      <div className={runOverride === null ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <SessionTrajectory sessionId={sessionId} onOpenSubRun={setRunOverride} />
-      </div>
-      {runOverride !== null && (
-        <RunTrajectory runId={runOverride} onBack={() => setRunOverride(null)} />
-      )}
-    </>
-  );
+  return <SessionTrajectory sessionId={sessionId} />;
 }

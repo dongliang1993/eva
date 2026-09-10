@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 
-import type { AgentTool } from "@eva/harness";
 import {
   createUserUIMessage,
   stripReasoningParts,
@@ -8,20 +7,15 @@ import {
 } from "@eva/shared";
 import { convertToModelMessages, type ModelMessage } from "ai";
 
-import { defined, type WorkspaceContext } from "./agent-factory.js";
-import type { AppConfig } from "../../config.js";
+import { type WorkspaceContext } from "./agent-factory.js";
 import type { AppDatabase } from "../../db/index.js";
 import type { DrizzleMessageRepository } from "../sessions/index.js";
 import type { DrizzleRunRepository } from "./run-repository.js";
 import type { DrizzleSessionRepository } from "../sessions/index.js";
 import type { Session } from "../../db/repositories/types.js";
 import type { RunRequest } from "../../types/runs.js";
-import { autoCompactIfNeeded, createAutoCompactConfig, createModelSummarizer } from "../compact/index.js";
-import { buildMemoryRuntimeSupport } from "../memory/index.js";
 import type { ModelBinding } from "../providers/index.js";
 import type { MessagePosition, SessionService } from "../sessions/index.js";
-import { loadAppSettings } from "../settings/index.js";
-import { estimateModelHistoryTokens } from "../../lib/token-estimator.js";
 import { loadProjectDocsSection } from "../workspaces/index.js";
 import {
   resolveWorkspaceForSession,
@@ -33,12 +27,7 @@ interface WarnLogger {
 }
 
 export interface RunPreparationDependencies {
-  readonly config: AppConfig;
-  /**
-   * 仍然需要 —— compact、记忆检索、历史构建这几条都还是「函数吃 db」的形态,
-   * 它们各自的 Repository 归属要等 Wave 4 划模块时才定。
-   * 这里只把**本文件自己**曾经现建的三个 Repository 改成注入(§10.2 第 3 条)。
-   */
+  /** History conversion still consumes the database through SessionService. */
   readonly db: AppDatabase;
   readonly logger: WarnLogger;
   readonly session: SessionService;
@@ -63,8 +52,6 @@ export interface RunInput {
   /** send 从新 user 回溯；retry 从被重试 assistant 的父消息回溯。 */
   readonly historyLeafId: string;
   readonly workspace?: WorkspaceContext | undefined;
-  /** 本次请求新建了会话时非空，供模型不可用时回滚。 */
-  readonly createdSessionId?: string | undefined;
   /**
    * 本轮主对话模型("providerId:modelId")。**非空** —— 两条分支各有唯一来源,
    * 到这里已经定了,下游不需要再兜底:
@@ -78,10 +65,6 @@ export interface RunContext {
   readonly sessionId: string;
   readonly userMessageId: string;
   readonly modelMessages: ModelMessage[];
-  /** 喂给 agent.stream 的 additionalTools —— 记忆工具在这,路由再拼 subagentTools。 */
-  readonly additionalTools: readonly AgentTool[];
-  /** 喂给 agent.stream 的 context —— 目前是 { memory: <渲染好的记忆 prompt> }。 */
-  readonly context?: Record<string, unknown>;
 }
 
 const loadWorkspaceContext = async (
@@ -134,11 +117,11 @@ const assertSessionIdle = (
  * 阶段①:备齐这次 run 的输入材料 —— 建/取会话、落用户消息、定模型、定工作区。
  * 不解析模型(那是 AgentFactory 的活),只把"用哪个模型"这个决定落实成 modelId。
  */
-export const prepareRunInput = async (
+export const prepareRunInput = (
   dependencies: RunPreparationDependencies,
   body: RunRequest,
   runId: string
-): Promise<RunInput> => {
+): RunInput => {
   // send 与 retry 都从这里过;新建会话(无 sessionId)天然不可能有在飞 run。
   if (body.sessionId !== undefined) {
     assertSessionIdle(dependencies.runs, body.sessionId);
@@ -163,7 +146,6 @@ export const prepareRunInput = async (
       throw new Error("该会话没有可用模型记录,重新生成时请指定 modelId");
     }
 
-    const workspace = await loadWorkspaceContext(dependencies, current);
     const parentMessage =
       target.parentId !== null ? dependencies.messages.findById(target.parentId) : undefined;
 
@@ -173,7 +155,6 @@ export const prepareRunInput = async (
       humanText: parentMessage ? uiMessageText(parentMessage.message) : "",
       assistantPosition: dependencies.session.positionAlongside(target),
       historyLeafId: target.parentId!,
-      ...(workspace !== undefined ? { workspace } : {}),
       modelId: retryModelId
     };
   }
@@ -184,7 +165,6 @@ export const prepareRunInput = async (
     : undefined;
   const { session, userMessage: storedUser } =
     continuedSession ?? dependencies.session.createSession(userMessage, runId);
-  const workspace = await loadWorkspaceContext(dependencies, session);
 
   return {
     sessionId: session.id,
@@ -192,14 +172,22 @@ export const prepareRunInput = async (
     humanText: body.text!,
     assistantPosition: dependencies.session.positionAfterActiveLeaf(session.id),
     historyLeafId: storedUser.id,
-    ...(continuedSession === undefined ? { createdSessionId: session.id } : {}),
-    workspace,
     // schema 的 superRefine 已保证 text 模式必带 modelId。
     modelId: body.modelId!
   };
 };
 
-/** 阶段③:拿输入材料 + 已解析模型 → 模型这轮可见的历史、记忆上下文和附加工具。 */
+export const prepareRunWorkspace = async (
+  dependencies: RunPreparationDependencies,
+  input: RunInput,
+): Promise<RunInput> => {
+  const session = dependencies.sessions.findById(input.sessionId);
+  if (!session) throw new Error("Session no longer exists");
+  const workspace = await loadWorkspaceContext(dependencies, session);
+  return { ...input, ...(workspace ? { workspace } : {}) };
+};
+
+/** 阶段③：拿输入材料与已解析模型，构建本轮分支可见的模型历史。 */
 export const prepareRunContext = async (
   dependencies: RunPreparationDependencies,
   input: RunInput,
@@ -207,14 +195,6 @@ export const prepareRunContext = async (
 ): Promise<RunContext> => {
   const { mainModel } = resolved;
   dependencies.sessions.updateModel(input.sessionId, mainModel.qualifiedModelId);
-
-  const settings = loadAppSettings(dependencies.db, dependencies.config);
-  await autoCompactIfNeeded(
-    dependencies.db,
-    input.sessionId,
-    createAutoCompactConfig(settings.chat),
-    { summarize: createModelSummarizer(resolved.toolModel, dependencies.logger) }
-  );
 
   const history = dependencies.session.buildModelHistory(
     dependencies.db,
@@ -231,28 +211,9 @@ export const prepareRunContext = async (
     ? [{ role: "system", content: history.summary }, ...converted]
     : converted;
 
-  const memoryRuntime = await buildMemoryRuntimeSupport({
-    db: dependencies.db,
-    config: dependencies.config,
-    userMessage: input.humanText,
-    historyTokens: estimateModelHistoryTokens(history),
-    modelLimits: {
-      ...defined("contextWindow", mainModel.contextWindow),
-      ...defined("maxOutputTokens", mainModel.maxOutputTokens)
-    }
-  });
-
-  // MemoryRuntimeSupport(服务层词)→ agent.stream 的入参(harness 词):
-  // additionalTools 还要在路由拼 subagentTools;memoryContext 是个裸 string,
-  // harness 要 Record —— 给它起 key = "memory"。
   return {
     sessionId: input.sessionId,
     userMessageId: input.userMessageId,
-    modelMessages,
-    additionalTools: memoryRuntime.additionalTools,
-    ...defined("context",
-      memoryRuntime.memoryContext !== undefined
-        ? { memory: memoryRuntime.memoryContext }
-        : undefined)
+    modelMessages
   };
 };

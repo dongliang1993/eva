@@ -14,6 +14,8 @@ const MAX_TEXT_LENGTH = 100_000;
  */
 export const runRequestSchema = z
   .object({
+    /** Reuse this UUID when retrying the same HTTP request. */
+    requestId: z.string().uuid().optional(),
     /** 新消息。与 retryMessageId 二选一。 */
     text: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
     /** 缺省 = 新建会话,响应的 run_start 帧会带回新 sessionId。 */

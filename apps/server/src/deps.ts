@@ -8,7 +8,7 @@ import { loadConfig, type AppConfig } from "./config.js";
 import {
   initializeDatabase
 } from "./db/index.js";
-import { DrizzleRunRepository } from "./modules/runs/index.js";
+import { DrizzleRunRepository, interruptToolExecutions } from "./modules/runs/index.js";
 import { failStaleTasks } from "./modules/subagents/index.js";
 import { ApprovalRepository } from "./modules/approvals/index.js";
 import {
@@ -17,14 +17,8 @@ import {
   sweepAbandonedOperations,
 } from "./modules/observability/index.js";
 import { loadAppSettings } from "./modules/settings/index.js";
-import { clampContextWindow } from "./modules/providers/index.js";
 import { findMonorepoRoot } from "./infrastructure/monorepo-root.js";
 import { syncMcpConfigFile } from "./modules/mcp/index.js";
-import {
-  migrateLegacySettings,
-  migrateSecurityToAlwaysAllowTools,
-  migrateAlwaysAllowToolsToPolicies
-} from "./modules/settings/index.js";
 import { secretKeyPath, userSkillsDir } from "./paths.js";
 import {
   AesGcmEncryptor,
@@ -38,15 +32,7 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   const config = loadConfig();
   const logger = pino({ level: config.LOG_LEVEL });
   const db = initializeDatabase(config, logger);
-  // T38: observer 订阅超限钳制事件 → 钳小该模型 contextWindow 写 DB(持久化,下次 resolve 生效)。
-  // clamp 只改 capabilities.contextWindow,不动 apiKey,encryptor 用缺省明文即可。
-  const observer = createPinoObserver(logger, (clamp) => {
-    clampContextWindow(db, {
-      providerId: clamp.providerId,
-      modelId: clamp.modelId,
-      observedTokens: clamp.observedTokens
-    });
-  });
+  const observer = createPinoObserver(logger);
   const workspaceRoot = findMonorepoRoot(process.cwd());
 
   // 用户技能在 ~/.eva/skills(打包后唯一可写位置);dev 时额外扫 monorepo 根的
@@ -75,27 +61,18 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
     logger.info("SOUL.md loaded");
   }
 
-  // 一次性把旧 settings 结构迁到模型槽位(存在 models 行即幂等跳过)。
-  migrateLegacySettings(db, logger);
-
-  // T14:旧「始终允许」全局开关 → per-tool 白名单(存在 alwaysAllowTools 即幂等跳过)。
-  migrateSecurityToAlwaysAllowTools(db, logger);
-
-  // T27:per-tool 白名单 → thread 作用域 policy key(存在 allowAlwaysPolicies 即幂等跳过)。
-  migrateAlwaysAllowToolsToPolicies(db, logger);
-
   // ~/.eva/mcp.json → mcp_servers 表（file-origin）。运行时只读表，不读文件。
   // 这里只同步配置，不建连接 —— 连接留给第一个 run 触发（没配 MCP 的用户零开销）。
   syncMcpConfigFile(db, logger);
 
   // 进程重启时把上次没跑完的 run 收成 error —— 否则崩溃留下的 running 行会永远挂着。
+  interruptToolExecutions(db);
   const staleRuns = new DrizzleRunRepository(db).failStale();
   if (staleRuns.length > 0) {
     logger.warn({ staleRuns: staleRuns.length }, "marked in-flight runs as error after restart");
   }
 
-  // 同样的收尾给后台子代理任务:崩溃遗留的 running 任务实为"永远等不到",
-  // 收成 failed 后 join 拿到明确错误,而不是吊到 join 超时。
+  // 收尾崩溃遗留的 awaited 子代理任务，避免 transcript 永久显示 running。
   const staleTasks = failStaleTasks(db);
   if (staleTasks > 0) {
     logger.warn({ staleTasks }, "marked in-flight subagent tasks as failed after restart");

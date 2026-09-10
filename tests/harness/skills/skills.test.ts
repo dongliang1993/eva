@@ -232,12 +232,6 @@ describe("skillsToPromptSection", () => {
 
     expect(section.body).toContain("No skills");
   });
-
-  it("uses the not-selected wording when selection was applied and empty", () => {
-    const section = skillsToPromptSection([], { selectionApplied: true });
-
-    expect(section.body).toContain("No skills were auto-selected");
-  });
 });
 
 describe("createReadSkillTool", () => {

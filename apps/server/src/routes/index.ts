@@ -11,7 +11,6 @@ import {
 import { registerMcpServerRoutes } from "../modules/mcp/index.js";
 import { registerMemoryRoutes } from "../modules/memory/index.js";
 import { registerModelRoutes } from "../modules/providers/index.js";
-import { registerPlanWeaveRoutes } from "../modules/plan-weave/index.js";
 import { registerProviderRoutes } from "../modules/providers/index.js";
 import { registerRunRoutes } from "../modules/runs/index.js";
 import { registerSearchRoutes } from "../modules/search/index.js";
@@ -29,7 +28,6 @@ export const registerRoutes = async (app: FastifyInstance): Promise<void> => {
   registerMcpServerRoutes(app);
   registerMemoryRoutes(app);
   registerModelRoutes(app);
-  registerPlanWeaveRoutes(app);
   registerProviderRoutes(app);
   registerRunRoutes(app);
   registerSearchRoutes(app);

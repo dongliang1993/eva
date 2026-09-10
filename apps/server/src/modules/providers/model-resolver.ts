@@ -41,7 +41,7 @@ const toNonEmpty = (value?: string): string | undefined => {
  * 调用方拿不到 override 时(如会话外的用量查询),要么传会话记录的模型,要么
  * 接受 ok:false 并降级 —— 不许在这里编一个默认模型出来。
  *
- * tool/embedding 槽位仍从 settings 取默认(它们不是 per-run 决策)。
+ * tool 槽位仍从 settings 取默认(它们不是 per-run 决策)。
  */
 export const resolveModelSlot = (
   db: AppDatabase,
@@ -50,12 +50,8 @@ export const resolveModelSlot = (
   override?: string,
   encryptor?: Encryptor
 ): ModelResolution => {
-  const settings = loadAppSettings(db, config);
-  // chat 槽位:override 是唯一来源;没给就是没选模型,不回落全局默认。
-  const configured =
-    slot === "chat"
-      ? toNonEmpty(override)
-      : toNonEmpty(override) ?? settings.models[slot];
+  const configured = toNonEmpty(override)
+    ?? (slot === "tool" ? loadAppSettings(db, config).models.tool : undefined);
 
   if (!configured) {
     return { ok: false, reason: `未配置 ${slot} 模型。` };

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { MemoryRecord, MemoryStats } from "@eva/shared";
+import type { MemoryCandidateRecord, MemoryRecord, MemoryStats } from "@eva/shared";
 
 const memoryCategoryEnum = z.enum([
   "user",
@@ -21,6 +21,30 @@ export const registerMemoryRoutes = (app: FastifyInstance): void => {
   );
 
   app.get("/api/v1/memories/stats", async (): Promise<MemoryStats> => app.api.memory.stats());
+
+  app.get("/api/v1/memories/candidates", async (): Promise<readonly MemoryCandidateRecord[]> =>
+    app.api.memory.listCandidates()
+  );
+
+  app.post("/api/v1/memories/candidates/:id/accept", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const candidate = app.api.memory.acceptCandidate(id);
+    if (!candidate) {
+      reply.code(404);
+      return { error: "Pending memory candidate not found" };
+    }
+    return candidate;
+  });
+
+  app.post("/api/v1/memories/candidates/:id/reject", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const candidate = app.api.memory.rejectCandidate(id);
+    if (!candidate) {
+      reply.code(404);
+      return { error: "Pending memory candidate not found" };
+    }
+    return candidate;
+  });
 
   app.post("/api/v1/memories/search", async (request): Promise<readonly MemoryRecord[]> => {
     const { query } = z.object({ query: z.string() }).parse(request.body ?? {});
@@ -59,6 +83,4 @@ export const registerMemoryRoutes = (app: FastifyInstance): void => {
     return null;
   });
 
-  // 批量补齐 pending 的向量。
-  app.post("/api/v1/memories/reindex", async () => app.api.memory.reindex());
 };

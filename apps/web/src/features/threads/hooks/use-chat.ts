@@ -9,7 +9,6 @@ import type {
   RunPlanReviewRequestEvent,
   RunPlanReviewResolvedEvent,
   RunSubagentUpdateEvent,
-  RunSubagentReportEvent
 } from "@eva/shared";
 import { UiMessageBuilder, createUserUIMessage } from "@eva/shared";
 
@@ -39,7 +38,6 @@ export interface UseChatHandlers {
   /** S7:子代理事件 —— 与主链隔离,由 useSubagents 累积(绝不并进主 builder)。 */
   readonly onSubagent?: (event: RunSubagentUpdateEvent) => void;
   /** S7:子代理主动交付结论 —— 卡片即时显示"已回报"。 */
-  readonly onSubagentReport?: (event: RunSubagentReportEvent) => void;
   /**
    * 这一句被 409 挡了(会话里还有一轮在飞):hook 已经挂到在跑的那个 run 上,
    * 但用户刚打的字不能就这么吞掉 —— 交给页面放回输入框并提示一句。
@@ -170,10 +168,6 @@ export function useChat(handlers: UseChatHandlers = {}): UseChatReturn {
       handlersRef.current.onSubagent?.(event);
     },
 
-    onSubagentReport(event) {
-      handlersRef.current.onSubagentReport?.(event);
-    },
-
     onError(message) {
       setStreaming({
         id: assistantId,
@@ -288,7 +282,7 @@ export function useChat(handlers: UseChatHandlers = {}): UseChatReturn {
 
   const stopStreaming = useCallback(() => {
     if (!isStreamingRef.current || !runIdRef.current) return;
-    abortRun(runIdRef.current).catch(() => {});
+    abortRun(runIdRef.current).catch(() => { });
   }, []);
 
   const newConversation = useCallback(() => {

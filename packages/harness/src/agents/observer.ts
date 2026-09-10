@@ -17,8 +17,6 @@ export type LoopTransitionReason =
   | "proactive_loop_compact"
   | "reactive_compact_retry"
   | "max_output_tokens_recovery"
-  /** S7:后台子代理交付结论 → 注入通知后续跑一圈。 */
-  | "subagent_notice"
   /** T22:步数撞顶终态 —— 异常必须留痕(排查"agent 为什么停了"靠它)。 */
   | "max_steps";
 
@@ -168,13 +166,6 @@ export type AgentTelemetryEvent =
       readonly approved: boolean;
     }
   | {
-      /** T18:repairToolCall 修复成功(失败不发 —— 那会有 error 事件收尾)。 */
-      readonly type: "tool_call_repaired";
-      readonly toolName: string;
-      /** name=工具名修成真实存在的;input=入参按 schema 重出。 */
-      readonly kind: "name" | "input";
-    }
-  | {
       readonly type: "loop_transition";
       readonly step: number;
       readonly reason: LoopTransitionReason;
@@ -190,12 +181,8 @@ export type AgentTelemetryEvent =
       readonly estimatedTokensAfter: number;
     }
   | {
-      /**
-       * T38: 模型真实报 context 超限(reactive compact 路径触发)——server 侧订阅此事件
-       * 把该模型的 contextWindow 永久钳小写 DB(Alma main:90647 clamping 学习)。
-       * observedTokens = 触发时估算/真实的用量,作为「实际能跑多少」的钳制参考。
-       */
-      readonly type: "context_overflow_clamp";
+      /** 模型真实报 context 超限；用于诊断 reactive compact。 */
+      readonly type: "context_overflow";
       readonly providerId: string;
       readonly modelId: string;
       readonly contextWindow: number;

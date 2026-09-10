@@ -163,8 +163,14 @@ describe("工具三段计时(T50)", () => {
       name: "t",
       description: "t",
       inputSchema: z.object({}),
-      execute: async () => {
-        await sleep(500);
+      execute: async (_input, options) => {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(resolve, 500);
+          options?.abortSignal?.addEventListener("abort", () => {
+            clearTimeout(timeout);
+            reject(options.abortSignal?.reason);
+          }, { once: true });
+        });
         return "should never reach";
       }
     });

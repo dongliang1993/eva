@@ -10,16 +10,15 @@ import type { AppConfig } from "../config.js";
 import type { AppDatabase } from "../db/index.js";
 import type {
   AgentFactory,
-  RunLedger,
   RunRegistry,
 } from "../modules/runs/index.js";
 import type { Encryptor } from "../infrastructure/crypto/encryptor.js";
 import type { McpRegistry } from "../modules/mcp/index.js";
 import type { ApprovalGateway } from "../modules/approvals/index.js";
 import type { ApprovalPolicyStore } from "../modules/approvals/index.js";
-import type { PlanWeaveService } from "../modules/plan-weave/index.js";
 import type { SessionService } from "../modules/sessions/index.js";
 import type { WorkspaceStore } from "../modules/workspaces/index.js";
+import type { MemoryAutomationService } from "../modules/memory/index.js";
 import type { AppApi } from "../api/index.js";
 
 export interface AppInfrastructure {
@@ -39,11 +38,11 @@ export interface AppServices {
   session: SessionService;
   approvals: ApprovalGateway;
   approvalPolicies: ApprovalPolicyStore;
-  runLedger: RunLedger;
   runRegistry: RunRegistry;
   workspaces: WorkspaceStore;
-  planWeave: PlanWeaveService;
   mcp: McpRegistry;
+  /** Optional only so focused route fixtures need not construct a background worker. */
+  memoryAutomation?: MemoryAutomationService | undefined;
 }
 
 declare module "fastify" {

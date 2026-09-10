@@ -283,7 +283,7 @@ describe("write guard(T23 mtime 快照校验)", () => {
     }
   });
 
-  it("mtime/size 变了但 before 对新内容仍唯一命中 → 放宽放行,替换基于新内容", async () => {
+  it("外部改写即使不触及 before 也拒绝，不隐式合并", async () => {
     const root = await makeWorkspace();
     await writeFile(path.join(root, "r.txt"), "keep1 old keep2", "utf-8");
 
@@ -307,13 +307,12 @@ describe("write guard(T23 mtime 快照校验)", () => {
         { path: "r.txt", before: "old", after: "NEW" },
         "wg-3",
       );
-      expect(String(res)).toContain("Edited");
+      expect(String(res)).toContain("modified since");
     } finally {
       spy.mockRestore();
     }
 
-    // 外部改动(KEEP2)与本次替换(NEW)同时在场 —— replace 基于重读后的新内容。
-    expect(await readFileAbs(path.join(root, "r.txt"))).toBe("keep1 NEW KEEP2");
+    expect(await readFileAbs(path.join(root, "r.txt"))).toBe("keep1 old KEEP2");
   });
 
   it("write(overwrite)开始后文件被外部改 → 拒;append 豁免照常追加", async () => {

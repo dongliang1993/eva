@@ -25,8 +25,7 @@ export interface SessionRuntimeStatus {
  * 会话状态是**算出来的**,不是存的(docs 14 §5.2 原则 8)。
  * 优先级取首个命中:等人 > 在跑 > 空闲。
  *
- * docs 14 还列了第四态 `waiting`(主 loop 闲但有存活后台任务)。后台任务是 S7
- * 的概念,现在不存在 —— 不为不存在的概念留字段,S7 引入 background_tasks 时再加。
+ * 子代理是同一 Run 内的 awaited tool,不产生独立 `waiting` 状态。
  */
 export const deriveSessionStatus = (facts: SessionStatusFacts): SessionStatus =>
   facts.hasPendingApproval ? "requires_action"

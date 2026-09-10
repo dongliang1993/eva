@@ -514,10 +514,14 @@ describe("工具超时(T25 toolTimeout 配置)", () => {
       name: "hung",
       description: "never resolves",
       inputSchema: z.object({}),
-      // 不检查 abortSignal 的工具:模拟 fs 挂死(NFS/磁盘满)——
-      // toolMs 到点后 SDK 折成的 AbortSignal 没人看,靠 build-tool 的
-      // race 兜底才能收口。
-      execute: () => new Promise<string>(() => {}),
+      // 模拟长时 I/O，但遵守工具契约：取消时停止底层工作后 reject。
+      execute: (_input, options) => new Promise<string>((_resolve, reject) => {
+        options?.abortSignal?.addEventListener(
+          "abort",
+          () => reject(options.abortSignal?.reason),
+          { once: true },
+        );
+      }),
     });
 
   it("toolMs 到点 → 挂死工具以 Error: 收口,循环继续到 finish", async () => {

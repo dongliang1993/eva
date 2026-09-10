@@ -26,7 +26,7 @@ export class RunEventStream {
   private closed = false;
   private heartbeat: NodeJS.Timeout | undefined;
 
-  constructor(private readonly reply: FastifyReply) {}
+  constructor(private readonly reply: FastifyReply) { }
 
   open(): void {
     // 告诉 Fastify「这条响应由我接管」——必须在 writeHead 之前。
@@ -54,13 +54,17 @@ export class RunEventStream {
       return false;
     }
 
-    this.reply.raw.write(chunk);
-    return true;
+    const accepted = this.reply.raw.write(chunk);
+    // A slow observer must not accumulate an unbounded buffer in the agent process.
+    if (!accepted && this.reply.raw.writableLength > 1024 * 1024) {
+      this.reply.raw.destroy();
+      return false;
+    }
+    return accepted;
   }
 
   emit(event: RunStreamEvent): void {
-    // 后台子代理可能在 run 收尾后才产生事件。响应已经关闭时静默丢弃；
-    // 事实仍在 DB 中，不能让迟到事件触发 write-after-end。
+    // 断线/收尾竞态中的迟到事件不能触发 write-after-end。
     if (this.closed || this.reply.raw.writableEnded || this.reply.raw.destroyed) {
       return;
     }
@@ -74,7 +78,11 @@ export class RunEventStream {
     // Node >=18 的 request "close" 在请求体读完时就可能触发；response "close"
     // 才表示 socket 在 response.end() 前关闭。
     this.reply.raw.on("close", () => {
-      if (!this.closed) listener();
+      this.stopHeartbeat();
+      if (!this.closed) {
+        this.closed = true;
+        listener();
+      }
     });
   }
 

@@ -1,7 +1,7 @@
-import { and, count, desc, eq, isNotNull, lt, max, min, sql } from "drizzle-orm";
+import { and, count, desc, eq, lt, max, sql } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/index.js";
-import { backgroundTasks, runEvents, runs, type RunEventSeverity } from "../../db/schema.js";
+import { runEvents, type RunEventSeverity } from "../../db/schema.js";
 
 export interface RunEventRecord {
   readonly id: string;
@@ -46,19 +46,6 @@ export interface SessionEventCursor {
   readonly occurredAtMs: number;
   readonly runId: string;
   readonly seq: number;
-}
-
-/** T52:后台子 Run 的摘要(类型与发起 Tool Call 由 background_tasks 反查,不冗余存储)。 */
-export interface SubRunSummary {
-  readonly runId: string;
-  readonly parentRunId: string;
-  readonly backgroundTaskId: string | null;
-  readonly subagentType: string | null;
-  readonly parentToolCallId: string | null;
-  readonly status: string;
-  readonly eventCount: number;
-  readonly firstOccurredAtMs: number | null;
-  readonly lastOccurredAtMs: number | null;
 }
 
 const toRecord = (row: typeof runEvents.$inferSelect): RunEventRecord => ({
@@ -135,19 +122,12 @@ export class RunEventRepository {
    * 会话事件页:三元组游标 (occurredAtMs, runId, seq) < before,按三元组倒序返回
    * (最新在前)。行值比较走 sql 模板 —— drizzle 没有行值构造器;索引由
    * idx_run_events_session_time 支撑。
-   *
-   * 只含主 Run 事件(契约 9):后台子 Run 的事件不进会话流 —— 锚点必然比子 Run
-   * 事件旧,before* 翻页会产出无处可挂的孤儿(设计文档 §9.1)。EXISTS 是过滤条件,
-   * 不影响 session_time 索引驱动排序。
    */
   listBySession(
     sessionId: string,
     options: { before?: SessionEventCursor; limit?: number } = {}
   ): RunEventRecord[] {
-    const conditions = [
-      eq(runEvents.sessionId, sessionId),
-      sql`EXISTS (SELECT 1 FROM ${runs} WHERE ${runs.id} = ${runEvents.runId} AND ${runs.parentRunId} IS NULL)`
-    ];
+    const conditions = [eq(runEvents.sessionId, sessionId)];
     if (options.before !== undefined) {
       const before = options.before;
       conditions.push(
@@ -177,8 +157,7 @@ export class RunEventRepository {
   }
 
   /**
-   * 会话全部事件(含后台子 Run),按三元组升序 —— session-log 导出用(T52)。
-   * 导出不是分页视图,没有锚点孤儿问题(设计文档 §9.4),所以子 Run 包含在内。
+   * 会话全部事件,按三元组升序 —— session-log 导出用。
    */
   listAllBySession(sessionId: string): RunEventRecord[] {
     return this.db
@@ -190,7 +169,7 @@ export class RunEventRepository {
       .map(toRecord);
   }
 
-  /** T48 retention 用:整 Run 粒度删,绝不删活 Run 里的旧事件(snapshot ref 链会断)。 */
+  /** retention 用:整 Run 粒度删,绝不删活 Run 里的旧事件(snapshot ref 链会断)。 */
   deleteByRun(runId: string): number {
     return this.db.delete(runEvents).where(eq(runEvents.runId, runId)).run().changes;
   }
@@ -205,55 +184,4 @@ export class RunEventRepository {
     );
   }
 
-  /**
-   * T52:会话的全部后台子 Run 摘要(runs + background_tasks + 事件统计)。
-   * 与 ledger 分页无关、不受 before* 游标影响 —— 渲染到哪个 Tool 行就挂哪一行。
-   */
-  summarizeSubRuns(sessionId: string): SubRunSummary[] {
-    const rows = this.db
-      .select({
-        runId: runs.id,
-        parentRunId: runs.parentRunId,
-        backgroundTaskId: runs.backgroundTaskId,
-        status: runs.status,
-        subagentType: backgroundTasks.subagentType,
-        parentToolCallId: backgroundTasks.parentToolCallId
-      })
-      .from(runs)
-      .leftJoin(backgroundTasks, eq(runs.backgroundTaskId, backgroundTasks.id))
-      .where(and(eq(runs.sessionId, sessionId), isNotNull(runs.parentRunId)))
-      .all();
-
-    if (rows.length === 0) {
-      return [];
-    }
-
-    const stats = this.db
-      .select({
-        runId: runEvents.runId,
-        eventCount: count(),
-        firstOccurredAtMs: min(runEvents.occurredAtMs),
-        lastOccurredAtMs: max(runEvents.occurredAtMs)
-      })
-      .from(runEvents)
-      .where(eq(runEvents.sessionId, sessionId))
-      .groupBy(runEvents.runId)
-      .all();
-    const statsByRun = new Map(stats.map((row) => [row.runId, row]));
-
-    return rows.map((row) => {
-      const stat = statsByRun.get(row.runId);
-      return {
-        runId: row.runId,
-        parentRunId: row.parentRunId ?? "",
-        backgroundTaskId: row.backgroundTaskId,
-        subagentType: row.subagentType,
-        parentToolCallId: row.parentToolCallId,
-        status: row.status,
-        eventCount: stat?.eventCount ?? 0,
-        firstOccurredAtMs: stat?.firstOccurredAtMs ?? null,
-        lastOccurredAtMs: stat?.lastOccurredAtMs ?? null
-      };
-    });
-  }
 }

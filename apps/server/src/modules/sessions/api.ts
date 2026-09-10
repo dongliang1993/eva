@@ -11,7 +11,7 @@ import type {
 
 import type { AppConfig } from "../../config.js";
 import type { AppDatabase } from "../../db/index.js";
-import type { BackgroundTaskRepository } from "../subagents/index.js";
+import type { SubagentTaskRepository } from "../subagents/index.js";
 import type { DrizzleRunRepository } from "../runs/index.js";
 import type { Session, StoredMessage } from "../../db/repositories/types.js";
 import { messages } from "../../db/schema.js";
@@ -104,7 +104,7 @@ export const createSessionsApi = (deps: {
   readonly sessions: DrizzleSessionRepository;
   readonly messages: DrizzleMessageRepository;
   readonly runs: DrizzleRunRepository;
-  readonly backgroundTasks: BackgroundTaskRepository;
+  readonly subagentTasks: SubagentTaskRepository;
   readonly approvals: ApprovalGateway;
   readonly session: SessionService;
 }): SessionsApi => {
@@ -205,7 +205,7 @@ export const createSessionsApi = (deps: {
       if (!deps.sessions.findById(id)) return undefined;
 
       // 子代理进程与主链共表,靠 parent_tool_call_id 隔离;按 toolCallId 取那棵子树。
-      const task = deps.backgroundTasks.findByParentToolCallId(toolCallId);
+      const task = deps.subagentTasks.findByParentToolCallId(toolCallId);
       if (!task || task.sessionId !== id) return undefined;
 
       const rows = deps.messages.findBySubagentToolCallId(toolCallId);

@@ -71,7 +71,6 @@ export function ChatPage() {
   } = useChat({
     onApproval: approvals.applyStreamEvent,
     onSubagent: subagents.applyStreamEvent,
-    onSubagentReport: subagents.applyReport,
     onRejected: handleRejected
   });
 
@@ -152,7 +151,7 @@ export function ChatPage() {
       if (sessionId) {
         setThreadWorkspace(sessionId, workspaceId)
           .then(() => queryClient.invalidateQueries({ queryKey: ["threads"] }))
-          .catch(() => {});
+          .catch(() => { });
       } else {
         setPendingWorkspaceId(workspaceId);
       }

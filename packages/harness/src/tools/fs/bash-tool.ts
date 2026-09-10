@@ -1,3 +1,4 @@
+import { withWorkspaceWrite } from "./workspace-write.js";
 import { spawn } from "node:child_process";
 import { z } from "zod";
 
@@ -16,8 +17,8 @@ const bashSchema = z.object({
     .string()
     .describe(
       "Clear, concise description of what this command does in active voice, 5-10 words " +
-        '(shown in the UI as the row title). Examples: "ls" → "List files in current directory"; ' +
-        '"git status" → "Show working tree status"; "npm install" → "Install package dependencies".',
+      '(shown in the UI as the row title). Examples: "ls" → "List files in current directory"; ' +
+      '"git status" → "Show working tree status"; "npm install" → "Install package dependencies".',
     ),
 });
 
@@ -80,7 +81,7 @@ const runBash = (
     };
     /** 组杀 SIGTERM;宽限期后补 SIGKILL(两段式)。 */
     const killTree = () => {
-      if (child.pid === undefined || child.exitCode !== null) return;
+      if (child.pid === undefined) return;
       try {
         process.kill(-child.pid, "SIGTERM");
       } catch {
@@ -133,7 +134,7 @@ const runBash = (
     });
     // 退出码语义:显式 0/非 0 是正常路径(输出原样回给模型);取消/超时由
     // canceled/timedOut 标记决定文案;spawn 失败走 error 事件。
-    child.on("exit", () => {
+    child.on("close", () => {
       settle({ stdout, stderr, canceled, timeout: timedOut });
     });
 
@@ -163,22 +164,24 @@ export const createBashTool = (options: FsToolBaseOptions): AgentTool =>
     inputSchema: bashSchema,
     needsApproval: true,
     async execute({ command }, execOptions?: ToolExecutionOptions) {
-      const { stdout, stderr, canceled, timeout } = await runBash(
-        command,
-        options,
-        execOptions?.abortSignal,
-      );
-      if (canceled) {
-        return TOOL_CALL_ABORTED_OUTPUT;
-      }
-      if (timeout) {
-        return maybeOverflow(
-          `Exit: SIGTERM\n(command exceeded its time limit)\n${[stdout, stderr].filter(Boolean).join("\n")}`,
-          options.overflowDir ?? "",
-          "bash",
+      return withWorkspaceWrite(options.workRoot, async () => {
+        const { stdout, stderr, canceled, timeout } = await runBash(
+          command,
+          options,
+          execOptions?.abortSignal,
         );
-      }
-      const all = [stdout, stderr].filter(Boolean).join("\n");
-      return maybeOverflow(all, options.overflowDir ?? "", "bash");
+        if (canceled) {
+          return TOOL_CALL_ABORTED_OUTPUT;
+        }
+        if (timeout) {
+          return maybeOverflow(
+            `Exit: SIGTERM\n(command exceeded its time limit)\n${[stdout, stderr].filter(Boolean).join("\n")}`,
+            options.overflowDir ?? "",
+            "bash",
+          );
+        }
+        const all = [stdout, stderr].filter(Boolean).join("\n");
+        return maybeOverflow(all, options.overflowDir ?? "", "bash");
+      }, execOptions?.abortSignal);
     },
   });

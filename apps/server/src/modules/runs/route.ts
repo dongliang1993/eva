@@ -15,6 +15,13 @@ const RUN_GONE = { error: "run not found or already finished" } as const;
  * 留在这里的只有 SSE 连接的建立、`RunOutcome` → HTTP 状态码、以及 404 语义。
  */
 export const registerRunRoutes = (app: FastifyInstance): void => {
+  app.get("/api/v1/runs/:runId", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const result = app.api.runs.get(runId);
+    if (!result) { reply.code(404); return { error: "Run not found" }; }
+    return result;
+  });
+
   app.post("/api/v1/runs/stream", async (request, reply) => {
     const outcome = await app.api.runs.start(
       request.body,
@@ -27,7 +34,15 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
       return undefined;
     }
 
-    // rejected = 流还没开就失败了,台账已由 finalizer 收好,只剩状态码要翻译。
+    if (outcome.kind === "duplicate") {
+      reply.code(409);
+      return {
+        error: "Request already accepted", runId: outcome.runId,
+        sessionId: outcome.sessionId, status: outcome.status,
+        ...(outcome.status === "running" ? { activeRunId: outcome.runId } : {})
+      };
+    }
+
     const { error } = outcome;
 
     // 409 带上 activeRunId:前端据此直接挂到在跑的那个 run 上,不用再查一次 status。
@@ -39,7 +54,7 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
 
     reply.code(error instanceof AgentUnavailableError ? 503 : 400);
 
-    return { error: toErrorMessage(error) };
+    return { error: toErrorMessage(error), runId: outcome.runId, sessionId: outcome.sessionId };
   });
 
   /**

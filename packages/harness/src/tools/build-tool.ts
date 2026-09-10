@@ -17,12 +17,7 @@ export interface AgentTool {
 export interface ToolExecutionOptions {
   /** SDK 派发的工具调用 id(卡片/历史 / fork 的 parent 挂点靠它归位)。 */
   readonly toolCallId: string;
-  /**
-   * 取消信号 = run 被取消 ∪ SDK 工具超时(streamText timeout 经 mergeAbortSignals
-   * 折进来)。工具应尽早检查并以业务返回值(而非 throw)收尾 —— race 兜底
-   * 已在包装层统一兜住"挂死不返回",工具自查的意义是把报错写得更具体。
-   * 可选:直接调用 execute(测试/无 SDK 上下文)时无信号。
-   */
+  /** Tools must pass cancellation to their underlying I/O and await its completion. */
   readonly abortSignal?: AbortSignal;
 }
 
@@ -55,20 +50,6 @@ export const toToolErrorOutput = (error: unknown): string =>
 /** 取消/超时统一收口文案(dsh 同款)。 */
 export const TOOL_CALL_ABORTED_OUTPUT = `${TOOL_ERROR_PREFIX} tool call aborted`;
 
-/**
- * T25 race 兜底:signal 触发时立即以错误文本 settle,不等业务 execute。
- * race 是软取消 —— 原 promise 还在跑,只是结果被丢弃(fs 写已发出就会写完,
- * 但 run 不再被挂住)。文案不说"已回滚":写操作可能已部分完成。
- */
-const abortFallback = (signal: AbortSignal): Promise<string> =>
-  new Promise<string>((resolve) => {
-    const onAbort = () => {
-      signal.removeEventListener("abort", onAbort);
-      resolve(TOOL_CALL_ABORTED_OUTPUT);
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-
 export const buildTool = <S extends z.ZodObject<z.ZodRawShape>>(
   definition: ToolDefinition<S>
 ): AgentTool => {
@@ -95,10 +76,11 @@ export const buildTool = <S extends z.ZodObject<z.ZodRawShape>>(
           toolCallId,
           ...(signal !== undefined ? { abortSignal: signal } : {})
         };
-        return await (signal !== undefined
-          ? Promise.race([definition.execute(parsed, toolOptions), abortFallback(signal)])
-          : definition.execute(parsed, toolOptions));
+        return await definition.execute(parsed, toolOptions);
       } catch (error) {
+        if (options?.abortSignal?.aborted) {
+          return TOOL_CALL_ABORTED_OUTPUT;
+        }
         return toToolErrorOutput(error);
       }
     }

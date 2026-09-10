@@ -16,12 +16,10 @@ import { runs } from "../../../apps/server/src/db/schema.js";
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
 import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
-import { AgentUnavailableError, type AgentFactory } from "../../../apps/server/src/modules/runs/index.js";
+import { AgentUnavailableError } from "../../../apps/server/src/modules/runs/index.js";
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
-import { RunLedger } from "../../../apps/server/src/modules/runs/index.js";
 import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
 import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
-import { SubagentRunner } from "../../../apps/server/src/modules/subagents/index.js";
 import { registerRunRoutes } from "../../../apps/server/src/modules/runs/index.js";
 import { loadAppSettings, replaceAppSettings } from "../../../apps/server/src/modules/settings/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
@@ -60,13 +58,14 @@ const buildAgent = (model: MockLanguageModelV4): Agent =>
 interface Harness {
   readonly agent: Agent;
   readonly mainModel: { qualifiedModelId: string };
+  readonly toolModel: { qualifiedModelId: string };
 }
 
 let app: FastifyInstance;
 let db: AppDatabase;
 let harness: Harness;
 
-const startApp = async (agent: Agent): Promise<void> => {
+const startApp = async (agent: Agent, memoryAutomation?: object): Promise<void> => {
   app = Fastify();
   app.decorate("infra", {
     config: loadConfig({ env: {}, cwd: "/tmp" }),
@@ -75,15 +74,20 @@ const startApp = async (agent: Agent): Promise<void> => {
   });
   app.decorate("services", {
     agents: {
-      build: () => ({ agent, mainModel: { qualifiedModelId: "openai:test" } })
+      build: () => ({
+        agent,
+        mainModel: { qualifiedModelId: "openai:test" },
+        toolModel: { qualifiedModelId: "openai:test-tool" }
+      })
     },
     session: new SessionService(
       new DrizzleSessionRepository(db),
       new DrizzleMessageRepository(db)
     ),
     approvals: new ApprovalGateway(new ApprovalRepository(db)),
-    runLedger: new RunLedger(new DrizzleRunRepository(db)),
+
     runRegistry: new RunRegistry(),
+    ...(memoryAutomation ? { memoryAutomation } : {}),
     // 本用例不测 MCP:给个空 registry 桩,证明"没配 MCP 时 run 照常跑"
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });
@@ -104,7 +108,11 @@ beforeEach(async () => {
     security: { ...settings.security, autoApproveToolRequests: true }
   });
 
-  harness = { agent: buildAgent(textModel("hello world")), mainModel: { qualifiedModelId: "openai:test" } };
+  harness = {
+    agent: buildAgent(textModel("hello world")),
+    mainModel: { qualifiedModelId: "openai:test" },
+    toolModel: { qualifiedModelId: "openai:test-tool" }
+  };
   await startApp(harness.agent);
 });
 
@@ -161,7 +169,7 @@ const startAppWithUnavailableAgent = async (): Promise<void> => {
       new DrizzleMessageRepository(db)
     ),
     approvals: new ApprovalGateway(new ApprovalRepository(db)),
-    runLedger: new RunLedger(new DrizzleRunRepository(db)),
+
     runRegistry: new RunRegistry(),
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });
@@ -171,6 +179,39 @@ const startAppWithUnavailableAgent = async (): Promise<void> => {
 };
 
 describe("run 台账", () => {
+  it("normal completion atomically enqueues post-run memory extraction", async () => {
+    await app.close();
+    const enqueued: unknown[] = [];
+    let wakes = 0;
+    await startApp(harness.agent, {
+      settingsSnapshot: () => ({
+        enabled: true,
+        autoRetrieve: true,
+        autoSummarize: true,
+        autoSummarizeMode: "review",
+        maxRetrievedMemories: 5,
+        maxRetrieveTokens: 1200
+      }),
+      retrieve: () => undefined,
+      commitRetrieval: () => undefined,
+      enqueue: (input: unknown) => {
+        enqueued.push(input);
+        return true;
+      },
+      wake: () => { wakes++; }
+    });
+
+    const result = await streamRun({ text: "remember my preference", modelId: "openai:test" });
+
+    expect(result.status).toBe(200);
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]).toMatchObject({
+      modelId: "openai:test-tool",
+      mode: "review"
+    });
+    expect(wakes).toBe(1);
+  });
+
   it("正常完成 → runs 一行 completed,带 assistant_message_id 与路由双字段", async () => {
     const { events } = await streamRun({ text: "hi", modelId: "openai:test" });
 
@@ -214,7 +255,7 @@ describe("run 台账", () => {
     expect(run!.model).toBeNull();
   });
 
-  it("T48 回滚:模型不可用且会话是本次请求新建的 → 503 且不留下空会话", async () => {
+  it("模型不可用时保留新会话、输入和失败 run", async () => {
     await startAppWithUnavailableAgent();
 
     const sessionRepo = new DrizzleSessionRepository(db);
@@ -224,14 +265,15 @@ describe("run 台账", () => {
     const { status } = await streamRun({ text: "hi", modelId: "openai:missing" });
     expect(status).toBe(503);
 
-    // 产品决策(routes/runs.ts 的 AgentUnavailableError 分支):回滚只删本次新建的会话 ——
-    // 否则没配好 API key 的新装用户每点一次发送就攒一条空会话。
-    // 这条断言存在的意义:Wave 1 把收尾逻辑搬进 RunFinalizer 时,这个回滚极易被漏掉。
-    expect(sessionRepo.listAll(50)).toHaveLength(0);
-
-    // runs.session_id 是 ON DELETE CASCADE —— 会话没了,那条 routing 失败的台账行随之消失。
-    // 刻意如此:会话都不存在了,留一条指向它的 run 行只会让台账里出现悬空引用。
-    expect(db.select().from(runs).all()).toHaveLength(0);
+    const sessions = sessionRepo.listAll(50);
+    expect(sessions).toHaveLength(1);
+    const failedRuns = runsRepo().findBySessionId(sessions[0]!.id);
+    expect(failedRuns).toHaveLength(1);
+    expect(failedRuns[0]).toMatchObject({
+      status: "error",
+      requestedModel: "openai:missing",
+      failureLayer: "routing",
+    });
   });
 
   it("模型报错 → status error,error 字段非空", async () => {
@@ -292,93 +334,6 @@ describe("run 台账", () => {
     expect(runStatusFor("aborted")).toBe("aborted");
     expect(runStatusFor("error")).toBe("error");
     expect(runStatusFor("max-steps")).toBe("completed");
-  });
-});
-
-describe("后台子代理 Run(T48)", () => {
-  it("独立 runs 行:父子字段正确,父 Run completed 之后子 Run 独立 settle", async () => {
-    new DrizzleSessionRepository(db).create({ id: "s-sub" });
-    const repo = runsRepo();
-    repo.start({ id: "parent-run", sessionId: "s-sub", model: "openai:test", userMessageId: "m1" });
-
-    // gate 挡住子代理的流式响应 —— 保证父 Run 先 settle,子代理还活着。
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const gatedAgent = createAgent({
-      model: new MockLanguageModelV4({
-        doStream: async () => {
-          await gate;
-          return {
-            stream: simulateReadableStream({
-              chunks: [
-                { type: "stream-start", warnings: [] },
-                { type: "text-start", id: "1" },
-                { type: "text-delta", id: "1", delta: "done" },
-                { type: "text-end", id: "1" },
-                { type: "finish", finishReason: "stop", usage }
-              ]
-            })
-          };
-        }
-      }),
-      tools: [],
-      maxSteps: 3
-    });
-
-    const runner = new SubagentRunner(
-      { buildSubagent: () => gatedAgent } as unknown as AgentFactory,
-      {
-        sessionId: "s-sub",
-        db,
-        runId: "parent-run",
-        model: "openai:test",
-        captureLevel: "redacted"
-      }
-    );
-
-    const forked = await runner.runFork({
-      background: true,
-      prompt: "explore the repo",
-      subagentType: "explorer",
-      description: "找一下入口文件",
-      taskId: "task-1",
-      parentToolCallId: "call-1"
-    });
-    expect(forked).toEqual({ taskId: "task-1" });
-
-    // 子 Run 行随 fork 建出,仍在飞;父子字段对得上。
-    const child = repo.findBySessionId("s-sub").find((row) => row.parentRunId === "parent-run");
-    expect(child).toBeDefined();
-    expect(child!.backgroundTaskId).toBe("task-1");
-    expect(child!.status).toBe("running");
-    expect(child!.model).toBe("openai:test");
-    expect(child!.captureLevel).toBe("redacted");
-
-    // background_task_id → 任务行能反查 subagent_type 与 parent_tool_call_id。
-    const task = rawClient(db)
-      .prepare("SELECT subagent_type, parent_tool_call_id FROM background_tasks WHERE id = ?")
-      .get("task-1") as { subagent_type: string; parent_tool_call_id: string };
-    expect(task.subagent_type).toBe("explorer");
-    expect(task.parent_tool_call_id).toBe("call-1");
-
-    // 父 Run 先 completed,子代理仍在跑(gate 未放)。
-    repo.settle("parent-run", { status: "completed" });
-    release();
-
-    const waitFor = async (cond: () => boolean): Promise<void> => {
-      const deadline = Date.now() + 3000;
-      while (!cond()) {
-        if (Date.now() > deadline) throw new Error("waitFor timeout");
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-    };
-    await waitFor(() => repo.findById(child!.id)!.status !== "running");
-
-    // 子 Run 独立 settle;父 Run 的终态不被改写。
-    expect(repo.findById(child!.id)!.status).toBe("completed");
-    expect(repo.findById("parent-run")!.status).toBe("completed");
   });
 });
 

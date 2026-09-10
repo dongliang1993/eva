@@ -1,5 +1,4 @@
 import type { FinishReason as ModelFinishReason, ModelMessage } from "ai";
-import type { RunInjectedNotice } from "@eva/shared";
 
 import type { ContextWindowPolicy } from "../context/policy.js";
 import {
@@ -12,8 +11,6 @@ import {
   shouldContinueForMaxOutput,
 } from "./context-strategy.js";
 
-export const NOTICE_GRACE_MS = 20_000;
-export const MAX_NOTICE_ROUNDS = 4;
 
 export interface ReactiveRecoveryPlan {
   readonly errorMessage: string;
@@ -21,7 +18,7 @@ export interface ReactiveRecoveryPlan {
   readonly compaction?: RuntimeCompactResult;
 }
 
-/** Reactive compact 最多成功一次；是否钳制模型登记值由 run loop 根据本计划观测。 */
+/** Reactive compact 最多成功一次；候选错误同时作为诊断事件记录。 */
 export const planReactiveRecovery = (input: {
   readonly error: unknown;
   readonly messages: readonly ModelMessage[];
@@ -70,29 +67,4 @@ export const buildMaxOutputRecovery = (input: {
   ],
   continuedText: input.continuedText + input.text,
   recoveries: input.recoveries + 1,
-});
-
-export const canDrainNotices = (input: {
-  readonly stepsUsed: number;
-  readonly maxSteps: number;
-  readonly noticeRounds: number;
-  readonly hasDrainNotices: boolean;
-}): boolean =>
-  input.stepsUsed < input.maxSteps &&
-  input.hasDrainNotices &&
-  input.noticeRounds < MAX_NOTICE_ROUNDS;
-
-export const buildNoticeRecovery = (input: {
-  readonly responseMessages: readonly ModelMessage[];
-  readonly notices: readonly RunInjectedNotice[];
-  readonly noticeRounds: number;
-}): { readonly messages: ModelMessage[]; readonly noticeRounds: number } => ({
-  messages: [
-    ...input.responseMessages,
-    {
-      role: "user",
-      content: input.notices.map((notice) => notice.text).join("\n\n"),
-    },
-  ],
-  noticeRounds: input.noticeRounds + 1,
 });

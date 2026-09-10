@@ -54,11 +54,12 @@ describe("readSessionUsage", () => {
     insertRun.run("run-3", "s-u", "running", null, iso(1000), null);
 
     // 造一条消息让 contextTokens 非零。
-    new DrizzleMessageRepository(db).create({
+    const stored = new DrizzleMessageRepository(db).create({
       sessionId: "s-u",
       message: createUserUIMessage(randomUUID(), "一条消息")
     });
 
+    sessionRepo.updateActiveLeaf("s-u", stored.id);
     const sessionService = new SessionService(sessionRepo, new DrizzleMessageRepository(db));
     const result = readSessionUsage(db, config, sessionService, "s-u");
 

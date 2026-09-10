@@ -1,8 +1,9 @@
 import type { AppInfrastructure, AppServices } from "../types/common.js";
-import { BackgroundTaskRepository } from "../modules/subagents/index.js";
+import { SubagentTaskRepository } from "../modules/subagents/index.js";
 import {
   createMemoryApi,
   DrizzleMemoryRepository,
+  MemoryExtractionRepository,
   type MemoryApi,
 } from "../modules/memory/index.js";
 import { DrizzleMessageRepository } from "../modules/sessions/index.js";
@@ -33,7 +34,6 @@ import {
   type UsageApi,
 } from "../modules/usage/index.js";
 import { createApprovalsApi, type ApprovalsApi } from "../modules/approvals/index.js";
-import { createPlansApi, type PlansApi } from "../modules/plan-weave/index.js";
 import { createProvidersApi, type ProvidersApi } from "../modules/providers/index.js";
 import { createSessionsApi, type SessionsApi } from "../modules/sessions/index.js";
 import { createSettingsApi, type SettingsApi } from "../modules/settings/index.js";
@@ -54,7 +54,6 @@ export interface AppApi {
   readonly mcp: McpApi;
   readonly memory: MemoryApi;
   readonly observability: ObservabilityApi;
-  readonly plans: PlansApi;
   readonly providers: ProvidersApi;
   readonly runs: RunsApi;
   readonly search: SearchApi;
@@ -82,14 +81,13 @@ export const buildAppApi = (infra: AppInfrastructure, services: AppServices): Ap
   }),
   memory: createMemoryApi({
     db: infra.db,
-    config: infra.config,
-    memories: new DrizzleMemoryRepository(infra.db)
+    memories: new DrizzleMemoryRepository(infra.db),
+    extraction: new MemoryExtractionRepository(infra.db)
   }),
   observability: createObservabilityApi({
     runEvents: new RunEventRepository(infra.db),
     runs: new DrizzleRunRepository(infra.db)
   }),
-  plans: createPlansApi({ planWeave: services.planWeave }),
   providers: createProvidersApi({
     db: infra.db,
     encryptor: infra.encryptor,
@@ -98,7 +96,8 @@ export const buildAppApi = (infra: AppInfrastructure, services: AppServices): Ap
   settings: createSettingsApi({
     db: infra.db,
     config: infra.config,
-    agents: services.agents
+    agents: services.agents,
+    memoryAutomation: services.memoryAutomation
   }),
   runs: createRunsApi(infra, services),
   search: createSearchApi({
@@ -112,7 +111,7 @@ export const buildAppApi = (infra: AppInfrastructure, services: AppServices): Ap
     sessions: new DrizzleSessionRepository(infra.db),
     messages: new DrizzleMessageRepository(infra.db),
     runs: new DrizzleRunRepository(infra.db),
-    backgroundTasks: new BackgroundTaskRepository(infra.db),
+    subagentTasks: new SubagentTaskRepository(infra.db),
     approvals: services.approvals,
     session: services.session
   }),

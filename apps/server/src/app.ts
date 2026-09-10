@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 
 import { buildAppApi } from "./api/index.js";
+import { closeDb } from "./db/index.js";
 import { buildInfrastructure } from "./deps.js";
 import { registerLoopbackTokenHook } from "./loopback.js";
 import { registerRoutes } from "./routes/index.js";
@@ -53,7 +54,18 @@ export const buildApp = async () => {
   const services = buildAppServices(infra);
   app.decorate("services", services);
   app.decorate("api", buildAppApi(infra, services));
+  app.addHook("preClose", async () => {
+    await Promise.all([services.runRegistry.close(), services.memoryAutomation?.close()]);
+  });
+  app.addHook("onClose", async () => {
+    try {
+      await services.mcp.dispose();
+    } finally {
+      closeDb(infra.db);
+    }
+  });
   await registerRoutes(app);
+  services.memoryAutomation?.start();
 
   return app;
 };

@@ -1,4 +1,4 @@
-import type { RunEventDto, SubRunSummaryDto } from "@eva/shared";
+import type { RunEventDto } from "@eva/shared";
 
 /**
  * deriveTrajectory —— 纯投影(T53):吃 run_events 数组,输出展示行。
@@ -11,8 +11,6 @@ import type { RunEventDto, SubRunSummaryDto } from "@eva/shared";
  * - tool_call_started + completed/abandoned → 一行 Tool;
  * - approval_asked/decided → Tool 行内的等待阶段,不单独占行;
  * - request_snapshot → System(也是 Request 边界);ref 不出行(检查器顺 ref 取正文);
- * - 后台子 Run 经 background_task_id → parent_tool_call_id 嵌到发起它的 Tool 行下;
- *   锚点还没翻到的子 Run 先不显示,不报错、不占位(设计文档 §9.1)。
  * - 未知 kind(未来版本)→ raw 行,投影不崩。
  */
 export type TrajectoryRowKind =
@@ -21,7 +19,6 @@ export type TrajectoryRowKind =
   | "context"
   | "assistant"
   | "tool"
-  | "subtool"
   | "compacted"
   | "error"
   | "raw";
@@ -40,9 +37,9 @@ export interface TrajectoryRow {
   readonly key: string;
   readonly kind: TrajectoryRowKind;
   readonly runId: string;
-  /** 组成该行的首个事件在 Run 内的 seq(快照 ref 解析与检查器取上下文用;subtool 子行恒为 -1)。 */
+  /** 组成该行的首个事件在 Run 内的 seq(快照 ref 解析与检查器取上下文用)。 */
   readonly seq: number;
-  /** "main" | taskId(前台子代理)。 */
+  /** "main" | taskId（awaited 子代理）。 */
   readonly agent: string;
   readonly turnIndex: number | null;
   readonly stepIndex: number | null;
@@ -54,8 +51,6 @@ export interface TrajectoryRow {
   /** 主要 payload(system prompt / tool args / 错误详情 …),检查器用。 */
   readonly payload?: unknown;
   readonly timing?: TrajectoryTiming;
-  /** 嵌套的后台子 Run(subtool)。 */
-  readonly children?: readonly TrajectoryRow[];
 }
 
 interface Payload {
@@ -309,29 +304,6 @@ const projectRun = (runId: string, events: readonly RunEventDto[]): RowDraft[] =
         }
         break;
       }
-      case "tool_call_repaired": {
-        // 标记到最近一行同名 Tool;找不到就降级 raw。
-        const toolName = str(payload["toolName"]);
-        const tool = [...toolRowByCallId.values()].reverse().find((row) => row.title === toolName);
-        if (tool) {
-          tool.payload = { ...asPayload(tool.payload), repaired: payload["repairKind"] };
-        } else {
-          rows.push({
-            key: `${runId}:repaired:${event.seq}`,
-            kind: "raw",
-            runId,
-            seq: event.seq,
-            agent: event.agent,
-            turnIndex: currentTurn,
-            stepIndex: currentStep,
-            title: `修复工具调用 ${toolName ?? "?"}`,
-            startedAtMs: event.occurredAtMs,
-            durationMs: null,
-            payload: event.payload
-          });
-        }
-        break;
-      }
       case "context_compacted":
       case "context_overflow": {
         const before = num(payload["estimatedTokensBefore"]);
@@ -425,7 +397,7 @@ const projectRun = (runId: string, events: readonly RunEventDto[]): RowDraft[] =
             payload: event.payload
           });
         }
-        // 其余 transition(reactive_compact/subagent_notice/max_output)由
+        // 其余 transition(reactive_compact/max_output)由
         // compacted 行与 Assistant 行表达,不单独占行。
         break;
       }
@@ -456,8 +428,7 @@ const projectRun = (runId: string, events: readonly RunEventDto[]): RowDraft[] =
 
 /** 主投影入口。events 任意顺序;输出按首事件三元组 (occurredAtMs, runId, seq) 升序。 */
 export const deriveTrajectory = (
-  events: readonly RunEventDto[],
-  subRuns: readonly SubRunSummaryDto[] = []
+  events: readonly RunEventDto[]
 ): TrajectoryRow[] => {
   const byRun = new Map<string, RunEventDto[]>();
   for (const event of events) {
@@ -487,50 +458,5 @@ export const deriveTrajectory = (
         || a.first.seq - b.first.seq
     );
 
-  const rows = runs.flatMap((run) => run.rows);
-  const toolRowByCallId = new Map<string, RowDraft>(
-    rows
-      .filter((row) => row.kind === "tool" && row.toolCallId !== undefined)
-      .map((row) => [row.toolCallId!, row])
-  );
-
-  // 后台子 Run 嵌套:锚点(parent_tool_call_id 的 Tool 行)在才挂,不在就先不显示。
-  for (const subRun of subRuns) {
-    if (subRun.parentToolCallId === null) continue;
-    const anchor = toolRowByCallId.get(subRun.parentToolCallId);
-    if (anchor === undefined) continue;
-
-    const child: TrajectoryRow = {
-      key: `${anchor.key}:subtool:${subRun.runId}`,
-      kind: "subtool",
-      runId: subRun.runId,
-      seq: -1,
-      agent: subRun.backgroundTaskId ?? "subagent",
-      turnIndex: null,
-      stepIndex: null,
-      title: `子代理 ${subRun.subagentType ?? "?"}`,
-      status:
-        subRun.status === "completed"
-          ? "success"
-          : subRun.status === "aborted"
-            ? "aborted"
-            : subRun.status === "error"
-              ? "error"
-              : undefined,
-      startedAtMs: subRun.firstOccurredAtMs,
-      durationMs:
-        subRun.firstOccurredAtMs !== null && subRun.lastOccurredAtMs !== null
-          ? subRun.lastOccurredAtMs - subRun.firstOccurredAtMs
-          : null,
-      payload: {
-        subagentType: subRun.subagentType,
-        backgroundTaskId: subRun.backgroundTaskId,
-        eventCount: subRun.eventCount,
-        status: subRun.status
-      }
-    };
-    anchor.children = [...(anchor.children ?? []), child];
-  }
-
-  return rows;
+  return runs.flatMap((run) => run.rows);
 };

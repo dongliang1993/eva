@@ -18,6 +18,7 @@ export const createSettingsApi = (deps: {
   readonly db: AppDatabase;
   readonly config: AppConfig;
   readonly agents: AgentCacheInvalidator;
+  readonly memoryAutomation?: { settingsChanged(): void } | undefined;
 }): SettingsApi => ({
   read: () => loadAppSettings(deps.db, deps.config),
   replace: (next) => {
@@ -25,6 +26,7 @@ export const createSettingsApi = (deps: {
     // 缓存失效属于「改设置」这个用例的一部分,不是调用方的礼节 ——
     // 放在 route 里,下一个写设置的入口就会忘。
     deps.agents.invalidate();
+    deps.memoryAutomation?.settingsChanged();
     return updated;
   }
 });

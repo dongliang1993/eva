@@ -22,7 +22,7 @@ const optWith = (abortSignal?: AbortSignal): ToolExecutionOptions => ({
   ...(abortSignal !== undefined ? { abortSignal } : {}),
 });
 
-describe("buildTool abortSignal 透传 + race 兜底(T25)", () => {
+describe("buildTool cooperative cancellation", () => {
   it("挂死工具 + 已 abort 的 signal → 立即返回 Error:,不再悬着", async () => {
     const hung = buildTool({
       name: "hung",
@@ -39,7 +39,7 @@ describe("buildTool abortSignal 透传 + race 兜底(T25)", () => {
     expect(String(res)).toContain("Error:");
   });
 
-  it("execute 开始后才 abort → race 在 abort 时点返回错误文本", async () => {
+  it("取消必须等待执行真正结束", async () => {
     const gate = deferred<string>();
     const tool = buildTool({
       name: "gated",
@@ -52,10 +52,13 @@ describe("buildTool abortSignal 透传 + race 兜底(T25)", () => {
       { a: 1 },
       optWith(controller.signal) as never,
     );
-    setTimeout(() => controller.abort(), 10);
-    const res = await pending;
-    expect(String(res)).toContain("Error:");
-    expect(String(res)).toMatch(/abort|cancel|timed?/i);
+    let settled = false;
+    void Promise.resolve(pending).then(() => { settled = true; });
+    controller.abort();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    gate.resolve("execution completed");
+    expect(await pending).toBe("execution completed");
   });
 
   it("正常完成先于 abort → 业务返回值原样透传", async () => {

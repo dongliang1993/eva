@@ -23,9 +23,7 @@ export interface EvaMessageMetadata {
    * DB 的 role 枚举只有 user/assistant,所以通知只能以 user 落库 —— UI 必须靠
    * 这个标记把它渲染成通知条,否则会显示成右对齐的用户气泡(像用户自己说的)。
    */
-  readonly noticeKind?: "subagent_reported" | "subagent_settled";
   /** 通知对应的子代理任务名(渲染通知条时显示)。 */
-  readonly noticeDescription?: string;
 }
 
 /**

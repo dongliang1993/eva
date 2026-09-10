@@ -11,6 +11,7 @@ export type {
   McpServersPayload,
   McpToolSummary,
   MemoryCategory,
+  MemoryCandidateRecord,
   MemoryOrigin,
   MemoryRecord,
   MemoryStats,

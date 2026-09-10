@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetch } from "../../../shared/api/fetch";
-import type { MemoryCategory, MemoryRecord, MemoryStats } from "../../../types/api";
+import type {
+  MemoryCandidateRecord,
+  MemoryCategory,
+  MemoryRecord,
+  MemoryStats
+} from "../../../types/api";
 
 interface UpdateMemoryInput {
   readonly id: string;
@@ -100,4 +105,34 @@ export function useMemoryStats() {
   });
 }
 
-export type { MemoryCategory, MemoryRecord };
+export function useMemoryCandidates() {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: [...MEMORIES_KEY, "candidates"],
+    queryFn: () => apiFetch<readonly MemoryCandidateRecord[]>("/api/v1/memories/candidates")
+  });
+  const accept = useMutation({
+    mutationFn: (id: string) => apiFetch<MemoryCandidateRecord>(
+      `/api/v1/memories/candidates/${id}/accept`, { method: "POST" }
+    ),
+    onSuccess: async () => invalidateMemoryQueries(queryClient)
+  });
+  const reject = useMutation({
+    mutationFn: (id: string) => apiFetch<MemoryCandidateRecord>(
+      `/api/v1/memories/candidates/${id}/reject`, { method: "POST" }
+    ),
+    onSuccess: async () => invalidateMemoryQueries(queryClient)
+  });
+
+  return {
+    candidates: query.data ?? [],
+    isLoading: query.isLoading,
+    error: query.error,
+    refresh: query.refetch,
+    acceptCandidate: accept.mutateAsync,
+    rejectCandidate: reject.mutateAsync,
+    isDeciding: accept.isPending || reject.isPending
+  };
+}
+
+export type { MemoryCandidateRecord, MemoryCategory, MemoryRecord };

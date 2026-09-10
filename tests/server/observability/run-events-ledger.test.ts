@@ -203,6 +203,7 @@ describe("run_events ledger(T47)", () => {
 
   it("captureContent=off 落空 payload;full 不截断但凭据规则仍生效", () => {
     seedRun(db, "run-1", "session-1");
+    new DrizzleRunRepository(db).settle("run-1", { status: "completed" });
     seedRun(db, "run-2", "session-1");
     // 注意:一个 Run 只能有一个 recorder(契约 4)。两档 capture level 用两条 Run 测。
     const offLogger = createLogger();
@@ -263,6 +264,7 @@ describe("run_events ledger(T47)", () => {
 
   it("listBySession:三元组游标跨 Run 翻页,同毫秒 tiebreak 稳定", () => {
     seedRun(db, "run-a", "session-1");
+    new DrizzleRunRepository(db).settle("run-a", { status: "completed" });
     // 第二条 Run 同 session
     db.insert(runs).values({ id: "run-b", sessionId: "session-1" }).run();
 
@@ -442,7 +444,7 @@ describe("retention(T48)", () => {
   const seedTerminalRun = (
     runId: string,
     sessionId: string,
-    options: { startedAt: string; status?: string; parentRunId?: string }
+    options: { startedAt: string; status?: string }
   ): void => {
     db.insert(sessions).values({ id: sessionId }).onConflictDoNothing().run();
     db.insert(runs)
@@ -451,8 +453,7 @@ describe("retention(T48)", () => {
         sessionId,
         status: (options.status ?? "completed") as "completed",
         startedAt: options.startedAt,
-        endedAt: options.startedAt,
-        ...(options.parentRunId !== undefined ? { parentRunId: options.parentRunId } : {})
+        endedAt: options.startedAt
       })
       .run();
   };
@@ -470,12 +471,12 @@ describe("retention(T48)", () => {
     });
   };
 
-  it("retentionDays=0:过期 Run 及子 Run 全清,usage_records 不受影响,外键不留孤儿", () => {
+  it("retentionDays=0:过期 Run 全清,usage_records 不受影响,外键不留孤儿", () => {
     seedTerminalRun("parent", "s-1", { startedAt: "2026-08-01 00:00:00" });
-    seedTerminalRun("child", "s-1", { startedAt: "2026-08-01 00:01:00", parentRunId: "parent" });
+    seedTerminalRun("old-2", "s-1", { startedAt: "2026-08-01 00:01:00" });
     seedTerminalRun("fresh", "s-1", { startedAt: "2026-08-01 00:02:00", status: "running" });
     seedEvent("parent", "s-1", 0);
-    seedEvent("child", "s-1", 0);
+    seedEvent("old-2", "s-1", 0);
     seedEvent("fresh", "s-1", 0);
     db.insert(usageRecords)
       .values({ id: "u-1", runId: "parent", sessionId: "s-1", date: "2026-08-01", totalTokens: 42 })
@@ -485,13 +486,13 @@ describe("retention(T48)", () => {
 
     const runsRepo = new DrizzleRunRepository(db);
     const eventsRepo = new RunEventRepository(db);
-    // 父与子整条没了(子由 parent_run_id 级联),running 豁免
+    // 过期 Run 整条没了,running 豁免
     expect(runsRepo.findById("parent")).toBeUndefined();
-    expect(runsRepo.findById("child")).toBeUndefined();
+    expect(runsRepo.findById("old-2")).toBeUndefined();
     expect(runsRepo.findById("fresh")).toBeDefined();
     // 事件随 run 级联清,外键不留孤儿
     expect(eventsRepo.countByRun("parent")).toBe(0);
-    expect(eventsRepo.countByRun("child")).toBe(0);
+    expect(eventsRepo.countByRun("old-2")).toBe(0);
     expect(eventsRepo.countByRun("fresh")).toBe(1);
     // usage_records 保留策略独立 —— 0030 摘 FK 就是为了让这一行活着
     const usage = db.select().from(usageRecords).all();

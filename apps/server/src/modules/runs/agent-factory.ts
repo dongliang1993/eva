@@ -1,6 +1,5 @@
 import type { LanguageModel } from "ai";
 import {
-  autoSelectSkills,
   buildAgentSystemPrompt,
   createAgent,
   createBashTool,
@@ -23,7 +22,6 @@ import {
   type Agent,
   type AgentObserver,
   type AgentTool,
-  type AutoSelectSkillsResult,
   type PlanGateState,
   type PlanGateStore,
   type PromptSection,
@@ -84,23 +82,20 @@ export interface AgentBuildOptions {
   readonly observer: AgentObserver;
   readonly requestApproval?: RequestApproval | undefined;
   readonly workspace?: WorkspaceContext | undefined;
-  /** 进程级外部工具（MCP）；由路由从 registry 取好传进来。 */
+  /** 本轮已固定的附加能力（MCP、memory 等）。 */
   readonly extraTools?: readonly AgentTool[] | undefined;
   /** per-run 读好的人类可读记忆 section（L1 MEMORY.md + 近几天日记）。 */
   readonly memoryFilesSection?: PromptSection | undefined;
-  /**
-   * T44:auto-selection 的产出(always ∪ thread 累积 ∪ 本轮新选)。
-   * 传了(含空数组)就按选中集注 prompt;不传 = 兼容路径,列全部 infra.skills。
-   */
-  readonly selectedSkills?: readonly Skill[] | undefined;
+  /** Deterministically retrieved cross-session facts for this request. */
+  readonly retrievedMemorySection?: PromptSection | undefined;
   /** T45a:run-scoped plan gate。仅在绑了 workspace 时由路由注入。 */
   readonly planGate?:
-    | {
-        readonly state: PlanGateState;
-        readonly store: PlanGateStore;
-        readonly requestPlanReview?: RequestPlanReview | undefined;
-      }
-    | undefined;
+  | {
+    readonly state: PlanGateState;
+    readonly store: PlanGateStore;
+    readonly requestPlanReview?: RequestPlanReview | undefined;
+  }
+  | undefined;
 }
 
 export interface ResolvedModels {
@@ -118,21 +113,20 @@ export interface ResolvedAgent {
 // Agent system prompt 的 Memory 板块,由 build 注入。
 // T16 §2.4:五工具的分工是"规模与访问模式"切(L1 全量注入 vs L4 按需检索),不是按内容切。
 // 判据必须给模型一句能直接照着判的话;别在 5 个工具 description 里各写一遍(会互相矛盾)。
-const MEMORY_PROMPT_SECTION: PromptSection = {
+const createMemoryPromptSection = (databaseEnabled: boolean): PromptSection => ({
   heading: "Memory",
   body: [
-    "- Relevant memories are automatically recalled and provided in your context each turn",
     "- `MEMORY.md` and your recent daily notes are injected into your context this turn (see ## Memory Files). These are human-readable files the user can edit directly.",
     "",
-    "Five tools, three places — pick by scale and access pattern:",
-    "- Ask yourself: *is this fact worth spending tokens on every single turn?* Yes -> `update_long_term_memory` (MEMORY.md). No -> `save_memory` (database).",
+    "Choose the store by scale and access pattern:",
+    `- Ask yourself: *is this fact worth spending tokens on every single turn?* Yes -> \`update_long_term_memory\` (MEMORY.md). ${databaseEnabled ? "No -> `save_memory` (searchable database)." : "The searchable database is disabled for this run."}`,
     '- `update_long_term_memory`: stable identity, preferences, durable constraints. Read the WHOLE file first with `read_memory_file("MEMORY.md")`, then write back the full content — it REPLACES the file.',
     "- `append_memory`: day-stamped decisions and ephemeral events, into today's daily note.",
     "- `save_memory` / `search_memory`: searchable facts and project knowledge in the database. ALWAYS `search_memory` before saving to avoid duplicates; pass updateId to update.",
     "- `read_memory_file` with no argument lists your memory files — use it to discover days beyond the injected window.",
     "- Never claim you will remember something unless you actually called one of these tools this turn.",
   ].join("\n"),
-};
+});
 
 /**
  * LanguageModel 实例缓存键 —— 只包含决定"实例本身"的字段。
@@ -164,22 +158,20 @@ export const buildBaseTools = (
     readonly extraTools?: readonly AgentTool[] | undefined;
     /** T45a:主 agent 专用;子代理不传(子代理仍按角色白名单收窄)。 */
     readonly planGate?:
-      | {
-          readonly state: PlanGateState;
-          readonly store: PlanGateStore;
-          readonly requestPlanReview?: RequestPlanReview | undefined;
-        }
-      | undefined;
+    | {
+      readonly state: PlanGateState;
+      readonly store: PlanGateStore;
+      readonly requestPlanReview?: RequestPlanReview | undefined;
+    }
+    | undefined;
   },
-  getToolModel: (binding: ModelBinding) => LanguageModel,
-  toolBinding: ModelBinding,
 ): AgentTool[] => {
   const { skills, workspace, extraTools, planGate } = options;
 
   const tools: AgentTool[] = [
     ...(skills.length > 0 ? [createReadSkillTool([...skills] as Skill[])] : []),
     createDuckDuckGoWebSearchTool(),
-    createWebFetchTool({ summaryModel: getToolModel(toolBinding) }),
+    createWebFetchTool(),
     ...(extraTools ?? []),
   ];
 
@@ -226,7 +218,7 @@ export const buildBaseTools = (
 export class AgentFactory {
   private readonly models = new Map<string, LanguageModel>();
 
-  constructor(private readonly infra: AppInfrastructure) {}
+  constructor(private readonly infra: AppInfrastructure) { }
 
   /** provider / settings 变更后失效缓存(apiKey、baseURL 可能已改)。 */
   invalidate(): void {
@@ -254,45 +246,16 @@ export class AgentFactory {
       throw new AgentUnavailableError(chat.reason);
     }
 
-    const tool = resolveModelSlot(
-      this.infra.db,
-      this.infra.config,
-      "tool",
-      undefined,
-      this.infra.encryptor,
-    );
+    const settings = loadAppSettings(this.infra.db, this.infra.config);
+    const tool = settings.models.tool
+      ? resolveModelSlot(this.infra.db, this.infra.config, "tool", settings.models.tool, this.infra.encryptor)
+      : undefined;
 
     return {
       chat: chat.binding,
-      // tool 槽位没配或不可用 → 回落 chat(不是错误:杂务用主模型只是贵一点)
-      tool: tool.ok ? tool.binding : chat.binding,
-      // temperature 是 call setting,不是绑定属性 —— 从 settings 读一次。
-      temperature: loadAppSettings(this.infra.db, this.infra.config).chat
-        .temperature,
+      tool: tool?.ok ? tool.binding : chat.binding,
+      temperature: settings.chat.temperature,
     };
-  }
-
-  /**
-   * T44:skill AutoSkillSelection(Alma 对齐)。用 tool 槽位模型,失败走确定性 fallback;
-   * 不复用 build —— 选择发生在装 agent 之前,且不能因为没有可用 skill 让 build 失败。
-   */
-  async selectSkillsForRun(options: {
-    readonly modelId: string;
-    readonly humanText: string;
-    readonly alreadySelected?: readonly string[];
-    readonly maxNew?: number;
-  }): Promise<AutoSelectSkillsResult> {
-    const models = this.resolveModels({ modelId: options.modelId });
-
-    return autoSelectSkills({
-      model: this.getModel(models.tool),
-      skills: this.infra.skills,
-      humanText: options.humanText,
-      ...(options.alreadySelected !== undefined
-        ? { alreadySelected: options.alreadySelected }
-        : {}),
-      ...(options.maxNew !== undefined ? { maxNew: options.maxNew } : {}),
-    });
   }
 
   /**
@@ -314,27 +277,17 @@ export class AgentFactory {
         ...defined("extraTools", options.extraTools),
         ...defined("planGate", options.planGate),
       },
-      (binding) => this.getModel(binding),
-      models.tool,
     );
 
-    // defined() 摊的是 {key: value} 对象,这里要的是数组元素 —— 条件展开回原样。
-    // T44:selectedSkills 传了(含空)就按选中集注;不传 = 兼容路径,列全部 skills。
-    const promptSkills = options.selectedSkills ?? this.infra.skills;
     const sections: PromptSection[] = [
       ...(this.infra.soulSection ? [this.infra.soulSection] : []),
       ...(options.workspace?.docsSection
         ? [options.workspace.docsSection]
         : []),
       ...(options.memoryFilesSection ? [options.memoryFilesSection] : []),
-      MEMORY_PROMPT_SECTION,
-      ...(promptSkills.length > 0 || options.selectedSkills !== undefined
-        ? [
-            skillsToPromptSection([...promptSkills], {
-              selectionApplied: options.selectedSkills !== undefined,
-            }),
-          ]
-        : []),
+      ...(options.retrievedMemorySection ? [options.retrievedMemorySection] : []),
+      createMemoryPromptSection(tools.some((tool) => tool.name === "save_memory")),
+      ...(this.infra.skills.length ? [skillsToPromptSection([...this.infra.skills])] : []),
       createWebSearchPromptSection(),
       createWebFetchPromptSection(),
     ];
@@ -351,15 +304,11 @@ export class AgentFactory {
       },
       ...defined("requestApproval", options.requestApproval),
       ...defined("planGateState", options.planGate?.state),
-      // T18:schema 不匹配时用 tool 槽位模型修一次 —— 结构化小生成正是该槽位的用途。
-      repairModel: this.getModel(models.tool),
       contextPolicy: {
         ...defined("contextWindow", models.chat.contextWindow),
         ...defined("reservedOutputTokens", models.chat.maxOutputTokens),
       },
-      // T38:reactive compact 触发时回写更小的 contextWindow(自学习)——
-      // 需要知道钳哪家 provider 的哪个模型,绑的就是本轮 chat 槽位。
-      clampTarget: {
+      modelIdentity: {
         providerId: models.chat.providerId,
         modelId: models.chat.modelId,
       },
@@ -399,29 +348,20 @@ export class AgentFactory {
     readonly extraTools?: readonly AgentTool[] | undefined;
     readonly temperature?: number | undefined;
     /**
-     * 子代理的审批闸(T17)。注入后危险工具照包 withApproval ——
-     * 只是闭包第一格是"自动通过并落台账"(docs 04 §8.6.1 分支 2)。
-     * 不传 = 危险工具裸奔,那是 R4 的遗留状态,不是设计。
+     * 子代理与父 Run 共用审批通道。缺省时 harness 会拒绝危险工具。
      */
     readonly requestApproval?: RequestApproval | undefined;
-    /**
-     * 本轮主链选定的 chat 模型("providerId:modelId")。必填 ——
-     * 子代理的 tool 槽位回落 chat 时需要它,没有全局 chat 默认兜底,
-     * 所以子代理必须沿用本轮主链的模型,不能自己另开一条解析路径。
-     */
-    readonly modelId: string;
-    /** T49:run-scoped observer,必填(前台 = 父 Run recorder 绑 taskId;后台 = 子 Run 的)。 */
+    /** 主代理装配时已解析并冻结的 tool-model binding。 */
+    readonly model: ModelBinding;
+    /** run-scoped observer：与父 Run 共用 recorder，并绑定到 taskId。 */
     readonly observer: AgentObserver;
   }): Agent {
-    const models = this.resolveModels({ modelId: options.modelId });
     const baseTools = buildBaseTools(
       {
         skills: this.infra.skills,
         ...defined("workspace", options.workspace),
         ...defined("extraTools", options.extraTools),
       },
-      (binding) => this.getModel(binding),
-      models.tool,
     );
 
     // 角色要的工具在这个会话里压根不存在 → 早爆,不给残废工具集。
@@ -431,14 +371,14 @@ export class AgentFactory {
     if (missing.length > 0) {
       throw new AgentUnavailableError(
         `子代理 ${options.role.type} 缺少必需工具:${missing.join("、")}。` +
-          "这些是工作区工具 —— 请先给该会话绑定一个工作区,再派子代理。",
+        "这些是工作区工具 —— 请先给该会话绑定一个工作区,再派子代理。",
       );
     }
 
     const tools = [...filterToolsForRole(baseTools, options.role)];
 
     return createAgent({
-      model: this.getModel(models.tool),
+      model: this.getModel(options.model),
       tools,
       systemPrompt: options.role.systemPrompt,
       maxSteps: options.role.maxSteps ?? SUBAGENT_MAX_STEPS,
@@ -447,8 +387,6 @@ export class AgentFactory {
         ...defined("temperature", options.temperature),
       },
       ...defined("requestApproval", options.requestApproval),
-      // 子代理用的本来就是 tool 槽位(往往更弱),弱模型更需要修复器。
-      repairModel: this.getModel(models.tool),
       observer: options.observer,
     });
   }

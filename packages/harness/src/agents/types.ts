@@ -1,7 +1,6 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 import type {
   RunAgentStreamEvent,
-  RunInjectedNotice,
   StreamFinishReason,
   StreamTokenUsage,
 } from "@eva/shared";
@@ -11,7 +10,13 @@ import type { AgentModel } from "../models/agent-model.js";
 import type { AgentTool, PlanGateState } from "../tools/index.js";
 import type { AgentObserver } from "./observer.js";
 
+export type ToolExecutionEvent =
+  | { type: "started"; toolCallId: string; toolName: string; input: unknown }
+  | { type: "completed"; toolCallId: string; output: unknown }
+  | { type: "failed"; toolCallId: string; error: string };
+
 export interface AgentRunInput {
+  onToolExecution?: ((event: ToolExecutionEvent) => void) | undefined;
   messages: ModelMessage[];
   context?: Record<string, unknown>;
   maxSteps?: number;
@@ -28,15 +33,7 @@ export interface AgentRunInput {
    */
   preferredToolNames?: readonly string[];
   abortSignal?: AbortSignal;
-  /**
-   * 取待注入的子代理通知(S7 push)。只在 loop 走到 stop 终态前调用一次/轮。
-   *
-   * 约定:无待处理通知且无存活后台任务 → 立刻返回 `[]`(不拖慢正常收尾);
-   * 有存活任务但还没报 → 最多等 `graceMs`。返回非空则 loop 注入后再跑一圈。
-   */
-  drainNotices?: (opts: {
-    graceMs: number;
-  }) => Promise<readonly RunInjectedNotice[]>;
+
 }
 
 export type { StreamFinishReason, StreamTokenUsage };
@@ -54,7 +51,7 @@ export interface AgentToolCallResult {
   approvalWaitMs?: number;
   /** T50:并发帽排队等待。 */
   queueWaitMs?: number;
-  /** T50:执行被 abort 截断(race 兜底抢先)。 */
+      /** T50:执行观察到 abort 并协作退出。 */
   execAborted?: boolean;
 }
 
@@ -81,7 +78,7 @@ export interface ToolApprovalRequest {
   readonly args: Record<string, unknown>;
 }
 
-/** 危险工具执行前的用户审批入口(由宿主注入;默认放行)。 */
+/** 危险工具执行前的用户审批入口；缺省时拒绝执行。 */
 export type RequestApproval = (
   request: ToolApprovalRequest,
 ) => Promise<boolean>;
@@ -102,15 +99,10 @@ export interface CreateAgentOptions {
   requestApproval?: RequestApproval;
   callSettings?: AgentCallSettings;
   /**
-   * T18:repairToolCall 用的修复模型(tool 槽位)。可选 —— 不传维持 SDK 默认
-   * (schema 校验失败直接报错),最小场景/测试不该被强制塞一个模型。
-   */
-  repairModel?: AgentModel;
-  /**
    * T25:SDK TimeoutConfiguration 的工具子集 —— streamText 的
    * `timeout: { toolMs, tools: { <toolName>Ms } }`。SDK 把超时折成
    * AbortSignal 塞进 `options.abortSignal` 传给工具 execute(它从不自己
-   * 杀工具),真正收口靠 build-tool 的 race 兜底。不传 = 不配超时(现状),
+   * 杀工具),工具实现必须观察 signal 并协作退出。不传 = 不配超时(现状),
    * 默认值由 server 的 agent-factory 注入 —— harness 的最小使用者不该被
    * 强加隐形的 60s 行为。类型故意不复用 SDK 全集(totalMs/stepMs/chunkMs
    * 明确不做,r6 00-overview §2.1 #4)。
@@ -124,12 +116,9 @@ export interface CreateAgentOptions {
    */
   readOnlyConcurrency?: number;
   /**
-   * T38:reactive compact(模型因上下文超限拒单)触发时,emit
-   * `context_overflow_clamp` 让 server 把这个模型的 contextWindow 钳到实测值的
-   * 90% —— 登记值虚高的模型从此学会自己的真实上限。harness 不知道也不该知道
-   * provider 登记处,只吐事件;钳制动作在 server 侧(deps → clampContextWindow)。
+   * 模型身份只用于把 reactive context overflow 诊断事件关联到实际路由结果。
    */
-  clampTarget?: { providerId: string; modelId: string };
+  modelIdentity?: { providerId: string; modelId: string };
   /** T45a:run-scoped plan gate 状态。传了就在最外层包 withPlanGate + 每步注 reminder。 */
   planGateState?: PlanGateState;
 }

@@ -1,10 +1,5 @@
 export { createProvidersApi, type ProvidersApi } from "./api.js";
 export { toAgentModel } from "./agent-model.js";
-export {
-  clampContextWindow,
-  computeClampedContextWindow,
-  MIN_CONTEXT_WINDOW,
-} from "./context-clamp.js";
 export { resolveModelSlot, type ModelBinding } from "./model-resolver.js";
 export {
   findProviderSpec,

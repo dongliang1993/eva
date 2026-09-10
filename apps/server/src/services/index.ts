@@ -4,7 +4,6 @@ import { DrizzleMessageRepository } from "../modules/sessions/index.js";
 import {
   AgentFactory,
   DrizzleRunRepository,
-  RunLedger,
   RunRegistry,
 } from "../modules/runs/index.js";
 import { McpRegistry, McpServerRepository } from "../modules/mcp/index.js";
@@ -13,12 +12,12 @@ import {
   ApprovalGateway,
   ApprovalPolicyStore,
 } from "../modules/approvals/index.js";
-import { PlanWeaveService } from "../modules/plan-weave/index.js";
 import { SessionService } from "../modules/sessions/index.js";
 import {
   DrizzleWorkspaceRepository,
   WorkspaceStore,
 } from "../modules/workspaces/index.js";
+import { MemoryAutomationService } from "../modules/memory/index.js";
 
 export const buildAppServices = (infra: AppInfrastructure): AppServices => {
   const workspaces = new WorkspaceStore(new DrizzleWorkspaceRepository(infra.db));
@@ -31,11 +30,15 @@ export const buildAppServices = (infra: AppInfrastructure): AppServices => {
     ),
     approvals: new ApprovalGateway(new ApprovalRepository(infra.db)),
     approvalPolicies: new ApprovalPolicyStore(infra.db, infra.config),
-    runLedger: new RunLedger(new DrizzleRunRepository(infra.db)),
     runRegistry: new RunRegistry(),
     workspaces,
+    memoryAutomation: new MemoryAutomationService({
+      db: infra.db,
+      config: infra.config,
+      encryptor: infra.encryptor,
+      logger: infra.logger
+    }),
     // T46:任务图状态在 workspace 文件里,service 只认 workspaceId —— 无 DB 表。
-    planWeave: new PlanWeaveService(workspaces),
     mcp: new McpRegistry(new McpServerRepository(infra.db), infra.logger)
   };
 };

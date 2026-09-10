@@ -10,8 +10,6 @@ import { UsageRecordRepository } from "../usage/index.js";
 export interface RunRecord {
   readonly id: string;
   readonly sessionId: string;
-  readonly parentRunId: string | null;
-  readonly backgroundTaskId: string | null;
   readonly status: RunStatus;
   readonly requestedModel: string | null;
   readonly model: string | null;
@@ -31,12 +29,10 @@ export interface StartRunInput {
   readonly sessionId: string;
   /** T48 起可选:Run 提前到模型解析前创建,解析成功后 patchRouting 补上。 */
   readonly model?: string;
-  /** 子 Run(后台子代理)没有用户消息锚点,可空。 */
+  /** 主 Run 的用户消息锚点。 */
   readonly userMessageId?: string;
   readonly requestedModel?: string;
   readonly captureLevel?: string;
-  readonly parentRunId?: string;
-  readonly backgroundTaskId?: string;
 }
 
 export interface SettleRunInput {
@@ -63,8 +59,6 @@ export const runStatusFor = (reason: StreamFinishReason): Exclude<RunStatus, "ru
 const toRecord = (row: typeof runs.$inferSelect): RunRecord => ({
   id: row.id,
   sessionId: row.sessionId,
-  parentRunId: row.parentRunId,
-  backgroundTaskId: row.backgroundTaskId,
   status: row.status as RunStatus,
   requestedModel: row.requestedModel,
   model: row.model,
@@ -92,10 +86,6 @@ export class DrizzleRunRepository {
         ...(input.userMessageId !== undefined ? { userMessageId: input.userMessageId } : {}),
         ...(input.requestedModel !== undefined ? { requestedModel: input.requestedModel } : {}),
         ...(input.captureLevel !== undefined ? { captureLevel: input.captureLevel } : {}),
-        ...(input.parentRunId !== undefined ? { parentRunId: input.parentRunId } : {}),
-        ...(input.backgroundTaskId !== undefined
-          ? { backgroundTaskId: input.backgroundTaskId }
-          : {})
       })
       .run();
   }
@@ -117,7 +107,7 @@ export class DrizzleRunRepository {
     // 双写事务:runs.usage 是既有契约(双写过渡,删列留给下下轮),
     // usage_records 是聚合读路径 —— 两处要么都写要么都不写。
     this.db.transaction((tx) => {
-      tx.update(runs)
+      const changed = tx.update(runs)
         .set({
           status: input.status,
           endedAt: now,
@@ -129,8 +119,10 @@ export class DrizzleRunRepository {
           ...(input.error !== undefined ? { error: input.error } : {}),
           ...(input.failureLayer !== undefined ? { failureLayer: input.failureLayer } : {})
         })
-        .where(eq(runs.id, runId))
-        .run();
+        .where(and(eq(runs.id, runId), eq(runs.status, "running")))
+        .run().changes;
+
+      if (changed === 0) return;
 
       if (input.usage !== undefined) {
         // model/sessionId 从 run 行读(坑 3):settle 时该行已有,调用方拿的不一定一致。
@@ -274,7 +266,7 @@ export class DrizzleRunRepository {
   /**
    * retention(T48):删掉 endedAt/started_at 早于 cutoff 的终结态 Run。
    * cutoff 是 SQLite datetime 表达式(与 started_at 的 datetime('now') 同基准同格式)。
-   * 子 Run 由 parent_run_id 自引用级联带走;run_events 由 run_id 级联带走。
+   * run_events 由 run_id 级联带走。
    * @returns 直接命中的行数(级联删除的子 Run 不计入)
    */
   deleteTerminalBefore(cutoffSql: ReturnType<typeof sql>): number {

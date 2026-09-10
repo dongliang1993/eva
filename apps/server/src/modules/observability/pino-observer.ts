@@ -2,16 +2,8 @@ import type { FastifyBaseLogger } from "fastify";
 
 import type { AgentTelemetryEvent } from "@eva/harness";
 
-export interface ClampEvent {
-  readonly providerId: string;
-  readonly modelId: string;
-  readonly contextWindow: number;
-  readonly observedTokens: number;
-}
-
 export const createPinoObserver = (
-  logger: FastifyBaseLogger,
-  onClamp?: (event: ClampEvent) => void
+  logger: FastifyBaseLogger
 ): ((event: AgentTelemetryEvent) => void) => {
   return (event: AgentTelemetryEvent): void => {
     switch (event.type) {
@@ -95,23 +87,16 @@ export const createPinoObserver = (
           `agent context compacted via ${event.reason}`
         );
         break;
-      case "context_overflow_clamp":
-        // T38: 模型真实超限 → 钳小它的 contextWindow(写 DB),下次 resolve 生效。
+      case "context_overflow":
         logger.warn(
           {
-            event: "context_overflow_clamp",
+            event: "context_overflow",
             model: event.modelId,
             contextWindow: event.contextWindow,
             observedTokens: event.observedTokens
           },
-          `[AutoCompact] ${event.modelId} rejected ${event.observedTokens} tokens — clamping contextWindow`
+          `[AutoCompact] ${event.modelId} rejected ${event.observedTokens} tokens — retrying with compacted context`
         );
-        onClamp?.({
-          providerId: event.providerId,
-          modelId: event.modelId,
-          contextWindow: event.contextWindow,
-          observedTokens: event.observedTokens
-        });
         break;
       case "tool_count_degraded":
         // T43: 工具数超限进 discovery mode —— 必须可见,否则「配的 MCP 工具没直接出现」无从排查。

@@ -1,6 +1,6 @@
 import type { AgentObserver } from "../agents/observer.js";
 import { ToolDiscoveryController } from "../agents/tool-discovery.js";
-import type { RequestApproval } from "../agents/types.js";
+import type { RequestApproval, AgentRunInput } from "../agents/types.js";
 import { DEFAULT_READ_ONLY_CONCURRENCY, Semaphore, withConcurrencyCap } from "./concurrency-cap.js";
 import type { AgentTool } from "./build-tool.js";
 import { withPlanGate, type PlanGateState } from "./plan-gate/index.js";
@@ -10,6 +10,7 @@ import { withApproval } from "./with-approval.js";
 import { withExecTiming } from "./with-exec-timing.js";
 
 export interface ToolPipelineOptions {
+  readonly onToolExecution?: AgentRunInput["onToolExecution"];
   readonly tools?: readonly AgentTool[];
   readonly requestApproval?: RequestApproval;
   readonly observer?: AgentObserver;
@@ -18,6 +19,7 @@ export interface ToolPipelineOptions {
 }
 
 export interface ToolPipeline {
+  readonly drain: () => Promise<void>;
   readonly tools: AgentTool[];
   readonly toolDiscovery: ToolDiscoveryController;
   readonly toolTiming: ToolTimingState;
@@ -31,7 +33,12 @@ export interface ToolPipeline {
  * 不能占用只读并发额度，审批与排队耗时也不能混入真实执行时长。
  */
 export const buildToolPipeline = (options: ToolPipelineOptions): ToolPipeline => {
-  const requestApproval = options.requestApproval;
+  const requestApproval = options.requestApproval ?? (async () => false);
+  const names = new Set<string>(["tool_search"]);
+  for (const tool of options.tools ?? []) {
+    if (names.has(tool.name)) throw new Error(`Duplicate tool name: ${tool.name}`);
+    names.add(tool.name);
+  }
   const planGateState = options.planGateState;
   const limiter = new Semaphore(
     options.readOnlyConcurrency ?? DEFAULT_READ_ONLY_CONCURRENCY,
@@ -43,24 +50,43 @@ export const buildToolPipeline = (options: ToolPipelineOptions): ToolPipeline =>
     createToolSearchTool(toolDiscovery),
   ];
   const timedTools = withDiscoveryTools.map((tool) =>
-    withExecTiming(tool, toolTiming),
+    withExecTiming(tool, toolTiming, options.onToolExecution),
   );
   const cappedTools = timedTools.map((tool) =>
     withConcurrencyCap(tool, limiter, toolTiming),
   );
   const approvalTools = requestApproval
     ? cappedTools.map((tool) =>
-        withApproval(
-          tool,
-          requestApproval,
-          options.observer,
-          toolTiming,
-        ),
-      )
+      withApproval(
+        tool,
+        requestApproval,
+        options.observer,
+        toolTiming,
+      ),
+    )
     : cappedTools;
   const tools = planGateState
     ? approvalTools.map((tool) => withPlanGate(tool, planGateState))
     : approvalTools;
 
-  return { tools, toolDiscovery, toolTiming };
+  const pending = new Set<Promise<unknown>>();
+  const trackedTools = tools.map(agentTool => {
+    const execute = agentTool.tool.execute;
+    if (typeof execute !== "function") return agentTool;
+    return {
+      ...agentTool, tool: {
+        ...agentTool.tool,
+        execute: (input: unknown, options?: unknown) => {
+          const task = Promise.resolve().then(() => execute(input as never, options as never));
+          pending.add(task);
+          void task.then(() => pending.delete(task), () => pending.delete(task));
+          return task;
+        }
+      } as typeof agentTool.tool
+    };
+  });
+  return {
+    tools: trackedTools, toolDiscovery, toolTiming,
+    drain: async () => { while (pending.size) await Promise.allSettled([...pending]); }
+  };
 };

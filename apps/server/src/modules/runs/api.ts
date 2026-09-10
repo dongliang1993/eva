@@ -1,9 +1,9 @@
 import { DrizzleMessageRepository } from "../sessions/index.js";
 import { DrizzlePlanRepository } from "../plan-gate/index.js";
-import { DrizzleRunRepository } from "./run-repository.js";
+import { listToolExecutions } from "./tool-operations.js";
+import { DrizzleRunRepository, type RunRecord } from "./run-repository.js";
 import { DrizzleSessionRepository } from "../sessions/index.js";
 import type { AppInfrastructure, AppServices } from "../../types/common.js";
-import { RunFinalizer } from "./run-finalizer.js";
 import {
   RunCoordinator,
   type RunOutcome,
@@ -14,6 +14,7 @@ import type { RunEventStream } from "../../transports/sse/event-stream.js";
 export type { RunOutcome, RunRequestLog };
 
 export interface RunsApi {
+  get(runId: string): { run: RunRecord; operations: ReturnType<typeof listToolExecutions> } | undefined;
   /**
    * 开一次 Run。**不抛** —— 失败的台账在里面收好了,返回值只告诉调用方
    * 还能不能回 HTTP 状态码(见 RunOutcome)。
@@ -31,6 +32,7 @@ export interface RunsApi {
 }
 
 export const createRunsApi = (infra: AppInfrastructure, services: AppServices): RunsApi => {
+  const runs = new DrizzleRunRepository(infra.db);
   const coordinator = new RunCoordinator({
     config: infra.config,
     db: infra.db,
@@ -41,28 +43,22 @@ export const createRunsApi = (infra: AppInfrastructure, services: AppServices): 
     session: services.session,
     approvals: services.approvals,
     approvalPolicies: services.approvalPolicies,
-    runLedger: services.runLedger,
     runRegistry: services.runRegistry,
     workspaces: services.workspaces,
-    planWeave: services.planWeave,
     mcp: services.mcp,
     sessions: new DrizzleSessionRepository(infra.db),
     messages: new DrizzleMessageRepository(infra.db),
-    runs: new DrizzleRunRepository(infra.db),
+    runs,
     plans: new DrizzlePlanRepository(infra.db),
-    // 终态的构造权留在组合根这一侧。coordinator 只拿到这个工厂,拿不到
-    // RunSettlingLedger —— 于是「在 catch 里顺手 fail 一下」编译不过(§7.2)。
-    createFinalizer: (binding) =>
-      new RunFinalizer({
-        ...binding,
-        runLedger: services.runLedger,
-        session: services.session,
-        runRegistry: services.runRegistry,
-        approvals: services.approvals
-      })
+    memoryAutomation: services.memoryAutomation,
+
   });
 
   return {
+    get: (runId) => {
+      const run = runs.findById(runId);
+      return run ? { run, operations: listToolExecutions(infra.db, runId) } : undefined;
+    },
     start: (body, stream, log) => coordinator.run(body, stream, log),
 
     attach: async (runId, stream) => {

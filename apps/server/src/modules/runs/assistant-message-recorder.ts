@@ -9,8 +9,9 @@ import type {
   StreamFinishReason,
   StreamTokenUsage
 } from "@eva/shared";
-import { UiMessageBuilder, createUserUIMessage, isDynamicToolPart } from "@eva/shared";
+import { UiMessageBuilder, isDynamicToolPart, toErrorMessage } from "@eva/shared";
 
+import type { RunFailureLayer } from "../../db/schema.js";
 import type { MessagePosition, SessionService } from "../sessions/index.js";
 
 export interface AssistantMessageRecorderOptions {
@@ -28,24 +29,21 @@ export interface AssistantMessageRecorderOptions {
 }
 
 export interface RecordedAssistantRun {
+  readonly failureLayer?: RunFailureLayer;
   readonly assistantMessageId: string;
   readonly finishReason: StreamFinishReason;
   readonly usage?: StreamTokenUsage | undefined;
   readonly streamError?: string | undefined;
 }
 
-/**
- * 把一轮 agent 事件折叠成持久化消息。
- *
- * notice-injected 是消息边界：先收口当前 assistant，再把通知作为主链消息落库，
- * 最后用新的 builder 继续下一段 assistant。
- */
+/** Persists one assistant message throughout the run. */
 export class AssistantMessageRecorder {
   private builder = new UiMessageBuilder(randomUUID());
   private position: MessagePosition;
-  private finishReason: StreamFinishReason = "stop";
+  private finishReason: StreamFinishReason = "error";
+  private failureLayer: RunFailureLayer | undefined;
   private usage: StreamTokenUsage | undefined;
-  private streamError: string | undefined;
+  private streamError: string | undefined = "Agent stream ended without a terminal outcome";
 
   constructor(
     private readonly session: SessionService,
@@ -57,32 +55,41 @@ export class AssistantMessageRecorder {
   push(event: RunAgentStreamEvent): void {
     this.builder.push(event);
 
-    if (event.type === "notice-injected") {
-      this.recordNoticeBoundary(event);
-      return;
-    }
-
     if (event.type === "finish") {
       this.finishReason = event.finishReason;
       this.usage = event.usage;
+      this.streamError = undefined;
+      this.failureLayer = event.finishReason === "max-steps" ? "orchestration" : undefined;
       return;
     }
 
     if (event.type === "error") {
       this.finishReason = "error";
       this.streamError = event.message;
+      this.failureLayer = event.failureLayer ?? "unknown";
     }
   }
 
-  /**
-   * 当前在飞 assistant 消息的快照 —— SSE 重连时反推成合成帧补历史(RunHub.attach)。
-   * 读的是**当前那个** builder:notice-injected 边界前的消息已经落库了。
-   */
+  fail(error: unknown, aborted: boolean): void {
+    this.finishReason = aborted ? "aborted" : "error";
+    this.streamError = toErrorMessage(error);
+    this.failureLayer = aborted ? undefined : "unknown";
+  }
+
   snapshot(): EvaUIMessage {
     return this.builder.snapshot({
       runId: this.options.runId,
       model: this.options.model
     });
+  }
+
+  checkpoint(): void {
+    this.session.recordAssistantMessage(
+      this.options.sessionId,
+      this.withApprovalDecisions(this.snapshot()),
+      this.position,
+      this.options.runId
+    );
   }
 
   finish(): RecordedAssistantRun {
@@ -99,6 +106,7 @@ export class AssistantMessageRecorder {
     );
 
     return {
+      ...(this.failureLayer ? { failureLayer: this.failureLayer } : {}),
       assistantMessageId: stored.id,
       finishReason: this.finishReason,
       ...(this.usage !== undefined ? { usage: this.usage } : {}),
@@ -138,34 +146,4 @@ export class AssistantMessageRecorder {
     return touched ? { ...message, parts } : message;
   }
 
-  private recordNoticeBoundary(
-    event: Extract<RunAgentStreamEvent, { type: "notice-injected" }>
-  ): void {
-    this.session.recordAssistantMessage(
-      this.options.sessionId,
-      this.builder.build({
-        runId: this.options.runId,
-        model: this.options.model
-      }),
-      this.position,
-      this.options.runId
-    );
-
-    for (const notice of event.notices) {
-      this.session.continueSession(
-        this.options.sessionId,
-        createUserUIMessage(randomUUID(), notice.text, {
-          runId: this.options.runId,
-          noticeKind: notice.kind === "reported"
-            ? "subagent_reported"
-            : "subagent_settled",
-          noticeDescription: notice.description
-        }),
-        this.options.runId
-      );
-    }
-
-    this.position = this.session.positionAfterActiveLeaf(this.options.sessionId);
-    this.builder = new UiMessageBuilder(randomUUID());
-  }
 }

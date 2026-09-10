@@ -12,7 +12,6 @@ import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessi
 import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
 import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
-import { RunLedger } from "../../../apps/server/src/modules/runs/index.js";
 import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
 import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
 import { registerRunRoutes } from "../../../apps/server/src/modules/runs/index.js";
@@ -64,13 +63,17 @@ beforeEach(async () => {
   app = Fastify();
   app.decorate("infra", { config: loadConfig({ env: {}, cwd: "/tmp" }), db, skills: [] });
   app.decorate("services", {
-    agents: { build: () => ({ agent, mainModel: { qualifiedModelId: "openai:test" } }) },
+    agents: { build: () => ({
+      agent,
+      mainModel: { qualifiedModelId: "openai:test" },
+      toolModel: { qualifiedModelId: "openai:test-tool" }
+    }) },
     session: new SessionService(
       new DrizzleSessionRepository(db),
       new DrizzleMessageRepository(db)
     ),
     approvals,
-    runLedger: new RunLedger(new DrizzleRunRepository(db)),
+
     runRegistry: registry,
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });

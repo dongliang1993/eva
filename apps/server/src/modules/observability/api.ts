@@ -1,11 +1,10 @@
 import type {
   RunEventRecord,
-  RunEventRepository,
-  SubRunSummary
+  RunEventRepository
 } from "./run-event-repository.js";
 import type { DrizzleRunRepository } from "../runs/index.js";
 
-export type { RunEventRecord, SubRunSummary };
+export type { RunEventRecord };
 
 /** 会话级轨迹的游标三元组:occurredAtMs 定序,runId/seq 是同毫秒 tiebreaker。 */
 export interface SessionTrajectoryCursor {
@@ -28,7 +27,6 @@ export interface ObservabilityApi {
   ): readonly RunEventRecord[];
   /** 导出用:整会话不分页,按 (occurredAtMs, runId, seq) 稳定排序。 */
   listAllSessionEvents(sessionId: string): readonly RunEventRecord[];
-  summarizeSubRuns(sessionId: string): readonly SubRunSummary[];
   listRunEvents(
     runId: string,
     options: { readonly beforeSeq?: number; readonly limit: number }
@@ -42,6 +40,5 @@ export const createObservabilityApi = (deps: {
   runExists: (runId) => deps.runs.findById(runId) !== undefined,
   listSessionEvents: (sessionId, options) => deps.runEvents.listBySession(sessionId, options),
   listAllSessionEvents: (sessionId) => deps.runEvents.listAllBySession(sessionId),
-  summarizeSubRuns: (sessionId) => deps.runEvents.summarizeSubRuns(sessionId),
   listRunEvents: (runId, options) => deps.runEvents.listByRun(runId, options)
 });

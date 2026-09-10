@@ -96,38 +96,3 @@ describe("T31 alwaysAllowTools 退役(钉死第二个事实源)", () => {
     expect(source).not.toContain("alwaysAllowTools");
   });
 });
-
-describe("T31 迁移收敛(幂等,迁完即净)", () => {
-  let db: AppDatabase;
-
-  beforeEach(() => {
-    db = initDb({ dbPath: ":memory:" });
-    migrateDb(db);
-  });
-
-  afterEach(() => {
-    closeDb(db);
-  });
-
-  it("老库的 alwaysAllowTools 迁成 thread:global policies 后字段不再残留", async () => {
-    // 模拟一座没迁过的老库:security 只有旧白名单,没有 policies。
-    const legacy = loadAppSettings(db, config) as unknown as Record<string, unknown>;
-    replaceAppSettings(db, config, {
-      ...(legacy as never),
-      security: { logLevel: "info", alwaysAllowTools: ["bash", "write"] } as never
-    });
-
-    const { migrateAlwaysAllowToolsToPolicies } = await import(
-      "../../../apps/server/src/modules/settings/index.js"
-    );
-    const logger = { warn: () => undefined } as never;
-    migrateAlwaysAllowToolsToPolicies(db, logger);
-
-    const after = loadAppSettings(db, config);
-    // 折成 thread:global 条目(T27 迁移规则)
-    expect(after.security.allowAlwaysPolicies).toContain("bash:thread:global:all");
-    expect(after.security.allowAlwaysPolicies).toContain("write:thread:global:all");
-    // 退役后:settings 里不再有 alwaysAllowTools 这个键。
-    expect("alwaysAllowTools" in after.security).toBe(false);
-  });
-});

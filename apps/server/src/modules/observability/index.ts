@@ -1,6 +1,6 @@
 export { createObservabilityApi, type ObservabilityApi } from "./api.js";
 export { canonicalStringify, sha256Hex } from "./canonical.js";
-export { createObserverBridge, fanout, type ObserverBridge, type ObserverBridgeHooks } from "./observer-bridge.js";
+export { createObserverBridge, fanout, type ObserverBridge } from "./observer-bridge.js";
 export { createPinoObserver } from "./pino-observer.js";
 export {
   MAX_FIELD_BYTES,
@@ -11,7 +11,7 @@ export {
   type TruncatedField,
 } from "./redact.js";
 export { registerTrajectoryRoutes } from "./route.js";
-export { RunEventRepository, type RunEventRecord, type SubRunSummary } from "./run-event-repository.js";
+export { RunEventRepository, type RunEventRecord } from "./run-event-repository.js";
 export {
   createRunRecorder,
   runEventKinds,

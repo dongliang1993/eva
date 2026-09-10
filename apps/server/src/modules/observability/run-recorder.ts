@@ -27,7 +27,6 @@ export const runEventKinds = [
   "tool_call_abandoned",
   "approval_asked",
   "approval_decided",
-  "tool_call_repaired",
   "context_compacted",
   "context_overflow",
   "loop_transition",
@@ -39,7 +38,7 @@ export const runEventKinds = [
 export type RunEventKind = (typeof runEventKinds)[number];
 
 export interface RunEventInput {
-  /** "main" | taskId(前台子代理)。runId 属于绑定关系,不在事件里。 */
+  /** "main" | taskId（awaited 子代理）。runId 属于绑定关系，不在事件里。 */
   readonly agent: string;
   readonly kind: RunEventKind;
   readonly turnIndex?: number;
@@ -56,8 +55,7 @@ export interface RunEventInput {
 /**
  * Run 级 recorder。四条纪律(00-overview §3 契约 2/4/5):
  * 1. seq 由 recorder 独占单调分配,分配与 insert 在同一同步临界段(better-sqlite3
- *    同线程同步写,不需要额外锁)。同一 Run 的主 Agent 与前台子代理共用一个实例;
- *    后台子代理有自己 Run 的 recorder,seq 从 0 重新开始。
+ *    同线程同步写，不需要额外锁）。同一 Run 的主代理与 awaited 子代理共用一个实例；
  * 2. record 绝不抛 —— 它被 Agent loop 同步调用,抛出去等于观测把业务打挂。
  * 3. payload 定型在 recorder 内:脱敏 → 截断 → canonical JSON;调用方只给对象。
  * 4. occurredAtMs 由 recorder 打,调用方不传时间戳(不同时钟语义会漂)。

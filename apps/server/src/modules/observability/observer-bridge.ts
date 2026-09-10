@@ -1,13 +1,12 @@
 import type { AgentObserver, AgentTelemetryEvent } from "@eva/harness";
 
-import type { RunFailureLayer } from "../../db/schema.js";
 import { canonicalStringify, sha256Hex } from "./canonical.js";
 import type { RunEventInput, RunRecorder } from "./run-recorder.js";
 
 /**
- * T49:run-scoped observer 桥。一个 Run 一个 bridge,主 Agent 与前台子代理的
+ * Run-scoped observer 桥。一个 Run 一个 bridge，主代理与 awaited 子代理的
  * observer 由它分别绑定(agent 不同,recorder 同一个 —— UNIQUE(run_id, seq)
- * 靠共享 recorder 成立)。后台子代理有自己 Run 的 recorder,另起一个 bridge。
+ * 靠共享 recorder 成立)。
  *
  * 身份纪律(契约 3):runId 在 recorder 里,agent 在绑定里,事件本身两样都不带。
  * 没有任何「当前 run」单例。
@@ -15,11 +14,6 @@ import type { RunEventInput, RunRecorder } from "./run-recorder.js";
  * request_snapshot 的同 Run 去重也在这里(§4.3):同一 Run 内部分 hash 全同的
  * 后续 snapshot 只记 request_snapshot_ref 指向首次那条,seq 由 recorder 返回。
  */
-export interface ObserverBridgeHooks {
-  /** agent_run_end(max-steps)/ agent_run_failed 带的失败层,route settle 时写进 runs。 */
-  readonly onFailureLayer?: (layer: RunFailureLayer) => void;
-}
-
 export interface ObserverBridge {
   readonly forAgent: (agent: string) => AgentObserver;
 }
@@ -27,8 +21,7 @@ export interface ObserverBridge {
 type SnapshotEvent = Extract<AgentTelemetryEvent, { type: "request_snapshot" }>;
 
 export const createObserverBridge = (
-  recorder: RunRecorder,
-  hooks: ObserverBridgeHooks = {}
+  recorder: RunRecorder
 ): ObserverBridge => {
   const snapshotSeqByHash = new Map<string, number>();
 
@@ -88,16 +81,12 @@ export const createObserverBridge = (
               usage: event.totalTokenUsage
             }
           });
-          if (event.failureLayer !== undefined) {
-            hooks.onFailureLayer?.(event.failureLayer);
-          }
           break;
         case "agent_run_failed":
           record("run_failed", {
             severity: "error",
             payload: { error: event.error, failureLayer: event.failureLayer }
           });
-          hooks.onFailureLayer?.(event.failureLayer);
           break;
         case "turn_started":
           record("turn_started", { turnIndex: event.turnIndex });
@@ -206,11 +195,6 @@ export const createObserverBridge = (
             payload: { toolName: event.toolName, approved: event.approved }
           });
           break;
-        case "tool_call_repaired":
-          record("tool_call_repaired", {
-            payload: { toolName: event.toolName, repairKind: event.kind }
-          });
-          break;
         case "loop_transition":
           record("loop_transition", {
             stepIndex: event.step,
@@ -230,7 +214,7 @@ export const createObserverBridge = (
             }
           });
           break;
-        case "context_overflow_clamp":
+        case "context_overflow":
           record("context_overflow", {
             severity: "warn",
             payload: {

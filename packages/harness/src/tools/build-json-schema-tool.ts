@@ -1,6 +1,7 @@
 import { jsonSchema, tool, type Tool } from "ai";
 
 import {
+  TOOL_CALL_ABORTED_OUTPUT,
   toToolErrorOutput,
   type AgentTool,
   type ToolExecutionOptions,
@@ -43,6 +44,9 @@ export const buildJsonSchemaTool = (
         // 旧代码路径不存在(签名一直是单参)。
         return await definition.execute(input, options);
       } catch (error) {
+        if (options?.abortSignal?.aborted) {
+          return TOOL_CALL_ABORTED_OUTPUT;
+        }
         return toToolErrorOutput(error);
       }
     },

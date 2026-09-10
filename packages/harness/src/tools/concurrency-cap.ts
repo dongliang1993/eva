@@ -4,43 +4,44 @@ import type { ToolTimingState } from "./tool-timing.js";
 /** 只读工具的默认并发帽(Claude Code 同款默认)。 */
 export const DEFAULT_READ_ONLY_CONCURRENCY = 10;
 
-/**
- * 无依赖的 FIFO 信号量(T24)。
- *
- * 不用 p-limit:依赖树多一个包换 50 行手写,而手写版把 FIFO 语义钉死
- * (p-limit 的队列策略在迭代版本间变过)。不可重入是设计 —— 工具 execute
- * 不会嵌套调自己,做成可重入反而让"同一步同工具两个调用"绕帽。
- * acquire 返回的 release 幂等,必须在 finally 里调用(见 withConcurrencyCap)。
- */
 export class Semaphore {
   private active = 0;
   private readonly waiters: Array<() => void> = [];
 
-  constructor(readonly limit: number) {}
+  constructor(readonly limit: number) {
+    if (!Number.isInteger(limit) || limit < 1) throw new Error("Concurrency must be a positive integer");
+  }
 
-  async acquire(): Promise<() => void> {
-    if (this.active >= this.limit) {
-      await new Promise<void>((resolve) => this.waiters.push(resolve));
+  async acquire(signal?: AbortSignal): Promise<() => void> {
+    signal?.throwIfAborted();
+    if (this.active < this.limit) {
+      this.active += 1;
+    } else {
+      await new Promise<void>((resolve, reject) => {
+        const grant = () => {
+          signal?.removeEventListener("abort", cancel);
+          resolve();
+        };
+        const cancel = () => {
+          const index = this.waiters.indexOf(grant);
+          if (index >= 0) this.waiters.splice(index, 1);
+          reject(signal?.reason);
+        };
+        this.waiters.push(grant);
+        signal?.addEventListener("abort", cancel, { once: true });
+      });
     }
-    this.active += 1;
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      this.active -= 1;
-      this.waiters.shift()?.();
+      const next = this.waiters.shift();
+      if (next) next();
+      else this.active -= 1;
     };
   }
 }
 
-/**
- * 把只读工具的 execute 包进信号量(T24 装配层限流)。
- *
- * 只帽 `readOnly === true` 的工具 —— 写类/未标工具直通:写工具的正确性由
- * T23 写守卫兜底,不该排队;宁可漏帽不可误帽(把写类误帽进只读队列 =
- * T23 白做)。release 在 finally:一个 throw 的工具把帽带崩,后续只读调用
- * 全饿死,表象是"agent 越跑越慢",极难归因。
- */
 export const withConcurrencyCap = (
   agentTool: AgentTool,
   limiter: Semaphore,
@@ -64,12 +65,14 @@ export const withConcurrencyCap = (
       execute: async (input: unknown, options?: unknown) => {
         // T50:排队等待单独成段 —— 无竞争时是 0,不是 undefined。
         const queueStart = Date.now();
-        const release = await limiter.acquire();
+        const signal = (options as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
+        const release = await limiter.acquire(signal);
         const toolCallId = (options as { toolCallId?: string } | undefined)?.toolCallId;
         if (toolCallId !== undefined) {
           timing?.record(toolCallId, "queue", Date.now() - queueStart);
         }
         try {
+          signal?.throwIfAborted();
           return await innerExecute(input as never, options as never);
         } finally {
           release();

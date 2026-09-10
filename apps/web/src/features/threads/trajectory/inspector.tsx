@@ -50,12 +50,10 @@ function HashLine({ label, hash }: { readonly label: string; readonly hash: unkn
 export function Inspector({
   row,
   snapshotPayload,
-  onOpenSubRun,
   onClose
 }: {
   readonly row: TrajectoryRow;
   readonly snapshotPayload?: unknown;
-  readonly onOpenSubRun?: (runId: string) => void;
   readonly onClose: () => void;
 }) {
   const payload = asRecord(row.payload);
@@ -157,26 +155,6 @@ export function Inspector({
             <div className="text-[11px] text-muted-foreground">
               调用当时的 snapshot 在未加载的页里(继续上滚加载后可见)。
             </div>
-          )}
-        </>
-      ) : null}
-
-      {row.kind === "subtool" && payload ? (
-        <>
-          <Section title="子代理">
-            <KV label="类型" value={String(payload["subagentType"] ?? "?")} />
-            <KV label="任务" value={String(payload["backgroundTaskId"] ?? "?")} />
-            <KV label="状态" value={String(payload["status"] ?? "?")} />
-            <KV label="事件数" value={String(payload["eventCount"] ?? 0)} />
-          </Section>
-          {onOpenSubRun && (
-            <button
-              type="button"
-              onClick={() => onOpenSubRun(row.runId)}
-              className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent/50"
-            >
-              打开子 Run 轨迹 →
-            </button>
           )}
         </>
       ) : null}

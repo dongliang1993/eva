@@ -25,10 +25,9 @@ export interface RunApprovalChannelDependencies {
 /**
  * 一次 Run 的审批通道 —— 工具执行前那道闸门的**全部**决定都在这个文件里。
  *
- * 三条出口,不是三个相似的函数:
- * - `requestApproval`      主 Agent 的普通工具:四级放行链,最后一级才弹窗;
- * - `subagentRequestApproval` 后台子代理:没人能点弹窗,直接落台账自动通过;
- * - `requestPlanReview`    exit_plan_mode 的平行通道(不走 boolean 协议)。
+ * 两条出口,不是两个相似的函数:
+ * - `requestApproval`   主代理和 awaited 子代理共用的普通工具审批链;
+ * - `requestPlanReview` exit_plan_mode 的平行通道(不走 boolean 协议)。
  *
  * 外加两个 `lookup*Decision` —— 决策的**唯一查询口**。事实源是 `approval_requests` 行,
  * 不是 SSE 事件:回放路径不带 decision(§坑 3),从事件里捞会在刷新后丢掉定格态。
@@ -45,7 +44,7 @@ export class RunApprovalChannel {
    */
   private planGateState: PlanGateState | undefined;
 
-  constructor(private readonly deps: RunApprovalChannelDependencies) {}
+  constructor(private readonly deps: RunApprovalChannelDependencies) { }
 
   bindPlanGate(state: PlanGateState): void {
     this.planGateState = state;
@@ -153,14 +152,6 @@ export class RunApprovalChannel {
 
     return approved;
   };
-
-  /**
-   * 子代理分支(T17,docs 04 §8.6.1):后台子代理没人能点弹窗 —— 进闸门、
-   * 自动通过、落台账。不发 approval_request:后台的 SSE 帧混进主流会让前端
-   * 冒出 runId 相同但 toolCallId 陌生的审批卡片。
-   */
-  readonly subagentRequestApproval: RequestApproval = async ({ toolCallId, toolName, args }) =>
-    this.deps.approvals.autoApprove(toolCallId, this.origin(toolName, args));
 
   /** T45b:exit_plan_mode 的平行审批通道。普通工具的 RequestApproval boolean 链路不动。 */
   readonly requestPlanReview: RequestPlanReview = async ({

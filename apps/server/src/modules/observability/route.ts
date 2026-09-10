@@ -3,11 +3,10 @@ import { z } from "zod";
 import type {
   RunEventDto,
   RunTrajectoryResponse,
-  SessionTrajectoryResponse,
-  SubRunSummaryDto
+  SessionTrajectoryResponse
 } from "@eva/shared";
 
-import type { RunEventRecord, SubRunSummary } from "./api.js";
+import type { RunEventRecord } from "./api.js";
 
 const limitSchema = z.coerce.number().int().min(1).max(1000).default(200);
 
@@ -56,18 +55,6 @@ const toDto = (row: RunEventRecord): RunEventDto => ({
   payload: parsePayload(row.payload),
   occurredAtMs: row.occurredAtMs,
   durationMs: row.durationMs
-});
-
-const toSubRunDto = (row: SubRunSummary): SubRunSummaryDto => ({
-  runId: row.runId,
-  parentRunId: row.parentRunId,
-  backgroundTaskId: row.backgroundTaskId,
-  subagentType: row.subagentType,
-  parentToolCallId: row.parentToolCallId,
-  status: row.status as SubRunSummaryDto["status"],
-  eventCount: row.eventCount,
-  firstOccurredAtMs: row.firstOccurredAtMs,
-  lastOccurredAtMs: row.lastOccurredAtMs
 });
 
 /** session log 一行:键序固定(JSON.stringify 按插入序),两次导出 byte 相同。
@@ -134,7 +121,6 @@ export const registerTrajectoryRoutes = (app: FastifyInstance): void => {
     const last = events[events.length - 1];
     const response: SessionTrajectoryResponse = {
       events: events.map(toDto),
-      subRuns: app.api.observability.summarizeSubRuns(sessionId).map(toSubRunDto),
       nextCursor:
         events.length === query.limit && last !== undefined
           ? {

@@ -28,12 +28,11 @@ export { loadSoulSection } from "./prompts/soul.js";
 
 // Skills
 export {
-  autoSelectSkills,
   createReadSkillTool,
   loadSkills,
   skillsToPromptSection,
 } from "./skills/index.js";
-export type { AutoSelectSkillsResult, Skill } from "./skills/index.js";
+export type { Skill } from "./skills/index.js";
 
 // Tool construction and built-in tools
 export {
@@ -50,7 +49,6 @@ export {
   createListDirTool,
   createMemoryPromptSection,
   createPlanGateState,
-  createPlanWeaveTools,
   createReadFileTool,
   createReadMemoryFileTool,
   createSaveMemoryTool,
@@ -60,43 +58,30 @@ export {
   createWriteTool,
   isSafeReadOnlyCommand,
   matchesPlanGatePath,
-  planInputSchema,
 } from "./tools/index.js";
 export type {
   AgentTool,
   MemoryCategory,
   MemoryEntry,
   MemoryStore,
-  PlanBlockInput,
   PlanGateHandle,
   PlanGateState,
   PlanGateStore,
-  PlanInput,
-  PlanTaskInput,
-  PlanWeaveGateway,
   RequestPlanReview,
 } from "./tools/index.js";
 export { buildPolicyKeys } from "./approval/policy-key.js";
 
 // Subagent host contract
 export {
-  canSpawnAtDepth,
-  createReportTool,
   createSubagentTool,
-  CrewRegistry,
+  SUBAGENT_ROLES,
   filterToolsForRole,
-  formatSubagentNotice,
-  MAX_DEPTH,
   missingRoleTools,
-  runSubagent,
   SUBAGENT_MAX_STEPS,
 } from "./subagents/index.js";
 export type {
-  CreateTaskInput,
   ForkRunner,
   SubagentEventSink,
-  SubagentNotice,
   SubagentRole,
   TaskRecord,
-  TaskStore,
 } from "./subagents/index.js";

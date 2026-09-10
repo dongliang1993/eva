@@ -3,23 +3,20 @@ import { RunHub } from "./run-hub.js";
 interface RunEntry {
   readonly controller: AbortController;
   readonly hub: RunHub;
+  readonly done: Promise<void>;
+  readonly resolve: () => void;
 }
 
-/**
- * run 级注册表:runId → { AbortController, 事件枢纽 }。
- *
- * **不持有 sessionId** —— 审批的归属键是 runId(见 ApprovalGateway.cancelByRun),
- * 让这个注册表知道会话只会诱惑调用方把它当归属源用。
- *
- * 枢纽放在这里的原因:重连路由(GET /runs/:runId/stream)只有 runId,
- * 它需要一个进程内的地方按 runId 找到在飞 run 的事件源。
- */
 export class RunRegistry {
   private readonly runs = new Map<string, RunEntry>();
+  private closing = false;
 
   register(runId: string): AbortController {
+    if (this.closing) throw Object.assign(new Error("Server is shutting down"), { statusCode: 503 });
     const controller = new AbortController();
-    this.runs.set(runId, { controller, hub: new RunHub(runId) });
+    let resolve!: () => void;
+    const done = new Promise<void>(complete => { resolve = complete; });
+    this.runs.set(runId, { controller, hub: new RunHub(runId), done, resolve });
     return controller;
   }
 
@@ -40,9 +37,17 @@ export class RunRegistry {
     return true;
   }
 
+  async close(): Promise<void> {
+    this.closing = true;
+    const entries = [...this.runs.values()];
+    for (const entry of entries) entry.controller.abort();
+    await Promise.all(entries.map(entry => entry.done));
+  }
+
   unregister(runId: string): void {
     // 兜底:路由正常收尾时已经 closeAll 过,异常路径靠这里不留悬挂的订阅者。
     this.runs.get(runId)?.hub.closeAll();
+    this.runs.get(runId)?.resolve();
     this.runs.delete(runId);
   }
 }

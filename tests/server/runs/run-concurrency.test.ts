@@ -11,7 +11,6 @@ import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessi
 import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
 import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
-import { RunLedger } from "../../../apps/server/src/modules/runs/index.js";
 import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
 import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
 import { registerRunRoutes } from "../../../apps/server/src/modules/runs/index.js";
@@ -52,13 +51,17 @@ const startApp = async (): Promise<void> => {
   app = Fastify();
   app.decorate("infra", { config: loadConfig({ env: {}, cwd: "/tmp" }), db, skills: [] });
   app.decorate("services", {
-    agents: { build: () => ({ agent, mainModel: { qualifiedModelId: "openai:test" } }) },
+    agents: { build: () => ({
+      agent,
+      mainModel: { qualifiedModelId: "openai:test" },
+      toolModel: { qualifiedModelId: "openai:test-tool" }
+    }) },
     session: new SessionService(
       new DrizzleSessionRepository(db),
       new DrizzleMessageRepository(db)
     ),
     approvals: new ApprovalGateway(new ApprovalRepository(db)),
-    runLedger: new RunLedger(new DrizzleRunRepository(db)),
+
     runRegistry: new RunRegistry(),
     mcp: { ensureConnected: async () => {}, listTools: () => [] }
   });
@@ -109,6 +112,42 @@ afterEach(async () => {
  * 它红了就意味着刷新后再发一句会让两个 run 同时改 activeLeafId。
  */
 describe("同会话并发守卫", () => {
+  it("两个同时到达的请求只有一个能占位，失败者不追加用户消息", async () => {
+    new DrizzleSessionRepository(db).create({ id: "session-race" });
+    const responses = await Promise.all([
+      post({ sessionId: "session-race", text: "a", modelId: "openai:test" }),
+      post({ sessionId: "session-race", text: "b", modelId: "openai:test" }),
+    ]);
+    expect(responses.map(r => r.statusCode).sort()).toEqual([200, 409]);
+    expect(runRowCount("session-race")).toBe(1);
+    expect(new DrizzleMessageRepository(db).findBySessionId("session-race").filter(m => m.role === "user")).toHaveLength(1);
+  });
+
+  it("重发相同 requestId 不重复创建会话、输入或运行", async () => {
+    const requestId = crypto.randomUUID();
+    const body = { requestId, text: "once", modelId: "openai:test" };
+    expect((await post(body)).statusCode).toBe(200);
+    const duplicate = await post(body);
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json()).toMatchObject({ runId: requestId, status: "completed" });
+    const run = new DrizzleRunRepository(db).findById(requestId)!;
+    expect(runRowCount(run.sessionId)).toBe(1);
+    expect(new DrizzleMessageRepository(db).findBySessionId(run.sessionId)
+      .filter(message => message.role === "user")).toHaveLength(1);
+    const details = await app.inject({ method: "GET", url: `/api/v1/runs/${requestId}` });
+    expect(details.statusCode).toBe(200);
+    expect(details.json()).toMatchObject({ run: { id: requestId, status: "completed" }, operations: [] });
+  });
+
+  it("重复收尾不能覆盖终态", () => {
+    new DrizzleSessionRepository(db).create({ id: "session-final" });
+    const runs = new DrizzleRunRepository(db);
+    runs.start({ id: "run-final", sessionId: "session-final" });
+    runs.settle("run-final", { status: "completed", finishReason: "stop" });
+    runs.settle("run-final", { status: "error", error: "late failure" });
+    expect(runs.findById("run-final")).toMatchObject({ status: "completed", finishReason: "stop", error: null });
+  });
+
   it("已有 run 在飞 → 409 + activeRunId,不多留 run 行", async () => {
     new DrizzleSessionRepository(db).create({ id: "session-1" });
     seedRunningRun("session-1", "run-live");

@@ -22,7 +22,7 @@ export interface RetentionLogger {
  * 三条纪律:
  * - 整 Run 粒度删,绝不删活 Run 里的旧事件(request_snapshot_ref 的引用链在 Run 内,
  *   删中间事件会断链);running 状态永远豁免。
- * - 子 Run 由 parent_run_id 自引用级联带走,不能只删父的;run_events 由 run_id 级联带走。
+ * - run_events 由 run_id 级联带走。
  * - usage_records 的保留策略独立 —— 它的 runs FK 已在 0030 摘掉,这里删 Run 不影响它。
  */
 export const applyObservabilityRetention = (
@@ -40,7 +40,7 @@ export const applyObservabilityRetention = (
   if (agedOut > 0) {
     logger.info(
       { deletedRuns: agedOut, retentionDays: settings.retentionDays },
-      "observability retention: aged runs deleted (children cascaded)"
+      "observability retention: aged runs deleted"
     );
   }
 

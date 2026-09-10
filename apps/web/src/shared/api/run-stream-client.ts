@@ -9,7 +9,6 @@ import type {
   RunStreamEvent,
   RunStreamFrame,
   RunSubagentUpdateEvent,
-  RunSubagentReportEvent,
   StreamFinishReason
 } from "@eva/shared";
 import { toolPartOutput } from "@eva/shared";
@@ -49,7 +48,6 @@ export interface StreamCallbacks {
   /** S7:子代理事件。与主链隔离 —— 走专属 callback,绝不并进 onEvent 的主 builder。 */
   readonly onSubagent?: (event: RunSubagentUpdateEvent) => void;
   /** S7:子代理主动交付了结论 —— 卡片即时显示"已回报"。 */
-  readonly onSubagentReport?: (event: RunSubagentReportEvent) => void;
   readonly onError: (message: string) => void;
   readonly onEnd: (finishReason: StreamFinishReason) => void;
   /**
@@ -78,9 +76,9 @@ export const toolPartToInfo = (part: EvaDynamicToolPart): ToolCallInfo => {
   const rawDecision: unknown = part.toolMetadata?.approvalDecision;
   const approvalDecision =
     typeof rawDecision === "object" && rawDecision !== null
-    && ((rawDecision as ApprovalDecision).action === "granted"
-      || (rawDecision as ApprovalDecision).action === "denied")
-    && typeof (rawDecision as ApprovalDecision).decidedAt === "string"
+      && ((rawDecision as ApprovalDecision).action === "granted"
+        || (rawDecision as ApprovalDecision).action === "denied")
+      && typeof (rawDecision as ApprovalDecision).decidedAt === "string"
       ? (rawDecision as ApprovalDecision)
       : undefined;
 
@@ -166,9 +164,6 @@ const dispatchEvent = (ev: RunStreamEvent, callbacks: StreamCallbacks): void => 
     // builder,子代理的中间过程反向污染主上下文(T15 §2.4 的静默失败模式)。
     case "subagent_update":
       callbacks.onSubagent?.(ev);
-      break;
-    case "subagent_report":
-      callbacks.onSubagentReport?.(ev);
       break;
     case "end":
       callbacks.onEnd(ev.finishReason);

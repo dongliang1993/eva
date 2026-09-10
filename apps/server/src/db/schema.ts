@@ -1,5 +1,4 @@
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const sessions = sqliteTable(
@@ -75,9 +74,13 @@ export const memoryCategories = [
 
 export type MemoryCategory = (typeof memoryCategories)[number];
 
-export const memoryOrigins = ["manual", "tool_saved"] as const;
+export const memoryOrigins = ["manual", "tool_saved", "auto_extracted"] as const;
 
 export type MemoryOrigin = (typeof memoryOrigins)[number];
+
+export const memoryStatuses = ["active", "superseded"] as const;
+
+export type MemoryStatus = (typeof memoryStatuses)[number];
 
 export const memories = sqliteTable(
   "memories",
@@ -91,13 +94,18 @@ export const memories = sqliteTable(
       .default("manual"),
     content: text("content").notNull(),
     metadata: text("metadata").notNull().default("{}"),
+    /** Visibility, independent from the session that produced the fact. */
+    scopeKey: text("scope_key").notNull().default("global"),
+    /** Stable semantic identity used to update a fact instead of duplicating it. */
+    memoryKey: text("memory_key"),
+    status: text("status", { enum: memoryStatuses }).notNull().default("active"),
     sourceSessionId: text("source_session_id"),
     sourceMessageId: text("source_message_id"),
+    sourceRunId: text("source_run_id"),
+    /** Integer percentage, 0..100. */
+    confidence: integer("confidence"),
+    revision: integer("revision").notNull().default(0),
     userId: text("user_id").notNull().default("default"),
-    embeddingStatus: text("embedding_status").notNull().default("pending"),
-    embeddingModel: text("embedding_model"),
-    embeddedAt: text("embedded_at"),
-    lastRecalledAt: text("last_recalled_at"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),
@@ -108,8 +116,11 @@ export const memories = sqliteTable(
   (table) => [
     index("idx_memories_user_id").on(table.userId),
     index("idx_memories_category").on(table.category),
-    index("idx_memories_embedding_status").on(table.embeddingStatus),
-    index("idx_memories_created_at").on(table.createdAt)
+    index("idx_memories_created_at").on(table.createdAt),
+    index("idx_memories_scope_status").on(table.userId, table.scopeKey, table.status),
+    uniqueIndex("uq_memories_active_key")
+      .on(table.userId, table.scopeKey, table.memoryKey)
+      .where(sql`${table.memoryKey} IS NOT NULL AND ${table.status} = 'active'`)
   ]
 );
 
@@ -130,7 +141,7 @@ export const messages = sqliteTable(
     parentId: text("parent_id"),
     slotId: text("slot_id"),
     depth: integer("depth").notNull().default(0),
-    /** S7:子代理进程消息的挂点;主链构建时按 IS NULL 过滤(见 message-tree.ts)。 */
+    /** 子代理 transcript 的挂点；主链构建时按 IS NULL 过滤。 */
     parentToolCallId: text("parent_tool_call_id"),
     createdAt: text("created_at")
       .notNull()
@@ -144,9 +155,9 @@ export const messages = sqliteTable(
   ]
 );
 
-// 后台子代理任务事实表(S7)。transcript 在 messages 表,这里只存任务状态与结局。
-export const backgroundTasks = sqliteTable(
-  "background_tasks",
+// 子代理任务事实表。transcript 在 messages 表,这里只存任务状态与结局。
+export const subagentTasks = sqliteTable(
+  "subagent_tasks",
   {
     id: text("id").primaryKey(),
     sessionId: text("session_id")
@@ -168,7 +179,7 @@ export const backgroundTasks = sqliteTable(
     endedAt: text("ended_at")
   },
   (table) => [
-    index("idx_background_tasks_session").on(table.sessionId)
+    index("idx_subagent_tasks_session").on(table.sessionId)
   ]
 );
 
@@ -195,13 +206,6 @@ export const runs = sqliteTable(
     sessionId: text("session_id")
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
-    /** 后台子代理来源 Run;NULL 即主 Run(S27/T48)。删除父 Run 级联子 Run。 */
-    parentRunId: text("parent_run_id").references(
-      (): AnySQLiteColumn => runs.id,
-      { onDelete: "cascade" }
-    ),
-    /** 后台子代理对应的 background_tasks.id;类型与发起 Tool Call 由该行反查,不冗余。 */
-    backgroundTaskId: text("background_task_id"),
     status: text("status", { enum: runStatuses }).notNull().default("running"),
     /** 路由前请求的模型(请求 modelId / 会话记录),解析失败时只有它有值。 */
     requestedModel: text("requested_model"),
@@ -224,8 +228,110 @@ export const runs = sqliteTable(
   (table) => [
     index("idx_runs_session_id").on(table.sessionId),
     index("idx_runs_status").on(table.status),
-    index("idx_runs_parent_run_id").on(table.parentRunId),
-    index("idx_runs_background_task_id").on(table.backgroundTaskId)
+    uniqueIndex("idx_runs_active_session").on(table.sessionId)
+      .where(sql`${table.status} = 'running'`)
+  ]
+);
+
+/** Memories injected into a run, retained as provenance for debugging. */
+export const runMemoryRefs = sqliteTable(
+  "run_memory_refs",
+  {
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    memoryId: text("memory_id")
+      .notNull()
+      .references(() => memories.id, { onDelete: "cascade" }),
+    rank: integer("rank").notNull(),
+    score: integer("score").notNull(),
+    strategy: text("strategy").notNull().default("fts"),
+    injectedTokens: integer("injected_tokens").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`)
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.memoryId] }),
+    index("idx_run_memory_refs_memory").on(table.memoryId)
+  ]
+);
+
+export const memoryExtractionJobStatuses = [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "canceled"
+] as const;
+
+export const memoryExtractionJobs = sqliteTable(
+  "memory_extraction_jobs",
+  {
+    id: text("id").primaryKey(),
+    sourceRunId: text("source_run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    workspaceId: text("workspace_id"),
+    sourceUserMessageId: text("source_user_message_id").notNull(),
+    sourceAssistantMessageId: text("source_assistant_message_id").notNull(),
+    modelId: text("model_id").notNull(),
+    mode: text("mode", { enum: ["review", "automatic"] }).notNull(),
+    status: text("status", { enum: memoryExtractionJobStatuses })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    retryAt: integer("retry_at").notNull().default(0),
+    error: text("error"),
+    /** AI SDK usage JSON for this auxiliary model call. */
+    usage: text("usage"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    startedAt: text("started_at"),
+    endedAt: text("ended_at")
+  },
+  (table) => [
+    uniqueIndex("uq_memory_extraction_jobs_run").on(table.sourceRunId),
+    index("idx_memory_extraction_jobs_status").on(table.status, table.createdAt)
+  ]
+);
+
+export const memoryCandidateStatuses = [
+  "pending",
+  "accepted",
+  "rejected",
+  "auto_saved"
+] as const;
+
+export const memoryCandidates = sqliteTable(
+  "memory_candidates",
+  {
+    id: text("id").primaryKey(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => memoryExtractionJobs.id, { onDelete: "cascade" }),
+    action: text("action", { enum: ["create", "update", "ignore"] }).notNull(),
+    targetMemoryId: text("target_memory_id"),
+    targetRevision: integer("target_revision"),
+    category: text("category", { enum: memoryCategories }).notNull(),
+    scopeKey: text("scope_key").notNull(),
+    memoryKey: text("memory_key").notNull(),
+    content: text("content").notNull(),
+    confidence: integer("confidence").notNull(),
+    evidenceMessageIds: text("evidence_message_ids").notNull().default("[]"),
+    status: text("status", { enum: memoryCandidateStatuses })
+      .notNull()
+      .default("pending"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    decidedAt: text("decided_at")
+  },
+  (table) => [
+    index("idx_memory_candidates_status").on(table.status, table.createdAt),
+    index("idx_memory_candidates_job").on(table.jobId)
   ]
 );
 
@@ -238,7 +344,7 @@ export type RunEventSeverity = (typeof runEventSeverities)[number];
  * 崩溃收口靠启动清扫追加 abandoned 事件。时间一律 epoch ms —— 与 runs/messages
  * 的 ISO text 只做 run_id 关联,不做跨表时间运算。
  *
- * seq 由 Run 级 recorder 独占单调分配(同一 Run 主 Agent 与前台子代理共用),
+ * seq 由 Run 级 recorder 独占单调分配（同一 Run 主代理与 awaited 子代理共用），
  * UNIQUE(run_id, seq) 靠这个纪律成立。
  */
 export const runEvents = sqliteTable(
@@ -253,7 +359,7 @@ export const runEvents = sqliteTable(
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
     seq: integer("seq").notNull(),
-    /** "main" | taskId(前台子代理)。 */
+    /** "main" | taskId（awaited 子代理）。 */
     agent: text("agent").notNull(),
     kind: text("kind").notNull(),
     turnIndex: integer("turn_index"),
@@ -412,32 +518,6 @@ export const mcpServers = sqliteTable(
   ]
 );
 
-export const sessionSkillSelectionOrigins = ["auto", "forced"] as const;
-
-export type SessionSkillSelectionOrigin =
-  (typeof sessionSkillSelectionOrigins)[number];
-
-/** T44:skill auto-selection 的 thread 累积集(LLM 选中不可重放,落选表)。 */
-export const sessionSkillSelections = sqliteTable(
-  "session_skill_selections",
-  {
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => sessions.id, { onDelete: "cascade" }),
-    skillName: text("skill_name").notNull(),
-    origin: text("origin", { enum: sessionSkillSelectionOrigins })
-      .notNull()
-      .default("auto"),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(datetime('now'))`)
-  },
-  (table) => [
-    primaryKey({ columns: [table.sessionId, table.skillName] }),
-    index("idx_session_skill_selections_session").on(table.sessionId)
-  ]
-);
-
 export const planStatuses = ["active", "approved", "rejected"] as const;
 
 export type PlanStatus = (typeof planStatuses)[number];
@@ -465,3 +545,16 @@ export const plans = sqliteTable(
   },
   (table) => [index("idx_plans_session_status").on(table.sessionId, table.status)]
 );
+
+export const toolOperations = sqliteTable("tool_operations", {
+  runId: text("run_id").notNull().references(() => runs.id, { onDelete: "cascade" }),
+  agent: text("agent").notNull(),
+  toolCallId: text("tool_call_id").notNull(),
+  toolName: text("tool_name").notNull(),
+  input: text("input").notNull(),
+  output: text("output"),
+  error: text("error"),
+  status: text("status", { enum: ["running", "completed", "failed", "unknown"] }).notNull(),
+  startedAt: integer("started_at").notNull(),
+  endedAt: integer("ended_at")
+}, table => [primaryKey({ columns: [table.runId, table.agent, table.toolCallId] })]);

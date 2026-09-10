@@ -21,46 +21,12 @@ describe("subagent 原语 (S7 push 模型)", () => {
     expect(tools.map((t) => t.name)).toEqual(["subagent"]);
   });
 
-  it("缺省后台 → 立刻返回任务号,并明说结果会自动送到、无需轮询", async () => {
-    const seen: { background?: boolean; description?: string } = {};
+  it("等待子代理完成后返回结论", async () => {
     const tools = createSubagentTool({
-      runFork: async ({ background, description, taskId }) => {
-        seen.background = background;
-        seen.description = description;
-        return { taskId };
-      }
+      runFork: async ({ prompt }) => ({ text: `FINAL: ${prompt}` })
     });
-
-    const out = await exec("subagent", tools)({
-      description: "深挖 apps/server",
-      prompt: "调查 apps/server 的目录结构"
-    });
-
-    expect(seen.background).toBe(true);
-    expect(seen.description).toBe("深挖 apps/server");
-    expect(out).toMatch(/Started subagent/);
-    expect(out).toContain("深挖 apps/server");
-    expect(out).toContain("delivered to you");
-    // 绝不能出现任何"去查/去 join"的话术,也不该再提 TaskOutput(工具已不存在)。
-    expect(out).not.toMatch(/TaskOutput|poll/i);
-  });
-
-  it("run_in_background=false → 前台等到底,返回子代理交付的结论", async () => {
-    const tools = createSubagentTool({
-      runFork: async ({ background, prompt }) => {
-        expect(background).toBe(false);
-        // 子代理确实读了 README(中间步骤),但只有结论收敛出来(阀2)。
-        return { text: `FINAL: ${prompt} (read README, ~2 tools)` };
-      }
-    });
-
-    const out = await exec("subagent", tools)({
-      description: "读 README",
-      prompt: "digest README",
-      run_in_background: false
-    });
-
-    expect(out).toBe("FINAL: digest README (read README, ~2 tools)");
+    expect(await exec("subagent", tools)({ description: "读 README", prompt: "digest README" }))
+      .toBe("FINAL: digest README");
   });
 
   it("description 必填 —— 缺了就报错(否则卡片无法分辨)", async () => {

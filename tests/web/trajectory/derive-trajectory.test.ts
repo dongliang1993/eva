@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { RunEventDto, SubRunSummaryDto } from "@eva/shared";
+import type { RunEventDto } from "@eva/shared";
 import { deriveTrajectory } from "../../../apps/web/src/features/threads/trajectory/derive-trajectory.js";
 
 let seq = 0;
@@ -117,34 +117,6 @@ describe("deriveTrajectory(T53)", () => {
     const assistant = rows.find((row) => row.kind === "assistant")!;
     expect(assistant.timing?.ttftMs).toBe(320);
     expect(assistant.title).toBe("做完了");
-  });
-
-  it("后台子 Run 嵌到发起它的 Tool 行下;锚点未加载先不显示", () => {
-    const subRun: SubRunSummaryDto = {
-      runId: "child-run",
-      parentRunId: "r-1",
-      backgroundTaskId: "task-1",
-      subagentType: "explorer",
-      parentToolCallId: "call-3",
-      status: "completed",
-      eventCount: 12,
-      firstOccurredAtMs: 1100,
-      lastOccurredAtMs: 2000
-    };
-
-    // 锚点 call-3 在 → 挂上去
-    const withAnchor = deriveTrajectory(buildEvents(), [subRun]);
-    const anchorTool = withAnchor.find((row) => row.toolCallId === "call-3")!;
-    expect(anchorTool.children).toHaveLength(1);
-    expect(anchorTool.children![0]).toMatchObject({
-      kind: "subtool",
-      runId: "child-run",
-      status: "success"
-    });
-
-    // 锚点不在(只翻了第一页)→ 静默不显示,不报错
-    const withoutAnchor = deriveTrajectory(buildEvents().slice(0, 4), [subRun]);
-    expect(withoutAnchor.every((row) => row.kind !== "subtool")).toBe(true);
   });
 
   it("未知 kind 降级成 raw 行,投影不崩", () => {

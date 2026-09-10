@@ -26,11 +26,16 @@ const seedSessionWithMessages = (sessionId: string, count: number): void => {
   const sessionRepo = new DrizzleSessionRepository(db);
   sessionRepo.create({ id: sessionId });
   const messageRepo = new DrizzleMessageRepository(db);
+  let parentId: string | undefined;
   for (let i = 0; i < count; i += 1) {
-    messageRepo.create({
+    const stored = messageRepo.create({
       sessionId,
+      ...(parentId ? { parentId } : {}),
+      depth: i,
       message: createUserUIMessage(randomUUID(), `message ${i}`)
     });
+    parentId = stored.id;
+    sessionRepo.updateActiveLeaf(sessionId, stored.id);
   }
 };
 

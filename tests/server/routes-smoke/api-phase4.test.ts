@@ -13,7 +13,8 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import { DrizzleMemoryRepository } from "../../../apps/server/src/modules/memory/index.js";
+import { DrizzleMemoryRepository, MemoryExtractionRepository } from "../../../apps/server/src/modules/memory/index.js";
+import { runs } from "../../../apps/server/src/db/schema.js";
 import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
@@ -89,6 +90,33 @@ afterEach(async () => {
 });
 
 describe("Phase 4 API routes", () => {
+  it("reviews memory candidates and rejects stale updates with HTTP 409", async () => {
+    const session = new DrizzleSessionRepository(db).create({ id: randomUUID(), title: "Memory" });
+    const runId = randomUUID();
+    db.insert(runs).values({ id: runId, sessionId: session.id, status: "completed" }).run();
+    const repo = new DrizzleMemoryRepository(db);
+    const original = repo.save({ id: "fact", content: "Old preference", memoryKey: "preference.language" });
+    const jobs = new MemoryExtractionRepository(db);
+    jobs.enqueue({ id: "job", sourceRunId: runId, sessionId: session.id,
+      sourceUserMessageId: "user", sourceAssistantMessageId: "assistant", modelId: "provider:model", mode: "review" });
+    jobs.complete(jobs.claimNext()!, [{ action: "update", targetMemoryId: original.id,
+      targetRevision: original.revision, category: "preference", scopeKey: "global",
+      memoryKey: "preference.language", content: "Extracted preference", confidence: 95, evidenceMessageIds: ["user"] },
+    { action: "create", category: "knowledge", scopeKey: "global", memoryKey: "known.fact",
+      content: "Useful fact", confidence: 90, evidenceMessageIds: ["user"] }], repo);
+    const list = await app.inject({ method: "GET", url: "/api/v1/memories/candidates" });
+    expect(list.statusCode).toBe(200);
+    const [stale, fresh] = list.json();
+    repo.update("fact", "Manual correction");
+    const conflict = await app.inject({ method: "POST", url: `/api/v1/memories/candidates/${stale.id}/accept` });
+    expect(conflict.statusCode).toBe(409);
+    expect(repo.findById("fact")?.content).toBe("Manual correction");
+    expect((await app.inject({ method: "POST", url: `/api/v1/memories/candidates/${stale.id}/reject` })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `/api/v1/memories/candidates/${fresh.id}/accept` })).statusCode).toBe(200);
+    expect(repo.findByKey("global", "known.fact")?.content).toBe("Useful fact");
+    expect(jobs.listCandidates()).toEqual([]);
+  });
+
   it("searches threads across titles and indexed message text without duplicates", async () => {
     const sessionRepo = new DrizzleSessionRepository(db);
     const messageRepo = new DrizzleMessageRepository(db);
@@ -147,10 +175,6 @@ describe("Phase 4 API routes", () => {
         project: 1,
         decision: 0,
         knowledge: 0
-      },
-      embedding: {
-        ready: 0,
-        pending: 2
       }
     });
   });
@@ -292,11 +316,15 @@ describe("Phase 4 API routes", () => {
       title: "Short conversation"
     });
 
-    for (const content of ["One", "Two", "Three"]) {
-      messageRepo.create({
-        sessionId: thread.id,
+    let parentId: string | undefined;
+    for (const [depth, content] of ["One", "Two", "Three"].entries()) {
+      const stored = messageRepo.create({
+        sessionId: thread.id, depth,
+        ...(parentId ? { parentId } : {}),
         message: textMessage(content === "Two" ? "assistant" : "user", content)
       });
+      parentId = stored.id;
+      sessionRepo.updateActiveLeaf(thread.id, stored.id);
     }
 
     const response = await app.inject({

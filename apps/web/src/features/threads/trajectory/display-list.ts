@@ -12,7 +12,7 @@ export type DisplayItem =
       readonly type: "row";
       readonly key: string;
       readonly row: TrajectoryRow;
-      /** 0 = 顶层;1 = 挂在上一个 Assistant 下的 Tool;2 = 嵌套的后台子 Run。 */
+      /** 0 = 顶层；1 = 挂在上一个 Assistant 下的 Tool。 */
       readonly depth: 0 | 1 | 2;
       /** 该 Run 在会话里的序号(1 起) —— 左边角标。 */
       readonly runOrdinal: number;
@@ -138,17 +138,6 @@ export const buildDisplayList = (
       isRunStart
     });
 
-    // 后台子 Run 挂在 Tool 行下(depth 2 紧跟)。
-    for (const child of row.children ?? []) {
-      items.push({
-        type: "row",
-        key: child.key,
-        row: child,
-        depth: 2,
-        runOrdinal: ordinal,
-        isRunStart: false
-      });
-    }
   }
   flushAssistantFoldPlaceholder();
 

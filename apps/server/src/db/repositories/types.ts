@@ -68,7 +68,9 @@ export interface ISessionRepository {
 }
 
 export interface IMessageRepository {
+  findAncestors(sessionId: string, leafId: string): readonly StoredMessage[];
   create(input: CreateMessageInput): StoredMessage;
+  updateContent(message: EvaUIMessage): StoredMessage;
   findBySessionId(
     sessionId: string,
     options?: GetMessagesOptions

@@ -25,7 +25,6 @@ import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessi
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
 import { createObserverBridge, fanout } from "../../../apps/server/src/modules/observability/index.js";
 import { createRunRecorder } from "../../../apps/server/src/modules/observability/index.js";
-import { RunLedger } from "../../../apps/server/src/modules/runs/index.js";
 import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
 import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
 import { SubagentRunner } from "../../../apps/server/src/modules/subagents/index.js";
@@ -121,7 +120,8 @@ describe("run observability(T49)route 级", () => {
             maxSteps: 5,
             ...(options.observer !== undefined ? { observer: options.observer } : {})
           }),
-          mainModel: { qualifiedModelId: "openai:test" }
+          mainModel: { qualifiedModelId: "openai:test" },
+          toolModel: { qualifiedModelId: "openai:test-tool" }
         })
       },
       session: new SessionService(
@@ -129,7 +129,7 @@ describe("run observability(T49)route 级", () => {
         new DrizzleMessageRepository(db)
       ),
       approvals: new ApprovalGateway(new ApprovalRepository(db)),
-      runLedger: new RunLedger(new DrizzleRunRepository(db)),
+
       runRegistry: new RunRegistry(),
       mcp: { ensureConnected: async () => {}, listTools: () => [] }
     });
@@ -215,7 +215,6 @@ describe("run observability(T49)route 级", () => {
     // 骨架序列(允许中间夹 snapshot_ref / loop_transition 等):按序出现即满足投影需要。
     const skeleton = [
       "run_started",
-      "skills_selected",
       "routing_resolved",
       "turn_started",
       "request_snapshot",
@@ -298,11 +297,12 @@ describe("run observability(T49)子代理", () => {
       db,
       runId: "parent-run",
       model: "openai:test",
+      abortSignal: new AbortController().signal,
+      requestApproval: async () => false,
       observerForTask: (taskId) => bridge.forAgent(taskId)
     });
 
     const result = await runner.runFork({
-      background: false,
       prompt: "explore",
       subagentType: "explorer",
       description: "t",
@@ -323,52 +323,7 @@ describe("run observability(T49)子代理", () => {
     expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, i) => i));
   });
 
-  it("后台子代理:事件全在自己的 Run,父 Run ledger 无子代理事件", async () => {
-    seedParent();
-    const parentRecorder = createRunRecorder(recorderDeps(), {
-      runId: "parent-run",
-      sessionId: "s-1"
-    });
-    parentRecorder.record({ agent: "main", kind: "run_started" });
 
-    const runner = new SubagentRunner(stubFactory(textModel("bg answer")), {
-      sessionId: "s-1",
-      db,
-      runId: "parent-run",
-      model: "openai:test",
-      createChildObserver: (childRunId, taskId) =>
-        createObserverBridge(
-          createRunRecorder(recorderDeps(), { runId: childRunId, sessionId: "s-1" })
-        ).forAgent(taskId)
-    });
-
-    await runner.runFork({
-      background: true,
-      prompt: "explore",
-      subagentType: "explorer",
-      description: "t",
-      taskId: "task-b1",
-      parentToolCallId: "call-1"
-    });
-
-    const runsRepo = new DrizzleRunRepository(db);
-    const child = runsRepo.findBySessionId("s-1").find((row) => row.parentRunId === "parent-run");
-    expect(child).toBeDefined();
-    await waitFor(() => runsRepo.findById(child!.id)!.status !== "running");
-
-    const eventsRepo = new RunEventRepository(db);
-    const childEvents = eventsRepo.listByRun(child!.id, { limit: 500 });
-    expect(childEvents.length).toBeGreaterThan(0);
-    expect(childEvents.every((row) => row.agent === "task-b1")).toBe(true);
-    // 子 Run 的 seq 从 0 开始独立计数
-    const childSeqs = childEvents.map((row) => row.seq).sort((a, b) => a - b);
-    expect(childSeqs).toEqual(Array.from({ length: childSeqs.length }, (_, i) => i));
-
-    // 父 Run ledger 只有 main 的事件
-    const parentEvents = eventsRepo.listByRun("parent-run", { limit: 500 });
-    expect(parentEvents.every((row) => row.agent === "main")).toBe(true);
-    expect(parentEvents).toHaveLength(1); // 只有 route 侧那条 run_started
-  });
 });
 
 describe("run observability(T49)harness 事件", () => {
@@ -399,7 +354,7 @@ describe("run observability(T49)harness 事件", () => {
         }
         if (call === 1) {
           // step 1:纯文本 stop → notice 续跑(messages 长出运行时段,供 reactive compact 压缩)
-          return { stream: simulateReadableStream({ chunks: textChunks("first answer") }) };
+          return { stream: simulateReadableStream({ chunks: [...textChunks("first answer").slice(0, -1), { type: "finish", finishReason: { unified: "length", raw: "length" }, usage }] }) };
         }
         if (call === 2) {
           // 续跑圈 step 2 attempt 1:上下文溢出 → reactive compact 后重跑
@@ -417,10 +372,6 @@ describe("run observability(T49)harness 事件", () => {
       }
     });
 
-    // 第一次 drain 注入一条 notice 触发续跑圈,之后清空。(max-output 续写在
-    // MockLanguageModelV4 下端到端触发不了 —— finishReason 被归一成 other,
-    // 见 lead-agent-loop.test.ts:250 的同款结论。)
-    let noticeLeft = 1;
     const agent = createAgent({
       model,
       tools: [echoTool],
@@ -430,13 +381,7 @@ describe("run observability(T49)harness 事件", () => {
 
     const result = await agent.invoke({
       messages: [{ role: "user", content: "hi" }],
-      drainNotices: async () => {
-        if (noticeLeft > 0) {
-          noticeLeft -= 1;
-          return [{ text: "background subagent reported something" }];
-        }
-        return [];
-      }
+
     });
     expect(result.text).toContain("ok");
 

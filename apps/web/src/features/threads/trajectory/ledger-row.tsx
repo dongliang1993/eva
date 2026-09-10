@@ -7,7 +7,6 @@ const KIND_LABELS: Record<string, string> = {
   context: "Context",
   assistant: "Assistant",
   tool: "Tool",
-  subtool: "Sub",
   compacted: "Compacted",
   error: "Error",
   raw: "Raw"
@@ -20,7 +19,6 @@ const KIND_PILLS: Record<string, string> = {
   context: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
   assistant: "bg-violet-500/15 text-violet-700 dark:text-violet-400",
   tool: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  subtool: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
   compacted: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
   error: "bg-destructive/15 text-destructive",
   raw: "bg-muted text-muted-foreground"

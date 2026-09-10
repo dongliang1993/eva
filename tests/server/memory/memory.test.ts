@@ -1,22 +1,19 @@
 import { randomUUID } from "node:crypto";
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 import { loadConfig } from "../../../apps/server/src/config.js";
-import { initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
+import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
 import {
   DrizzleMemoryRepository,
+  recordMemoryRetrieval,
+  retrieveMemoriesForRun,
+  createMemoryTools,
   type IMemoryRepository
 } from "../../../apps/server/src/modules/memory/index.js";
-import {
-  buildMemoryRuntimeSupport,
-} from "../../../apps/server/src/modules/memory/index.js";
-import {
-  calculateMemoryContextTokenBudget,
-  renderRecallPromptContext,
-  type RecalledHistoryHit,
-  type RecalledMemoryEntry
-} from "../../../apps/server/src/modules/memory/index.js";
+import { runMemoryRefs, runs, sessions } from "../../../apps/server/src/db/schema.js";
+import { loadAppSettings } from "../../../apps/server/src/modules/settings/index.js";
+import { estimateTokens } from "../../../apps/server/src/lib/token-estimator.js";
 
 let db: AppDatabase;
 let repo: IMemoryRepository;
@@ -26,6 +23,8 @@ beforeEach(() => {
   migrateDb(db);
   repo = new DrizzleMemoryRepository(db);
 });
+
+afterEach(() => closeDb(db));
 
 // ---------------------------------------------------------------------------
 // Repository CRUD
@@ -112,100 +111,96 @@ describe("DrizzleMemoryRepository", () => {
     expect(memory.sourceMessageId).toBe("msg-1");
   });
 
-  it("renders recalled memory context within the available token budget", () => {
-    const memoryEntries: readonly RecalledMemoryEntry[] = [
-      {
-        id: "m1",
-        category: "user",
-        origin: "manual",
-        content: "User prefers concise answers.",
-        sourceSessionId: null,
-        sourceMessageId: null,
-        createdAt: "2026-04-05T00:00:00.000Z",
-        updatedAt: "2026-04-05T00:00:00.000Z",
-        estimatedTokens: 8
-      },
-      {
-        id: "m2",
-        category: "project",
-        origin: "manual",
-        content: "Project uses Drizzle ORM with SQLite and semantic memory recall. ".repeat(20).trim(),
-        sourceSessionId: null,
-        sourceMessageId: null,
-        createdAt: "2026-04-05T00:00:00.000Z",
-        updatedAt: "2026-04-05T00:00:00.000Z",
-        estimatedTokens: 300
-      }
-    ];
-    const historyHits: readonly RecalledHistoryHit[] = [
-      {
-        messageId: "msg-1",
-        sessionId: "thread-1",
-        content: "We previously discussed Drizzle migration pitfalls and memory compaction.",
-        snippet: "We previously discussed Drizzle migration pitfalls and memory compaction.",
-        rank: -1,
-        estimatedTokens: 18
-      }
-    ];
+  it("retrieves global and current-workspace memories across source sessions", () => {
+    repo.save({
+      id: "global-memory",
+      content: "The user prefers TypeScript architecture documents",
+      sourceSessionId: "an-old-session"
+    });
+    repo.save({
+      id: "current-workspace-memory",
+      content: "The TypeScript server uses a single run loop",
+      scopeKey: "workspace:workspace-a",
+      sourceSessionId: "another-old-session"
+    });
+    repo.save({
+      id: "other-workspace-memory",
+      content: "The TypeScript server uses an unrelated convention",
+      scopeKey: "workspace:workspace-b"
+    });
+    db.insert(sessions).values({ id: "current-session" }).run();
+    db.insert(runs).values({ id: "current-run", sessionId: "current-session" }).run();
 
-    const rendered = renderRecallPromptContext(
-      { memoryEntries, historyHits },
-      { tokenBudget: 120 }
-    );
+    const result = retrieveMemoriesForRun({
+      memories: repo as DrizzleMemoryRepository,
+      query: "Continue the TypeScript architecture work",
+      workspaceId: "workspace-a",
+      settings: loadAppSettings(db, loadConfig({ env: {}, cwd: "/tmp" })).memory
+    });
 
-    expect(rendered.usedMemoryIds).toContain("m1");
-    expect(rendered.usedMemoryIds).not.toContain("m2");
-    expect(rendered.promptContext).toContain("User prefers concise answers.");
-    expect(rendered.promptContext).not.toContain("semantic memory recall.");
+    expect(result.memoryIds).toContain("global-memory");
+    expect(result.memoryIds).toContain("current-workspace-memory");
+    expect(result.memoryIds).not.toContain("other-workspace-memory");
+    expect(result.section?.body).toContain("TypeScript");
+    expect(db.select().from(runMemoryRefs).all()).toHaveLength(0);
+    recordMemoryRetrieval(db, "current-run", result);
+    expect(db.select().from(runMemoryRefs).all()).toHaveLength(2);
   });
 
-  it("computes memory budget from remaining context headroom", () => {
-    const budget = calculateMemoryContextTokenBudget({
-      historyTokens: 120,
-      existingContext: {
-        incident: "Sentry issue RCA"
-      },
-      contextWindow: 20_000,
-      reservedOutputTokens: 4_000
-    });
-
-    expect(budget).toBeGreaterThan(0);
-    expect(budget).toBeLessThanOrEqual(8_000);
+  it("does not fall back to dumping memories for an empty FTS query", () => {
+    repo.save({ id: "secret-memory", content: "A memory that must not be dumped" });
+    expect(repo.search("a")).toEqual([]);
   });
 
-  it("builds budget-aware memory runtime context for recalled memories", async () => {
-    const config = loadConfig({ env: {}, cwd: "/tmp" });
-    const shortMemory = repo.save({
-      id: randomUUID(),
-      category: "project",
-      content: "Project guidance: keep RCA answers concise and action-oriented."
-    });
-    const longMemory = repo.save({
-      id: randomUUID(),
-      category: "project",
-      content: "Project guidance: "
-        + "capture every implementation detail about Drizzle, SQLite, embeddings, "
-        + "retrieval, migration history, API compatibility, and rollout notes. ".repeat(20).trim()
+  it("keeps accepted memory when its source session is deleted", () => {
+    db.insert(sessions).values({ id: "source-session" }).run();
+    const memory = repo.save({
+      id: "durable-memory",
+      content: "The user prefers concise replies",
+      sourceSessionId: "source-session"
     });
 
-    const runtime = await buildMemoryRuntimeSupport({
-      db,
-      config,
-      userMessage: "Need project guidance for the next RCA reply",
-      historyTokens: 60,
-      modelLimits: {
-        contextWindow: 1_000,
-        maxOutputTokens: 500
-      }
-    });
+    db.delete(sessions).run();
 
-    // T16:文件工具(L1 MEMORY.md + 日记)与 settings.memory.enabled 无关、始终挂载,
-    // 所以 additionalTools = DB 版 2 个(save/search)+ 文件版 3 个 = 5。
-    expect(runtime.additionalTools).toHaveLength(5);
-    expect(runtime.memoryBudgetTokens).toBeGreaterThan(0);
-    expect(runtime.memoryContext).toContain(shortMemory.content);
-    expect(runtime.usedMemoryIds).toContain(shortMemory.id);
-    expect(runtime.usedMemoryIds).not.toContain(longMemory.id);
-    expect(runtime.memoryContext).not.toContain("retrieval, migration history");
+    expect(repo.findById(memory.id)?.sourceSessionId).toBe("source-session");
+  });
+
+  it("retrieves Chinese facts through the trigram index", () => {
+    repo.save({ id: "chinese-memory", content: "用户正在重构服务端架构" });
+    expect(repo.search("继续做服务端架构").map((memory) => memory.id))
+      .toContain("chinese-memory");
+  });
+
+  it("supports two-character Chinese queries while respecting scopes and user identity", () => {
+    repo.save({ id: "zh", content: "用户喜欢中文回答" });
+    repo.save({ id: "other", content: "用户喜欢中文回答", userId: "another-user" });
+    repo.save({ id: "elsewhere", content: "文档使用中文", scopeKey: "workspace:another" });
+    expect(repo.searchRelevant("中文", ["global"]).map((memory) => memory.id)).toEqual(["zh"]);
+    expect(repo.searchRelevant("%%", ["global"])).toEqual([]);
+  });
+
+  it("includes the heading and guidance in the retrieval token budget", () => {
+    for (let i = 0; i < 5; i++) repo.save({ id: `fact-${i}`, content: "TypeScript " + "fact ".repeat(30) });
+    const settings = loadAppSettings(db, loadConfig({ env: {}, cwd: "/tmp" })).memory;
+    const result = retrieveMemoriesForRun({ memories: repo as DrizzleMemoryRepository,
+      query: "TypeScript", settings: { ...settings, maxRetrieveTokens: 100 } });
+    expect(result.section).toBeDefined();
+    expect(estimateTokens(`## ${result.section!.heading}\n${result.section!.body}`)).toBeLessThanOrEqual(100);
+    expect(result.tokenCount).toBeLessThanOrEqual(100);
+  });
+
+  it("tool-saved project facts carry workspace provenance and cannot update another workspace", async () => {
+    const tools = createMemoryTools(db, loadConfig({ env: {}, cwd: "/tmp" }), {
+      workspaceId: "current", sessionId: "session-a", runId: "run-a", userMessageId: "user-a"
+    });
+    const save = tools.find((tool) => tool.name === "save_memory")!;
+    const options = { toolCallId: "save", messages: [] };
+    await save.tool.execute!({ content: "This project uses TypeScript", category: "project" }, options);
+    expect(repo.listAll()[0]).toMatchObject({ scopeKey: "workspace:current", sourceSessionId: "session-a",
+      sourceRunId: "run-a", sourceMessageId: "user-a" });
+    expect(repo.searchRelevant("TypeScript", ["global", "workspace:another"])).toEqual([]);
+    repo.save({ id: "other-project", scopeKey: "workspace:another", content: "Original fact" });
+    await save.tool.execute!({ updateId: "other-project", content: "Overwrite", category: "project" }, options);
+    expect(repo.findById("other-project")?.content).toBe("Original fact");
   });
 });

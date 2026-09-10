@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   RunEventDto,
-  RunTrajectoryResponse,
   SessionTrajectoryCursor,
-  SessionTrajectoryResponse,
-  SubRunSummaryDto
+  SessionTrajectoryResponse
 } from "@eva/shared";
 
 import { apiFetch } from "../../../shared/api/fetch";
@@ -33,7 +31,6 @@ export const useTrajectory = (
   enabled: boolean
 ): TrajectoryState => {
   const [events, setEvents] = useState<readonly RunEventDto[]>([]);
-  const [subRuns, setSubRuns] = useState<readonly SubRunSummaryDto[]>([]);
   const [cursor, setCursor] = useState<SessionTrajectoryCursor | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -47,7 +44,6 @@ export const useTrajectory = (
     setLoading(true);
     setError(null);
     setEvents([]);
-    setSubRuns([]);
     setCursor(null);
 
     apiFetch<SessionTrajectoryResponse>(
@@ -56,7 +52,6 @@ export const useTrajectory = (
       .then((res) => {
         if (requestIdRef.current !== requestId) return;
         setEvents(res.events);
-        setSubRuns(res.subRuns);
         setCursor(res.nextCursor);
       })
       .catch((err: unknown) => {
@@ -86,7 +81,6 @@ export const useTrajectory = (
         if (requestIdRef.current !== requestId) return;
         // 旧页追加在尾部;投影内部自排序,累积顺序不影响结果。
         setEvents((prev) => [...prev, ...res.events]);
-        setSubRuns(res.subRuns);
         setCursor(res.nextCursor);
       })
       .catch((err: unknown) => {
@@ -98,7 +92,7 @@ export const useTrajectory = (
       });
   }, [sessionId, cursor, loadingOlder]);
 
-  const rows = useMemo(() => deriveTrajectory(events, subRuns), [events, subRuns]);
+  const rows = useMemo(() => deriveTrajectory(events), [events]);
 
   return {
     rows,
@@ -106,73 +100,6 @@ export const useTrajectory = (
     loading,
     loadingOlder,
     hasOlder: cursor !== null,
-    loadOlder,
-    error
-  };
-};
-
-/** 单 Run 轨迹(T54 Subtool 展开):beforeSeq 翻页,单 Run 内 seq 严格递增唯一。 */
-export const useRunTrajectory = (
-  runId: string | null
-): TrajectoryState => {
-  const [events, setEvents] = useState<readonly RunEventDto[]>([]);
-  const [nextBeforeSeq, setNextBeforeSeq] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!runId) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setEvents([]);
-    setNextBeforeSeq(null);
-
-    apiFetch<RunTrajectoryResponse>(
-      `/api/v1/runs/${runId}/trajectory?limit=${PAGE_SIZE}`
-    )
-      .then((res) => {
-        if (cancelled) return;
-        setEvents(res.events);
-        setNextBeforeSeq(res.nextBeforeSeq);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "加载子 Run 失败");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [runId]);
-
-  const loadOlder = useCallback(() => {
-    if (!runId || nextBeforeSeq === null || loadingOlder) return;
-    setLoadingOlder(true);
-    apiFetch<RunTrajectoryResponse>(
-      `/api/v1/runs/${runId}/trajectory?limit=${PAGE_SIZE}&beforeSeq=${nextBeforeSeq}`
-    )
-      .then((res) => {
-        setEvents((prev) => [...prev, ...res.events]);
-        setNextBeforeSeq(res.nextBeforeSeq);
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "加载更旧的记录失败");
-      })
-      .finally(() => setLoadingOlder(false));
-  }, [runId, nextBeforeSeq, loadingOlder]);
-
-  const rows = useMemo(() => deriveTrajectory(events, []), [events]);
-
-  return {
-    rows,
-    events,
-    loading,
-    loadingOlder,
-    hasOlder: nextBeforeSeq !== null,
     loadOlder,
     error
   };

@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { resolveContextWindowPolicy } from "../../../packages/harness/src/context/policy.js";
 import {
-  MAX_NOTICE_ROUNDS,
   buildMaxOutputRecovery,
-  buildNoticeRecovery,
-  canDrainNotices,
   planReactiveRecovery,
   shouldRecoverMaxOutput,
 } from "../../../packages/harness/src/agents/recovery-policy.js";
@@ -57,36 +54,4 @@ describe("Agent recovery policy", () => {
     expect(recovery.messages.at(-1)).toMatchObject({ role: "user" });
   });
 
-  it("notice 恢复受步数与轮数上限约束，并把多条通知合成下一条用户消息", () => {
-    expect(
-      canDrainNotices({
-        stepsUsed: 1,
-        maxSteps: 2,
-        noticeRounds: MAX_NOTICE_ROUNDS - 1,
-        hasDrainNotices: true,
-      }),
-    ).toBe(true);
-    expect(
-      canDrainNotices({
-        stepsUsed: 1,
-        maxSteps: 2,
-        noticeRounds: MAX_NOTICE_ROUNDS,
-        hasDrainNotices: true,
-      }),
-    ).toBe(false);
-
-    const recovery = buildNoticeRecovery({
-      responseMessages: [{ role: "assistant", content: "waiting" }],
-      notices: [
-        { taskId: "a", text: "first" },
-        { taskId: "b", text: "second" },
-      ],
-      noticeRounds: 0,
-    });
-    expect(recovery.noticeRounds).toBe(1);
-    expect(recovery.messages.at(-1)).toEqual({
-      role: "user",
-      content: "first\n\nsecond",
-    });
-  });
 });

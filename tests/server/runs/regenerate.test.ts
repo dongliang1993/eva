@@ -16,7 +16,6 @@ import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessi
 import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
 import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
-import { RunLedger } from "../../../apps/server/src/modules/runs/index.js";
 import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
 import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
 import { registerRunRoutes } from "../../../apps/server/src/modules/runs/index.js";
@@ -59,7 +58,8 @@ const startApp = async (): Promise<void> => {
     agents: {
       build: () => ({
         agent: createAgent({ model: textModel("reply"), tools: [], maxSteps: 3 }),
-        mainModel: { qualifiedModelId: "openai:test" }
+        mainModel: { qualifiedModelId: "openai:test" },
+        toolModel: { qualifiedModelId: "openai:test-tool" }
       }),
       resolveModels: () => ({ tool: { qualifiedModelId: "openai:test" } })
     },
@@ -68,7 +68,7 @@ const startApp = async (): Promise<void> => {
       new DrizzleMessageRepository(db)
     ),
     approvals: new ApprovalGateway(new ApprovalRepository(db)),
-    runLedger: new RunLedger(new DrizzleRunRepository(db)),
+
     runRegistry: new RunRegistry(),
     mcp: { ensureConnected: async () => {}, listTools: () => [] },
     workspaces: {} as never
