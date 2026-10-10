@@ -287,7 +287,13 @@ export class AgentFactory {
       ...(options.memoryFilesSection ? [options.memoryFilesSection] : []),
       ...(options.retrievedMemorySection ? [options.retrievedMemorySection] : []),
       createMemoryPromptSection(tools.some((tool) => tool.name === "save_memory")),
-      ...(this.infra.skills.length ? [skillsToPromptSection([...this.infra.skills])] : []),
+      ...(this.infra.skills.length
+        ? [
+          skillsToPromptSection([...this.infra.skills], {
+            contextWindowTokens: models.chat.contextWindow
+          })
+        ]
+        : []),
       createWebSearchPromptSection(),
       createWebFetchPromptSection(),
     ];

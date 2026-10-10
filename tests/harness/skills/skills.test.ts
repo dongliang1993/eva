@@ -232,6 +232,96 @@ describe("skillsToPromptSection", () => {
 
     expect(section.body).toContain("No skills");
   });
+
+  it("injects full descriptions when they fit the budget", () => {
+    const section = skillsToPromptSection(
+      [testSkill({ description: "A test skill." })],
+      { contextWindowTokens: 200_000 }
+    );
+
+    expect(section.body).toContain("A test skill.");
+  });
+
+  it("without a budget keeps today's behavior (no truncation)", () => {
+    const long = "x".repeat(300);
+    const section = skillsToPromptSection([testSkill({ description: long })]);
+
+    expect(section.body).toContain(long);
+  });
+});
+
+describe("skill listing budget", () => {
+  /** 250 字符以上的一条长 description,用于触发截断。 */
+  const longDescription = (seed: string): string =>
+    (seed + " ").repeat(60).trim();
+
+  const manySkills = (count: number): Skill[] =>
+    Array.from({ length: count }, (_, i) =>
+      testSkill({
+        name: `skill-${String(i).padStart(3, "0")}`,
+        description: longDescription(`skill ${i}`),
+      })
+    );
+
+  it("500 skills with default budget degrade to names-only listing", () => {
+    const section = skillsToPromptSection(manySkills(500), {
+      contextWindowTokens: 200_000,
+    });
+
+    const lines = section.body.split("\n").filter((l) => l.startsWith("- "));
+    expect(lines).toHaveLength(500);
+    // 每条只剩名字:不含 description 的重复正文。
+    expect(section.body).not.toContain("skill 0 skill 0");
+    // 名字全保留:预算降级不能丢条目,只能丢 description。
+    expect(section.body).toContain("**skill-000**");
+    expect(section.body).toContain("**skill-499**");
+    // 引导语保留 —— 降级后模型仍需被指去 read_skill。
+    expect(section.body).toContain("read_skill");
+  });
+
+  it("truncates descriptions to fit the budget instead of dropping entries", () => {
+    // 10 条长 description,预算 200k 窗口下放不下全量但放得下截断后的。
+    const section = skillsToPromptSection(manySkills(10), {
+      contextWindowTokens: 200_000,
+    });
+
+    const lines = section.body.split("\n").filter((l) => l.startsWith("- "));
+    expect(lines).toHaveLength(10);
+    // 截断后每条仍以 description 开头(带省略号收尾)。
+    expect(lines[0]).toContain("skill 0");
+    expect(section.body).toContain("…");
+  });
+
+  it("caps each description at 250 chars even when budget allows more", () => {
+    const long = "y".repeat(400);
+    const section = skillsToPromptSection([testSkill({ description: long })], {
+      contextWindowTokens: 200_000,
+    });
+
+    const line = section.body.split("\n").find((l) => l.startsWith("- "))!;
+    expect(line.length).toBeLessThanOrEqual("- **test-skill**: ".length + 250);
+  });
+
+  it("alwaysInject skills keep full descriptions through degradation", () => {
+    const pinned = testSkill({
+      name: "pinned-skill",
+      description: longDescription("pinned description"),
+      alwaysInject: true
+    });
+    const section = skillsToPromptSection(
+      [...manySkills(500), pinned],
+      { contextWindowTokens: 200_000 }
+    );
+
+    // 降级到纯名字的目录里,pinned 仍带全文 description。
+    expect(section.body).toMatch(/- \*\*pinned-skill\*\*: pinned description/);
+  });
+
+  it("no contextWindow → no budget → today's behavior for 500 skills", () => {
+    const section = skillsToPromptSection(manySkills(500));
+
+    expect(section.body).toContain("skill 0 skill 0");
+  });
 });
 
 describe("createReadSkillTool", () => {
