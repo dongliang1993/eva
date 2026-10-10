@@ -1,6 +1,6 @@
 # 一次 Run 今天是怎么跑的
 
-> **这是当前事实，不是目标。** 最后一次逐项对照代码：2026-08-31。
+> **这是当前事实，不是目标。** 最后一次逐项对照代码：2026-10-10（`0b38b29`）。
 > 主链的五个阶段在 `apps/server/src/modules/runs/run-coordinator.ts` 的注释里标了 ①–⑤，
 > 这篇是它的导读，不是它的副本 —— 有分歧以代码为准。
 
@@ -11,7 +11,7 @@
 | # | 文件 | 它负责 |
 |---|---|---|
 | 1 | `modules/runs/route.ts` | 三条端点、SSE 连接、`RunOutcome` → 409/503/400、404 语义。**没有业务顺序** |
-| 2 | `modules/runs/run-coordinator.ts` | 五个阶段的顺序 + 13 行流式循环 + 内联 `RunScope`。**只有顺序** |
+| 2 | `modules/runs/run-coordinator.ts` | 五个阶段的顺序 + 13 行流式循环。**只有顺序** |
 | 3 | `modules/runs/run-runtime-builder.ts` | 「这轮 agent 能用什么」：skill / 记忆 / plan gate / MCP / plan weave / 子代理 / 观测 |
 | 4 | `packages/harness/src/agents/agent.ts` | 工具管道 + `streamText` 主循环 |
 | 5 | `modules/runs/run-finalizer.ts` | 终态的**唯一**出口 |

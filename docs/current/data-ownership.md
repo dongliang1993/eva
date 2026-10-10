@@ -1,6 +1,6 @@
 # 谁拥有哪份状态
 
-> **这是当前事实，不是目标。** 最后一次逐项对照代码：2026-08-31。
+> **这是当前事实，不是目标。** 最后一次逐项对照代码：2026-10-10（`0b38b29`）。
 > 加一份新状态时先在这张表里给它找到一个所有者 —— 找不到，说明模块划分要先想清楚。
 
 三条判定规则（[ADR C4](../adr/0004-single-owner-per-state.md)、[C5](../adr/0005-derive-instead-of-duplicate.md)）：
@@ -11,24 +11,24 @@
 
 ## 持久化事实源（SQLite，`~/.eva/eva.db`）
 
-14 张 drizzle 表（另有 `messages_fts` 与 `memory_embeddings` 两张虚表在迁移里建），
+18 张 drizzle 表（另有 `messages_fts` 与 `memories_fts` 两张 FTS5 虚表在迁移里建），
 `db/schema.ts` 是唯一定义处，迁移在 `db/migrations/`（**不按模块拆**：migration 语义不能动）。
 
 | 领域 | 事实源 | 投影 / 内存态 | 唯一写入者 | 代码位置 |
 |---|---|---|---|---|
 | 会话基本信息 | `sessions` | 侧栏查询结果 | Sessions | `modules/sessions/{session.ts,session-repository.ts}` |
 | 消息与分支 | `messages.message` + parent/slot/depth | 流式 message builder | Sessions | `modules/sessions/{message-tree.ts,message-repository.ts}` |
-| Run 持久化终态 | `runs` | 当前请求的 `RunScope` | Runs（经 `RunFinalizer`） | `modules/runs/{run-ledger.ts,run-repository.ts}` |
+| Run 持久化终态 | `runs` | 当前请求的 run 控制流（`RunScope` 已退役） | Runs（经 `RunFinalizer`） | `modules/runs/{run-ledger.ts,run-repository.ts}` |
 | Run 调试事实 | `run_events` | 轨迹页投影 | Observability | `modules/observability/{run-recorder.ts,run-event-repository.ts}` |
 | 审批决定 | `approval_requests` | pending deferred promise、审批卡片 | Approvals | `modules/approvals/{approval-gateway.ts,approval-repository.ts}` |
 | always-allow policy | `settings.security.allowAlwaysPolicies` | 进程内 key set | Approvals（经 Settings 写回） | `modules/approvals/approval-policy-store.ts` |
 | Provider 配置 | `providers`（apiKey 密文 `enc:v1:…`） | `LanguageModel` 缓存 | Providers | `modules/providers/provider-repository.ts`；缓存在 `modules/runs/agent-factory.ts` |
 | 应用设置 | `settings` | 每 Run 的设置快照 | Settings | `modules/settings/app-settings.ts` |
 | 每会话 skill 选择 | `session_skill_selections` | 每 Run selection 快照 | Skills | `modules/skills/{select-run-skills.ts,session-skill-selection-repository.ts}` |
-| 记忆（可检索） | `memories` + embeddings + FTS | 召回上下文 | Memory | `modules/memory/{memory-repository.ts,memory-recall.ts}` |
+| 记忆（可检索） | `memories` + `memories_fts`（FTS5 trigram） | 召回上下文 | Memory | `modules/memory/{memory-repository.ts,memory-retriever.ts}` |
 | 工作区 | `workspaces` | 当前会话的绑定结果 | Workspaces | `modules/workspaces/{workspace-store.ts,workspace-repository.ts}` |
 | Plan Gate | `plans` + `<ws>/.eva/plan-gate/` | run-scoped gate state | Plan Gate | `modules/plan-gate/{service.ts,plan-repository.ts}` |
-| 后台子代理任务 | `background_tasks` | live runner | Subagents（子 message/run 仍归各自模块写） | `modules/subagents/sqlite-task-store.ts` |
+| 子代理任务 | `subagent_tasks` | live runner | Subagents（子 message 仍归 Sessions 写） | `modules/subagents/{subagent-runner.ts,subagent-task-repository.ts}` |
 | Token 用量 | `usage_records` | UI 聚合 | Usage | `modules/usage/usage-record-repository.ts` |
 | 历史压缩 | `session_compactions` | 每轮压缩后的历史 | Compact | `modules/compact/session-compaction-repository.ts` |
 | 跨会话检索 | `messages` 的 `search_text`（可重建索引投影） | — | Search | `modules/search/message-search-repository.ts` |
@@ -40,7 +40,6 @@
 | 人类可读记忆 | `~/.eva/MEMORY.md`、`~/.eva/memory/YYYY-MM-DD.md` | Memory | **用户可以直接编辑** —— 这是它存在的理由；每轮注入 prompt（8 KB 上限） |
 | Skill 目录 | `~/.eva/skills/<name>/SKILL.md`（dev 态另扫 monorepo 根 `skills/`） | 用户 / 安装包 | 进程启动时加载成 catalog |
 | MCP server 配置 | `~/.eva/mcp.json` | MCP（UI 增删改经 store 写回；用户也可直接编辑） | **唯一事实源**，无 DB 表；条目名即 id；env/headers 明文随配置回传（本机信任域）；写盘 tmp→rename 原子写。旧 `mcp_servers` 表由启动迁移 `migrateMcpServersToFile` 搬进文件后经 0031 删表 |
-| Plan Weave | `<workspace>/.eva/plan-weave/{plan.json,state.json,results/}` | Plan Weave | 有意进 git（人可直接改、可追踪）；写盘全部 tmp→fsync→rename |
 | Plan Gate 文件 | `<workspace>/.eva/plan-gate/<planId>/current.md` | Plan Gate | `.eva/.gitignore` 只忽略 `plan-gate/` |
 | 加密密钥 | `~/.eva/.secret-key`（0600） | 首次启动生成 | **删了就永久解不开已存的 apiKey**（要在设置里重新输入） |
 | 窗口位置 | Electron `userData/window-state.json` | Desktop `window-state.ts` | 唯一 owner 就是那个文件 |

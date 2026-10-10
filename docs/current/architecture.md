@@ -1,7 +1,8 @@
 # Eva 今天的架构
 
 > **这是当前事实，不是目标。** 写不确定的东西请写进 `docs/plans/`，不要写进这里。
-> 最后一次逐项对照代码：2026-08-31（架构改造 Wave 6）。
+> 最后一次逐项对照代码：2026-10-10（`0b38b29`，修 `plan-weave` / `RunScope` / 计数漂移）。
+> 已知未闭环的能力缺口见 [`../reviews/2026-10-10-maturity-review.md`](../reviews/2026-10-10-maturity-review.md)。
 
 Eva 是一个本地优先的 AI agent 桌面助手：一个 Electron 壳把 Fastify server 作为
 utility process 拉起来，前端是同一个 server 托管的 React SPA，agent 执行内核是
@@ -61,7 +62,7 @@ modules/runs/
   run-repository.ts   这张表的读写
 ```
 
-17 个模块：
+16 个模块：
 
 | 模块 | 它拥有什么 |
 |---|---|
@@ -72,19 +73,18 @@ modules/runs/
 | `settings` | 应用设置读写与历史迁移 |
 | `skills` | skill 目录与每轮 skill 选择 |
 | `memory` | DB 记忆 + 人类可读记忆文件 + 召回 |
-| `compact` | 历史压缩(含步中 auto-compact) |
+| `compact` | 会话级显式压缩（`session_compactions` 快照；步中自动 compact 在 harness，不在这里） |
 | `workspaces` | 工作区绑定、目录守卫、项目文档注入 |
 | `plan-gate` | 会话级 plan 审批闸门 |
-| `plan-weave` | workspace 级文件任务图 |
-| `subagents` | 后台/前台子代理任务与回报 |
+| `subagents` | 前台子代理任务与回报 |
 | `mcp` | MCP server 配置、连接、工具暴露 |
 | `observability` | run_events 台账、脱敏、保留策略、轨迹读取面 |
 | `search` | 跨会话消息检索 |
 | `usage` | token 用量记录 |
 | `system` | health、静态资源 |
 
-`plan-gate` 与 `plan-weave` **刻意是两个模块**：一个是会话级审批闸门，一个是 workspace 级
-文件任务图，事实源不共享。名字像不等于该合并。
+`plan-weave` 已随执行内核重建退役（代码零命中）；`plan-gate` 是留下来的那个，
+会话级审批闸门。
 
 Route 拿到的只有 `AppApi`（`app.api`），拿不到 `db`、`encryptor` 或任何 Repository ——
 `lint:arch` 的三条规则（`routes-only-app-api` / `routes-no-db` /
@@ -177,9 +177,9 @@ apps/web/src/
 
 ## 6. 边界怎么被强制
 
-- `pnpm lint:arch`（`scripts/check-architecture.mjs`）—— 9 条规则，当前 0 error / 0 warning。
+- `pnpm lint:arch`（`scripts/check-architecture.mjs`）—— 8 条规则，当前 0 error / 0 warning。
   它检查的是**依赖方向与模块入口**这类可判定规则，不做风格检查。仓库没有 ESLint。
-- `pnpm typecheck` / `pnpm test`（当前 96 文件 / 761 用例）/ `pnpm build` / `pnpm web:build`。
+- `pnpm typecheck` / `pnpm test`（当前 88 文件 / 689 用例）/ `pnpm build` / `pnpm web:build`。
 - 能力收窄接口代替 lint：`RunOpeningLedger` / `RunSettlingLedger` 让 coordinator
   **编译期**拿不到 `settle`，终态只有 `RunFinalizer` 一个出口。
 

@@ -129,7 +129,7 @@ module's `route.ts`. Grouped by capability:
 [`docs/current/architecture.md`](./docs/current/architecture.md)。
 
 结构上：架构改造 Wave 0–6 已于 2026-08-31 收尾（依赖方向与模块入口由 `pnpm lint:arch` 强制，
-9 条规则 0 error / 0 warning；主链五文件可读；current 文档与 ADR 就位）。
+8 条规则 0 error / 0 warning；主链五文件可读；current 文档与 ADR 就位）。
 改造总纲与每个 Wave 的实测尾注在
 [`docs/archive/plans/25-eva-simple-architecture-charter.md`](./docs/archive/plans/25-eva-simple-architecture-charter.md)。
 
