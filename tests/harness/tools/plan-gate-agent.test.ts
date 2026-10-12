@@ -5,11 +5,12 @@ import { z } from "zod";
 
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
 import {
-  buildTool,
   createEnterPlanModeTool,
   createExitPlanModeTool,
   createPlanGateState,
-  type AgentTool,
+  textResult,
+  tool,
+  type PipelineTool,
   type PlanGateStore
 } from "../../../packages/harness/src/tools/index.js";
 
@@ -30,7 +31,7 @@ describe("plan gate agent 集成（同 run 进出）", () => {
     const writes: string[] = [];
     const approvals: string[] = [];
 
-    const writeTool: AgentTool = buildTool({
+    const writeTool: PipelineTool = tool({
       name: "write",
       description: "write file",
       inputSchema: z.object({ path: z.string(), content: z.string() }),
@@ -38,7 +39,7 @@ describe("plan gate agent 集成（同 run 进出）", () => {
       execute: async ({ path: target, content }) => {
         writes.push(target);
         if (target === handle.planRelPath) planContent = content;
-        return `wrote ${target}`;
+        return textResult(`wrote ${target}`);
       }
     });
 

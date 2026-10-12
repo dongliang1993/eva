@@ -2,7 +2,7 @@ import {
   SUBAGENT_ROLES,
   type AgentObserver,
   type AgentRunInput,
-  type AgentTool,
+  type PipelineTool,
   type ForkRunner,
   type RequestApproval,
   type SubagentEventSink,
@@ -20,7 +20,7 @@ export interface SubagentRunnerOptions {
   readonly runId: string;
   readonly model: ResolvedAgent["toolModel"];
   readonly workspace?: WorkspaceContext;
-  readonly extraTools?: readonly AgentTool[];
+  readonly extraTools?: readonly PipelineTool[];
   readonly abortSignal: AbortSignal;
   readonly requestApproval: RequestApproval;
   readonly observerForTask: (taskId: string) => AgentObserver;

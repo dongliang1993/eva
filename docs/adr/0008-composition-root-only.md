@@ -37,10 +37,14 @@ Eva 的组合根：`apps/server/src/deps.ts`（基础设施）、`services/index
 
 ## 一个已经踩过的形态
 
+> **2026-10-12 现状：** `RunFinalizer` 与 `RunOpeningLedger` / `RunSettlingLedger` 已随执行内核重建移除。
+> 终态现在只有 `Coordinator.settle()` 一个出口，由 `runs.settle` 的条件更新（只改 `status = 'running'`）在数据库层兜底，
+> 不再由编译器守。下文描述的是当时的形态。
+
 `RunFinalizer` 是 per-run 的（持 runId / hub / failureLayer），但 coordinator 不能拿到
 `RunSettlingLedger`。解法是组合根提供一个**工厂**：coordinator 只能「要一个 finalizer」，
 不能自己 new。自己 new 就等于手里有了那个类型，能力收窄立刻白做。
 
 ## 怎么验证
 
-`pnpm lint:arch`：`repository-only-in-composition-root`、`run-ledger-terminal-state`。
+`pnpm lint:arch`：`repository-only-in-composition-root`。（`run-ledger-terminal-state` 已随窄接口一起移除。）

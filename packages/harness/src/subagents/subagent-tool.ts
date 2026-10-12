@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../tools/index.js";
+import { textResult, tool, type PipelineTool } from "../tools/tool.js";
 
 export type ForkRunner = (invocation: {
   readonly abortSignal?: AbortSignal;
@@ -29,8 +29,8 @@ const subagentSchema = z.object({
 
 });
 
-export const createSubagentTool = (ctx: SubagentToolContext): readonly AgentTool[] => {
-  const subagent = buildTool({
+export const createSubagentTool = (ctx: SubagentToolContext): readonly PipelineTool[] => {
+  const subagent = tool({
     name: "subagent",
     description: [
       "Delegate a self-contained task to a subagent (a separate agent that works in its own " +
@@ -41,11 +41,11 @@ export const createSubagentTool = (ctx: SubagentToolContext): readonly AgentTool
       "The tool waits for the child and returns its final result. Independent calls may run in parallel."
     ].join("\n"),
     inputSchema: subagentSchema,
-    execute: async ({ description, prompt, subagent: type }, options) => {
+    async execute({ description, prompt, subagent: type }, extra) {
       const id = crypto.randomUUID();
-      // parentToolCallId 用 SDK 派给这次调用的 toolCallId —— 子代理进程消息、SSE 帧、
+      // parentToolCallId 用 SDK 派给这次调用的 toolUseID —— 子代理进程消息、SSE 帧、
       // 主对话里的卡片三者靠它一对一归位。SDK 总会有,兜底只是防御。
-      const parentToolCallId = options?.toolCallId ?? `task-${id}`;
+      const parentToolCallId = extra.toolUseID ?? `task-${id}`;
 
       const result = await ctx.runFork({
         taskId: id,
@@ -53,10 +53,10 @@ export const createSubagentTool = (ctx: SubagentToolContext): readonly AgentTool
         subagentType: type ?? "explorer",
         description,
         prompt,
-        ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {})
+        abortSignal: extra.signal,
       });
 
-      return result.text;
+      return textResult(result.text);
     }
   });
 

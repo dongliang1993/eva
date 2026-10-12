@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
 import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
 import { APPROVAL_DENIED_PREFIX, withApproval } from "../../../packages/harness/src/tools/with-approval.js";
-import { buildTool } from "../../../packages/harness/src/tools/build-tool.js";
+import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
@@ -71,21 +71,21 @@ const toolCallThenTextModel = (
 };
 
 const readFileTool = () =>
-  buildTool({
+  tool({
     name: "read_file",
     description: "read a file",
     inputSchema: z.object({ path: z.string() }),
-    readOnly: true,
-    execute: async (input: { path: string }) => `content of ${input.path}`
+    annotations: { readOnlyHint: true },
+    execute: async (input: { path: string }) => textResult(`content of ${input.path}`)
   });
 
 const dangerousTool = () =>
-  buildTool({
+  tool({
     name: "dangerous_a",
     description: "a dangerous tool",
     inputSchema: z.object({ value: z.string() }),
     needsApproval: true,
-    execute: async () => "executed dangerous_a"
+    execute: async () => textResult("executed dangerous_a")
   });
 
 describe("withApproval 单元", () => {
@@ -341,12 +341,12 @@ describe("bash 只读直放(T29)", () => {
   });
 
   const bashTool = () =>
-    buildTool({
+    tool({
       name: "bash",
       description: "run a shell command",
       inputSchema: z.object({ command: z.string(), description: z.string() }),
       needsApproval: true,
-      execute: async () => "ran"
+      execute: async () => textResult("ran")
     });
 
   const runOnce = async (command: string) => {

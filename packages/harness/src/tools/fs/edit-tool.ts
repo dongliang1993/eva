@@ -2,7 +2,7 @@ import { withWorkspaceWrite } from "./workspace-write.js";
 import fs from "node:fs/promises";
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import { errorResult, textResult, tool, type PipelineTool } from "../tool.js";
 import { resolveWorkspacePath } from "./resolve-workspace-path.js";
 import type { FsToolBaseOptions } from "./read-file-tool.js";
 import { atomicWrite } from "./atomic-write.js";
@@ -17,8 +17,8 @@ const editFileSchema = z.object({
   after: z.string().describe("Replacement text."),
 });
 
-export const createEditTool = (options: FsToolBaseOptions): AgentTool =>
-  buildTool({
+export const createEditTool = (options: FsToolBaseOptions): PipelineTool =>
+  tool({
     name: "edit",
     description:
       "Precisely replace text in a file within the workspace. " +
@@ -26,10 +26,12 @@ export const createEditTool = (options: FsToolBaseOptions): AgentTool =>
       "Requires user approval because it modifies the filesystem.",
     inputSchema: editFileSchema,
     needsApproval: true,
-    async execute({ path: rel, before, after }, execOptions) {
+    async execute({ path: rel, before, after }, extra) {
       return withWorkspaceWrite(options.workRoot, async () => {
         if (before.length > EDIT_MAX_BEFORE) {
-          return `Error: 'before' text too long (${before.length} > ${EDIT_MAX_BEFORE}). Edit smaller chunks.`;
+          return errorResult(
+            `'before' text too long (${before.length} > ${EDIT_MAX_BEFORE}). Edit smaller chunks.`,
+          );
         }
 
         const absolute = resolveWorkspacePath(rel, options.workRoot);
@@ -37,16 +39,20 @@ export const createEditTool = (options: FsToolBaseOptions): AgentTool =>
 
         const occurrences = current.split(before).length - 1;
         if (occurrences === 0) {
-          return `Error: before text not found in ${rel}.`;
+          return errorResult(`before text not found in ${rel}.`);
         }
         if (occurrences > 1) {
-          return `Error: before text appears ${occurrences} times in ${rel}. Provide more context to make it unique.`;
+          return errorResult(
+            `before text appears ${occurrences} times in ${rel}. Provide more context to make it unique.`,
+          );
         }
 
         const updated = current.replace(before, after);
-        execOptions?.abortSignal?.throwIfAborted();
+        extra.signal.throwIfAborted();
         await atomicWrite(absolute, updated, { exists: true, content: current });
-        return `Edited ${rel}: replaced 1 occurrence (${before.length} → ${after.length} chars).`;
-      }, execOptions?.abortSignal);
+        return textResult(
+          `Edited ${rel}: replaced 1 occurrence (${before.length} → ${after.length} chars).`,
+        );
+      }, extra.signal);
     },
   });

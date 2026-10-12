@@ -2,34 +2,41 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import {
-  buildTool,
   createEnterPlanModeTool,
   createExitPlanModeTool,
   createPlanGateState,
   planGateInstructions,
   withPlanGate,
-  type AgentTool,
+  textResult,
+  tool,
+  type PipelineTool,
   type PlanGateStore
 } from "../../../packages/harness/src/tools/index.js";
+import { runToolText } from "../../helpers/run-tool.js";
 
 const probe = (
   name: string,
   execute: (input: unknown) => Promise<string> | string,
-  options: { readOnly?: boolean; needsApproval?: boolean } = {}
-): AgentTool =>
-  buildTool({
+  options: { readOnlyHint?: boolean; needsApproval?: boolean } = {}
+): PipelineTool =>
+  tool({
     name,
     description: `probe ${name}`,
     inputSchema: z.object({ path: z.string().optional() }).passthrough(),
-    execute: async (input) => execute(input),
-    ...(options.readOnly !== undefined ? { readOnly: options.readOnly } : {}),
+    execute: async (input) => {
+      const out = await execute(input);
+      return textResult(out);
+    },
+    ...(options.readOnlyHint !== undefined
+      ? { annotations: { readOnlyHint: options.readOnlyHint } }
+      : {}),
     ...(options.needsApproval !== undefined
       ? { needsApproval: options.needsApproval }
       : {})
   });
 
-const call = (tool: AgentTool, input: unknown): Promise<string> =>
-  tool.tool.execute!(input as never, { toolCallId: "tc" } as never) as Promise<string>;
+const call = (tool: PipelineTool, input: unknown): Promise<string> =>
+  runToolText(tool, input, { toolUseID: "tc" });
 
 describe("withPlanGate", () => {
   const plan = {
@@ -41,9 +48,9 @@ describe("withPlanGate", () => {
   it("inactive 时全部直放", async () => {
     const state = createPlanGateState({ active: false });
     const inner = vi.fn(async () => "ok");
-    const tool = withPlanGate(probe("write", inner), state);
+    const gated = withPlanGate(probe("write", inner), state);
 
-    expect(await call(tool, { path: "src/a.ts" })).toBe("ok");
+    expect(await call(gated, { path: "src/a.ts" })).toBe("ok");
     expect(inner).toHaveBeenCalledOnce();
   });
 
@@ -62,7 +69,7 @@ describe("withPlanGate", () => {
     expect(await call(write, { path: plan.planPath })).toBe("wrote");
 
     const readInner = vi.fn(async () => "read");
-    expect(await call(withPlanGate(probe("read_file", readInner, { readOnly: true }), state), {})).toBe("read");
+    expect(await call(withPlanGate(probe("read_file", readInner, { readOnlyHint: true }), state), {})).toBe("read");
 
     const bashInner = vi.fn(async () => "bash");
     expect(await call(withPlanGate(probe("bash", bashInner), state), {})).toBe("bash");
@@ -76,11 +83,11 @@ describe("withPlanGate", () => {
     const state = createPlanGateState({ active: false });
     state.enter(plan);
     const inner = vi.fn(async () => "ok");
-    const tool = withPlanGate(probe("write", inner), state);
+    const gated = withPlanGate(probe("write", inner), state);
 
-    expect(await call(tool, { path: "src/a.ts" })).toContain("[Plan Mode]");
+    expect(await call(gated, { path: "src/a.ts" })).toContain("[Plan Mode]");
     state.exit();
-    expect(await call(tool, { path: "src/a.ts" })).toBe("ok");
+    expect(await call(gated, { path: "src/a.ts" })).toBe("ok");
   });
 });
 
@@ -95,7 +102,8 @@ describe("enter/exit_plan_mode", () => {
       enter: vi.fn(async () => handle),
       readPlan: vi.fn(async () => planContent),
       recordRevision: vi.fn(async () => 1),
-      approve: vi.fn(async () => undefined)
+      approve: vi.fn(async () => undefined),
+      reject: vi.fn(async () => undefined)
     };
     return { handle, store };
   };

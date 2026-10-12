@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
 import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
-import { buildTool } from "../../../packages/harness/src/tools/build-tool.js";
+import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 import { createWebFetchTool } from "../../../packages/harness/src/index.js";
 import { Semaphore } from "../../../packages/harness/src/tools/concurrency-cap.js";
 
@@ -148,17 +148,17 @@ const probeTool = (
   name: string,
   opts: { readOnly?: boolean; metrics: { active: number; max: number } },
 ) =>
-  buildTool({
+  tool({
     name,
     description: `probe ${name}`,
     inputSchema: z.object({ n: z.number().optional() }),
-    ...(opts.readOnly === true ? { readOnly: true } : {}),
+    ...(opts.readOnly === true ? { annotations: { readOnlyHint: true } } : {}),
     execute: async (input: { n?: number }) => {
       opts.metrics.active += 1;
       opts.metrics.max = Math.max(opts.metrics.max, opts.metrics.active);
       await new Promise((r) => setTimeout(r, 30));
       opts.metrics.active -= 1;
-      return `${name}-${input.n ?? "?"}`;
+      return textResult(`${name}-${input.n ?? "?"}`);
     },
   });
 
@@ -210,28 +210,28 @@ describe("装配层帽(createAgent readOnlyConcurrency)", () => {
     let writeEnterAt: number | undefined;
 
     const readOnly = [0, 1].map((i) =>
-      buildTool({
+      tool({
         name: `ro${i}`,
         description: `read probe ${i}`,
         inputSchema: z.object({ n: z.number().optional() }),
-        readOnly: true,
+        annotations: { readOnlyHint: true },
         execute: async (input: { n?: number }) => {
           metrics.active += 1;
           metrics.max = Math.max(metrics.max, metrics.active);
           await new Promise((r) => setTimeout(r, 100));
           metrics.active -= 1;
-          return `ro${i}-${input.n ?? "?"}`;
+          return textResult(`ro${i}-${input.n ?? "?"}`);
         },
       }),
     );
-    const writeTool = buildTool({
+    const writeTool = tool({
       name: "w0",
       description: "write probe",
       inputSchema: z.object({ n: z.number().optional() }),
       execute: async (input: { n?: number }) => {
         writeEnterAt = Date.now() - startedAt;
         await new Promise((r) => setTimeout(r, 5));
-        return `w0-${input.n ?? "?"}`;
+        return textResult(`w0-${input.n ?? "?"}`);
       },
     });
 
@@ -274,13 +274,7 @@ describe("装配层帽(createAgent readOnlyConcurrency)", () => {
   });
 
   it("web_fetch 已补 readOnly 标志", () => {
-    const tool = createWebFetchTool({
-      summaryModel: new MockLanguageModelV4({
-        doStream: async () => ({
-          stream: simulateReadableStream({ chunks: [] }),
-        }),
-      }) as never,
-    });
-    expect(tool.readOnly).toBe(true);
+    const webFetchTool = createWebFetchTool();
+    expect(webFetchTool.annotations?.readOnlyHint).toBe(true);
   });
 });

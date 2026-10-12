@@ -12,6 +12,7 @@ import {
 } from "../../../packages/harness/src/skills/loader.js";
 import { skillsToPromptSection } from "../../../packages/harness/src/skills/prompt.js";
 import { createReadSkillTool } from "../../../packages/harness/src/skills/read-skill-tool.js";
+import { runToolText } from "../../helpers/run-tool.js";
 import type { Skill } from "../../../packages/harness/src/skills/types.js";
 
 const tempDirs: string[] = [];
@@ -329,10 +330,7 @@ describe("createReadSkillTool", () => {
 
   it("returns full content with the skill file resolution contract", async () => {
     const tool = createReadSkillTool([skill]);
-    const result = await tool.tool.execute!(
-      { name: "test-skill" },
-      { toolCallId: "tc-read-skill" } as never
-    );
+    const result = await runToolText(tool, { name: "test-skill" }, { toolUseID: "tc-read-skill" });
 
     expect(result).toContain("# Skill: test-skill");
     expect(result).toContain("**Skill File:** /path/to/test-skill/SKILL.md");
@@ -342,10 +340,7 @@ describe("createReadSkillTool", () => {
 
   it("returns available skills when the name is missing", async () => {
     const tool = createReadSkillTool([skill]);
-    const result = await tool.tool.execute!(
-      { name: "missing" },
-      { toolCallId: "tc-read-skill-missing" } as never
-    );
+    const result = await runToolText(tool, { name: "missing" }, { toolUseID: "tc-read-skill-missing" });
 
     expect(result).toContain('Skill "missing" not found');
     expect(result).toContain("test-skill");

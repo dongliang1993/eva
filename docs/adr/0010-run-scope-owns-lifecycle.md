@@ -1,6 +1,6 @@
 # 0010 生命周期资源必须由 Scope 管理
 
-- **Status**: Accepted（形态与宪法原文有一处偏差，见下）
+- **Status**: Accepted（原则仍成立；`RunScope` 与 `RunFinalizer` 两个承载对象都已移除，见下）
 - **对应宪法条款**: C10
 
 ## 决策
@@ -9,6 +9,17 @@
 Run Hub、Run Recorder、failure layer、Plan Gate State、Report Gateway、清理函数集合。
 
 释放要统一完成：取消 pending approval、释放 report gateway、注销 registry、关闭订阅者。
+
+## 今天的形态（2026-10-12）
+
+原则不变：一次 Run 的资源集中持有、只有一条释放路径。承载它的对象换了：
+
+- **持有**：`Coordinator.run` 里的 `ActiveRun`（runId / AbortController / hub / emit）与
+  `RunProgress`（推进到哪一步、已有的 recorder）。两者的生命期都是 `run()` 这一次调用。
+- **释放**：`run()` 的 `finally` —— `cancelByRun` + `runRegistry.unregister`（后者兜底关闭订阅者）。
+  三条退出路径（成功、流式中失败、准备期失败）都经过它。
+
+下面两节记的是落地之初的形态，留作历史。
 
 ## 与宪法原文的偏差（有意的）
 

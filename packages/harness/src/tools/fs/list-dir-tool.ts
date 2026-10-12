@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import { textResult, tool, type PipelineTool } from "../tool.js";
 import { resolveWorkspacePath } from "./resolve-workspace-path.js";
 import type { FsToolBaseOptions } from "./read-file-tool.js";
 
@@ -11,15 +11,15 @@ const listDirSchema = z.object({
   maxEntries: z.number().int().min(1).max(1000).default(100).describe("Max entries to list.")
 });
 
-export const createListDirTool = (options: FsToolBaseOptions): AgentTool =>
-  buildTool({
+export const createListDirTool = (options: FsToolBaseOptions): PipelineTool =>
+  tool({
     name: "list_dir",
     description:
       "List files and directories directly under a directory within the workspace. " +
       "One line per entry (dir/ prefix for directories). Use for exploring structure.",
     inputSchema: listDirSchema,
-    readOnly: true,
-    async execute({ path: rel, includeHidden, maxEntries }) {
+    annotations: { readOnlyHint: true },
+    async execute({ path: rel, includeHidden, maxEntries }: z.output<typeof listDirSchema>) {
       const absolute = resolveWorkspacePath(rel, options.workRoot);
       const entries = await fs.readdir(absolute, { withFileTypes: true });
 
@@ -34,6 +34,6 @@ export const createListDirTool = (options: FsToolBaseOptions): AgentTool =>
         lines.push(`… ${total - shown.length} more entries (limited to ${maxEntries})`);
       }
 
-      return `(${rel.length ? rel : "."} — ${shown.length}/${total} entries)\n${lines.join("\n")}`;
+      return textResult(`(${rel.length ? rel : "."} — ${shown.length}/${total} entries)\n${lines.join("\n")}`);
     }
   });

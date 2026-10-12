@@ -1,6 +1,6 @@
 # 谁拥有哪份状态
 
-> **这是当前事实，不是目标。** 最后一次逐项对照代码：2026-10-10（`0b38b29`）。
+> **这是当前事实，不是目标。** 最后一次逐项对照代码：2026-10-12。
 > 加一份新状态时先在这张表里给它找到一个所有者 —— 找不到，说明模块划分要先想清楚。
 
 三条判定规则（[ADR C4](../adr/0004-single-owner-per-state.md)、[C5](../adr/0005-derive-instead-of-duplicate.md)）：
@@ -18,7 +18,7 @@
 |---|---|---|---|---|
 | 会话基本信息 | `sessions` | 侧栏查询结果 | Sessions | `modules/sessions/{session.ts,session-repository.ts}` |
 | 消息与分支 | `messages.message` + parent/slot/depth | 流式 message builder | Sessions | `modules/sessions/{message-tree.ts,message-repository.ts}` |
-| Run 持久化终态 | `runs` | 当前请求的 run 控制流（`RunScope` 已退役） | Runs（经 `RunFinalizer`） | `modules/runs/{run-ledger.ts,run-repository.ts}` |
+| Run 持久化终态 | `runs` | 当前请求的 run 控制流（`RunScope` 已退役） | Runs（经 `Coordinator.settle`） | `modules/runs/{run-coordinator.ts,run-repository.ts}` |
 | Run 调试事实 | `run_events` | 轨迹页投影 | Observability | `modules/observability/{run-recorder.ts,run-event-repository.ts}` |
 | 审批决定 | `approval_requests` | pending deferred promise、审批卡片 | Approvals | `modules/approvals/{approval-gateway.ts,approval-repository.ts}` |
 | always-allow policy | `settings.security.allowAlwaysPolicies` | 进程内 key set | Approvals（经 Settings 写回） | `modules/approvals/approval-policy-store.ts` |
@@ -60,7 +60,7 @@
 
 ## 三条最容易被"顺手"破坏的
 
-1. **Run 的终态只有 `RunFinalizer` 一个出口**（`settle` / `fail` / `closeWithError`）。
-   `RunOpeningLedger` / `RunSettlingLedger` 两个窄接口把这条交给了编译器。
+1. **Run 的终态只有 `Coordinator.settle()` 一个出口**：成功、流式中失败、准备期失败都走它，
+   最终消息、终态、记忆提取入队在同一个事务里。`runs.settle` 只改 `status = 'running'` 的行。
 2. **`RunRegistry` 不认识会话**（上表已述）。
-3. **`mcp_servers` 表是运行时唯一事实源**，`mcp.json` 只是启动导入 —— 反过来会有两份配置。
+3. **`~/.eva/mcp.json` 是 MCP 配置的唯一事实源**，没有 DB 表 —— 加回一张表就会有两份配置。

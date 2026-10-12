@@ -37,8 +37,10 @@ export const registerRunRoutes = (app: FastifyInstance): void => {
     if (outcome.kind === "duplicate") {
       reply.code(409);
       return {
-        error: "Request already accepted", runId: outcome.runId,
-        sessionId: outcome.sessionId, status: outcome.status,
+        error: "Request already accepted",
+        runId: outcome.runId,
+        sessionId: outcome.sessionId,
+        status: outcome.status,
         ...(outcome.status === "running" ? { activeRunId: outcome.runId } : {})
       };
     }

@@ -1,7 +1,7 @@
 # Eva 今天的架构
 
 > **这是当前事实，不是目标。** 写不确定的东西请写进 `docs/plans/`，不要写进这里。
-> 最后一次逐项对照代码：2026-10-10（`0b38b29`，修 `plan-weave` / `RunScope` / 计数漂移）。
+> 最后一次逐项对照代码：2026-10-12。
 > 已知未闭环的能力缺口见 [`../reviews/2026-10-10-maturity-review.md`](../reviews/2026-10-10-maturity-review.md)。
 
 Eva 是一个本地优先的 AI agent 桌面助手：一个 Electron 壳把 Fastify server 作为
@@ -179,9 +179,9 @@ apps/web/src/
 
 - `pnpm lint:arch`（`scripts/check-architecture.mjs`）—— 8 条规则，当前 0 error / 0 warning。
   它检查的是**依赖方向与模块入口**这类可判定规则，不做风格检查。仓库没有 ESLint。
-- `pnpm typecheck` / `pnpm test`（当前 88 文件 / 689 用例）/ `pnpm build` / `pnpm web:build`。
-- 能力收窄接口代替 lint：`RunOpeningLedger` / `RunSettlingLedger` 让 coordinator
-  **编译期**拿不到 `settle`，终态只有 `RunFinalizer` 一个出口。
+- `pnpm typecheck` / `pnpm test`（当前 88 文件 / 696 用例）/ `pnpm build` / `pnpm web:build`。
+- Run 的终态只写一次：所有收尾路径都走 `Coordinator.settle()`，`runs.settle` 的条件更新
+  （只改 `status = 'running'` 的行）在数据库层兜底。
 
 ## 7. 想改点什么，从哪里开始读
 

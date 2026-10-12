@@ -7,6 +7,7 @@ import type {
   WebSearchClient,
   WebSearchResponse,
 } from "../../../packages/harness/src/tools/web-search/types.js";
+import { runToolText } from "../../helpers/run-tool.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -31,25 +32,18 @@ describe("createWebSearchTool", () => {
     } satisfies WebSearchResponse);
     const tool = createWebSearchTool({ search });
 
-    const raw = await tool.tool.execute!(
-      {
-        query: "latest work mi release",
-        maxResults: 3,
-      },
-      {
-        messages: [],
-        toolCallId: "test",
-        context: {},
-      },
-    );
+    const raw = await runToolText(tool, {
+      query: "latest work mi release",
+      maxResults: 3,
+    });
 
     expect(search).toHaveBeenCalledWith(
       {
         query: "latest work mi release",
         maxResults: 3,
       },
-      // T25:execute 第二参数未传 abortSignal → search 收到 undefined。
-      undefined,
+      // runTool 的 extra.signal 是新造的 AbortSignal(未 abort)→ search 收到它。
+      expect.any(AbortSignal),
     );
     expect(JSON.parse(String(raw))).toMatchObject({
       provider: "stub",

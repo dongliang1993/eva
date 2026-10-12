@@ -36,8 +36,7 @@ export type { Skill } from "./skills/index.js";
 
 // Tool construction and built-in tools
 export {
-  buildJsonSchemaTool,
-  buildTool,
+  aborted,
   classifyToolRisk,
   createAppendMemoryTool,
   createBashTool,
@@ -56,18 +55,25 @@ export {
   createUpdateLongTermMemoryTool,
   createWebFetchTool,
   createWriteTool,
+  errorResult,
   isSafeReadOnlyCommand,
   matchesPlanGatePath,
+  textOf,
+  textResult,
+  tool,
+  toolFromJsonSchema,
+  toToolSet,
 } from "./tools/index.js";
 export type {
-  AgentTool,
   MemoryCategory,
   MemoryEntry,
   MemoryStore,
+  PipelineTool,
   PlanGateHandle,
   PlanGateState,
   PlanGateStore,
   RequestPlanReview,
+  ToolResult,
 } from "./tools/index.js";
 export { buildPolicyKeys } from "./approval/policy-key.js";
 

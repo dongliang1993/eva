@@ -27,6 +27,7 @@ import {
   resolveReadablePath,
   resolveWorkspacePath,
 } from "../../../packages/harness/src/tools/fs/resolve-workspace-path.js";
+import { runToolText } from "../../helpers/run-tool.js";
 
 const tempDirs: string[] = [];
 
@@ -69,15 +70,9 @@ describe("fs tools", () => {
     const writeTool = createWriteTool({ workRoot: root });
     const readTool = createReadFileTool({ workRoot: root });
 
-    await writeTool.tool.execute!(
-      { path: "hello.txt", content: "line one\nline two\n" },
-      { messages: [], toolCallId: "c1", context: {} },
-    );
+    await runToolText(writeTool, { path: "hello.txt", content: "line one\nline two\n" });
 
-    const res = await readTool.tool.execute!(
-      { path: "hello.txt" },
-      { messages: [], toolCallId: "c2", context: {} },
-    );
+    const res = await runToolText(readTool, { path: "hello.txt" });
     expect(String(res)).toContain("line one");
     expect(String(res)).toContain("line two");
   });
@@ -86,10 +81,7 @@ describe("fs tools", () => {
     const root = await makeWorkspace();
     const writeTool = createWriteTool({ workRoot: root });
 
-    const res = await writeTool.tool.execute!(
-      { path: "../outside.txt", content: "x" },
-      { messages: [], toolCallId: "c3", context: {} },
-    );
+    const res = await runToolText(writeTool, { path: "../outside.txt", content: "x" });
     // buildTool 把沙盒错误包成 Error: 文本返回, 而非 reject。
     expect(String(res)).toContain("workspace");
   });
@@ -99,10 +91,7 @@ describe("fs tools", () => {
     await writeFile(path.join(root, "f.txt"), "hello world", "utf-8");
     const editTool = createEditTool({ workRoot: root });
 
-    const res = await editTool.tool.execute!(
-      { path: "f.txt", before: "world", after: "eva" },
-      { messages: [], toolCallId: "c4", context: {} },
-    );
+    const res = await runToolText(editTool, { path: "f.txt", before: "world", after: "eva" });
     expect(String(res)).toContain("Edited");
   });
 
@@ -111,10 +100,7 @@ describe("fs tools", () => {
     await writeFile(path.join(root, "f.txt"), "world world", "utf8");
     const editTool = createEditTool({ workRoot: root });
 
-    const res = await editTool.tool.execute!(
-      { path: "f.txt", before: "world", after: "eva" },
-      { messages: [], toolCallId: "c5", context: {} },
-    );
+    const res = await runToolText(editTool, { path: "f.txt", before: "world", after: "eva" });
     expect(String(res)).toContain("appears 2 times");
   });
 });
@@ -153,18 +139,12 @@ describe("readableRoots(overflow 白名单)", () => {
       overflowDir,
       readableRoots: [overflowDir],
     });
-    const readRes = await readTool.tool.execute!(
-      { path: overflowFile },
-      { messages: [], toolCallId: "c-read", context: {} },
-    );
+    const readRes = await runToolText(readTool, { path: overflowFile });
     expect(String(readRes)).toContain("overflowed content");
 
     // write 工具不用 readableRoots,给绝对路径溢出文件 → 仍按工作区解析并拒绝(白名单不放开写)。
     const writeTool = createWriteTool({ workRoot: root, overflowDir });
-    const writeRes = await writeTool.tool.execute!(
-      { path: overflowFile, content: "x" },
-      { messages: [], toolCallId: "c-write", context: {} },
-    );
+    const writeRes = await runToolText(writeTool, { path: overflowFile, content: "x" });
     expect(String(writeRes)).toContain("workspace");
   });
 });
@@ -174,14 +154,14 @@ describe("bash tool", () => {
     const root = await makeWorkspace();
     const bashTool = createBashTool({ workRoot: root });
 
-    // buildTool 在 execute 内 parse schema;只给 command 不给 description → parse 抛错 →
+    // tool() 在 execute 内 parse schema;只给 command 不给 description → parse 抛错 →
     // 被包装成 Error: 输出,命令不会真的执行。
-    const res = await bashTool.tool.execute!(
+    const res = await runToolText(
+      bashTool,
       { command: "echo hi" } as unknown as {
         command: string;
         description: string;
       },
-      { messages: [], toolCallId: "c-bash-1", context: {} },
     );
     expect(String(res)).toContain("Error:");
   });
@@ -190,28 +170,19 @@ describe("bash tool", () => {
     const root = await makeWorkspace();
     const bashTool = createBashTool({ workRoot: root });
 
-    const res = await bashTool.tool.execute!(
-      { command: "printf 'hello-bash'", description: "Print a marker string" },
-      { messages: [], toolCallId: "c-bash-2", context: {} },
-    );
+    const res = await runToolText(bashTool, { command: "printf 'hello-bash'", description: "Print a marker string" });
     expect(String(res)).toContain("hello-bash");
   });
 });
 describe("write guard(T23 mtime 快照校验)", () => {
   const editExec = (root: string, input: Record<string, unknown>, id: string) =>
-    createEditTool({ workRoot: root }).tool.execute!(
-      input as never,
-      { messages: [], toolCallId: id, context: {} } as never,
-    );
+    runToolText(createEditTool({ workRoot: root }), input as never, { toolUseID: id });
   const writeExec = (
     root: string,
     input: Record<string, unknown>,
     id: string,
   ) =>
-    createWriteTool({ workRoot: root }).tool.execute!(
-      input as never,
-      { messages: [], toolCallId: id, context: {} } as never,
-    );
+    runToolText(createWriteTool({ workRoot: root }), input as never, { toolUseID: id });
   const readFileAbs = (file: string) =>
     import("node:fs/promises").then((m) => m.readFile(file, "utf-8"));
 
@@ -389,10 +360,9 @@ describe("write guard(T23 mtime 快照校验)", () => {
 
     try {
       const tool = createEditTool({ workRoot: root });
-      const opt = { messages: [], context: {} } as never;
       const [r1, r2] = await Promise.all([
-        tool.tool.execute!({ path: "c.txt", before: "aaa", after: "AAA" }, opt),
-        tool.tool.execute!({ path: "c.txt", before: "ccc", after: "CCC" }, opt),
+        runToolText(tool, { path: "c.txt", before: "aaa", after: "AAA" }),
+        runToolText(tool, { path: "c.txt", before: "ccc", after: "CCC" }),
       ]);
       expect(String(r1)).toContain("Edited");
       expect(String(r2)).toContain("Edited");
@@ -414,18 +384,10 @@ describe("bash 取消(T25 abortSignal 接线)", () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 30);
     const startedAt = Date.now();
-    const res = await bashTool.tool.execute!(
-      {
+    const res = await runToolText(bashTool, {
         command: "sleep 10 && echo done",
         description: "Sleep long enough to be canceled",
-      },
-      {
-        messages: [],
-        toolCallId: "c-bash-abort",
-        context: {},
-        abortSignal: controller.signal,
-      } as never,
-    );
+      }, { signal: controller.signal });
     const elapsed = Date.now() - startedAt;
     expect(elapsed).toBeLessThan(3000);
     expect(String(res)).toMatch(/cancel|abort|SIGTERM/i);
@@ -434,13 +396,10 @@ describe("bash 取消(T25 abortSignal 接线)", () => {
   it("不 abort → 照常跑完并返回输出", async () => {
     const root = await makeWorkspace();
     const bashTool = createBashTool({ workRoot: root });
-    const res = await bashTool.tool.execute!(
-      {
+    const res = await runToolText(bashTool, {
         command: "printf 'ran-to-completion'",
         description: "Print completion marker",
-      },
-      { messages: [], toolCallId: "c-bash-ok", context: {} } as never,
-    );
+      });
     expect(String(res)).toContain("ran-to-completion");
   });
 
@@ -452,18 +411,10 @@ describe("bash 取消(T25 abortSignal 接线)", () => {
     // ps 只可能匹配到本次测试起的进程。
     const marker = `eva-orphan-${Date.now()}-${process.pid}`;
     const controller = new AbortController();
-    const pending = bashTool.tool.execute!(
-      {
+    const pending = runToolText(bashTool, {
         command: `sleep 30 && echo ${marker}`,
         description: "Compound command that spawns children",
-      },
-      {
-        messages: [],
-        toolCallId: "c-bash-tree",
-        context: {},
-        abortSignal: controller.signal,
-      } as never,
-    );
+      }, { signal: controller.signal });
     await new Promise((r) => setTimeout(r, 200));
     controller.abort();
     const res = await pending;

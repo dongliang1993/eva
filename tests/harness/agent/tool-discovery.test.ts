@@ -10,19 +10,19 @@ import {
   resolveToolExposure,
   TOOL_COUNT_SAFETY_LIMIT,
 } from "../../../packages/harness/src/agents/tool-safety-net.js";
-import { buildTool, type AgentTool } from "../../../packages/harness/src/tools/index.js";
+import { textResult, tool, type PipelineTool } from "../../../packages/harness/src/tools/index.js";
 import { rankToolCatalog } from "../../../packages/harness/src/tools/tool-search/index.js";
 
-const probeTool = (name: string, description = `probe ${name}`): AgentTool =>
-  buildTool({
+const probeTool = (name: string, description = `probe ${name}`): PipelineTool =>
+  tool({
     name,
     description,
     inputSchema: z.object({ n: z.number().optional() }),
-    execute: async () => `${name} ok`,
+    execute: async () => textResult(`${name} ok`),
   });
 
 const toolMap = (count: number, extraNames: readonly string[] = []) => {
-  const map = new Map<string, AgentTool>();
+  const map = new Map<string, PipelineTool>();
   for (let i = 0; i < count; i += 1) map.set(`filler-${i}`, probeTool(`filler-${i}`));
   for (const name of extraNames) map.set(name, probeTool(name));
   return map;
@@ -30,7 +30,7 @@ const toolMap = (count: number, extraNames: readonly string[] = []) => {
 
 describe("rankToolCatalog", () => {
   it("ranks exact/name-token matches first and honors limit", () => {
-    const catalog = new Map<string, AgentTool>([
+    const catalog = new Map<string, PipelineTool>([
       ["read_file", probeTool("read_file", "Read a file from the workspace")],
       [
         "mcp__github__create_issue",
@@ -73,6 +73,17 @@ describe("resolveToolExposure + ToolDiscoveryController", () => {
     const activation = discovery.activateTools(["mcp__x__y"]);
     expect(activation.added).toEqual(["mcp__x__y"]);
     expect(discovery.activeTools()).toContain("mcp__x__y");
+  });
+
+  it("discovery 首步的 active 工具包含 write 与 edit(实际工具名,不是 write_file/edit_file)", () => {
+    const tools = toolMap(45, ["tool_search", "read_file", "write", "edit", "bash"]);
+    const discovery = new ToolDiscoveryController();
+
+    const exposure = resolveToolExposure(tools, undefined, discovery);
+
+    expect(exposure.degraded).toBe(true);
+    expect(exposure.activeTools).toContain("write");
+    expect(exposure.activeTools).toContain("edit");
   });
 
   it("explicit activeToolNames win and skip discovery mode", () => {

@@ -7,7 +7,7 @@
  * preferredToolNames(skill allowed-tools):>40 时并入首步 active(core ∪ preferred,
  * 仍受 40 上限);<=40 时全集本来就可用,不改变行为。显式 activeToolNames 永远优先。
  */
-import type { AgentTool } from "../tools/index.js";
+import type { PipelineTool } from "../tools/index.js";
 import {
   TOOL_COUNT_SAFETY_LIMIT,
   type ToolDiscoveryController,
@@ -34,7 +34,7 @@ export interface ToolExposureResult {
  *    再并入 preferredToolNames(skill allowed-tools)直到 40 上限。
  */
 export const resolveToolExposure = (
-  tools: ReadonlyMap<string, AgentTool>,
+  tools: ReadonlyMap<string, PipelineTool>,
   activeToolNames: readonly string[] | undefined,
   discovery: ToolDiscoveryController,
   preferredToolNames?: readonly string[],

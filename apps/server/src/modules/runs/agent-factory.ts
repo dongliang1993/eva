@@ -21,7 +21,7 @@ import {
   SUBAGENT_MAX_STEPS,
   type Agent,
   type AgentObserver,
-  type AgentTool,
+  type PipelineTool,
   type PlanGateState,
   type PlanGateStore,
   type PromptSection,
@@ -83,7 +83,7 @@ export interface AgentBuildOptions {
   readonly requestApproval?: RequestApproval | undefined;
   readonly workspace?: WorkspaceContext | undefined;
   /** 本轮已固定的附加能力（MCP、memory 等）。 */
-  readonly extraTools?: readonly AgentTool[] | undefined;
+  readonly extraTools?: readonly PipelineTool[] | undefined;
   /** per-run 读好的人类可读记忆 section（L1 MEMORY.md + 近几天日记）。 */
   readonly memoryFilesSection?: PromptSection | undefined;
   /** Deterministically retrieved cross-session facts for this request. */
@@ -155,7 +155,7 @@ export const buildBaseTools = (
   options: {
     readonly skills: readonly Skill[];
     readonly workspace?: WorkspaceContext | undefined;
-    readonly extraTools?: readonly AgentTool[] | undefined;
+    readonly extraTools?: readonly PipelineTool[] | undefined;
     /** T45a:主 agent 专用;子代理不传(子代理仍按角色白名单收窄)。 */
     readonly planGate?:
     | {
@@ -165,10 +165,10 @@ export const buildBaseTools = (
     }
     | undefined;
   },
-): AgentTool[] => {
+): PipelineTool[] => {
   const { skills, workspace, extraTools, planGate } = options;
 
-  const tools: AgentTool[] = [
+  const tools: PipelineTool[] = [
     ...(skills.length > 0 ? [createReadSkillTool([...skills] as Skill[])] : []),
     createDuckDuckGoWebSearchTool(),
     createWebFetchTool(),
@@ -351,7 +351,7 @@ export class AgentFactory {
   buildSubagent(options: {
     readonly role: import("@eva/harness").SubagentRole;
     readonly workspace?: WorkspaceContext | undefined;
-    readonly extraTools?: readonly AgentTool[] | undefined;
+    readonly extraTools?: readonly PipelineTool[] | undefined;
     readonly temperature?: number | undefined;
     /**
      * 子代理与父 Run 共用审批通道。缺省时 harness 会拒绝危险工具。

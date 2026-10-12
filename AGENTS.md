@@ -54,7 +54,7 @@ Server 拥有 HTTP、SQLite、run 生命周期与能力装配；harness 拥有�
 
 - `app.ts` 拥有 Fastify 启动与关闭。`deps.ts` 造基础设施；`services/index.ts` 与
   `api/index.ts` 装配服务与 route 可见的操作。
-- `RunCoordinator.run` 在异步准备之前、同一事务里接受输入并启动 run。一个会话一条主 run
+- `Coordinator.run` 在异步准备之前、同一事务里接受输入并启动 run。一个会话一条主 run
   由准入与部分唯一索引双重保证。
 - `requestId` 是可选 UUID，用于 HTTP 重试去重；重复请求返回已有 run 的身份与状态，
   不再追加输入。
@@ -326,7 +326,7 @@ server/node_modules, web/dist}`。
   找不到说明模块划分要先想清楚。
 - **不要为「以后可能要换」造 Port**：门槛是「今天就有第二个实现，或跨 package」
   （[ADR 0006](./docs/adr/0006-ports-only-at-change-boundaries.md)）。需要限制调用方能力时，
-  用同一实现的窄接口（`RunOpeningLedger` 那种），编译期生效、零新增工具。
+  用同一实现的窄接口，编译期生效、零新增工具。
 - **测试放哪按被测代码的位置**，不按测试类型（[`tests/README.md`](./tests/README.md)）。
   数据库一律用真 SQLite（`initDb({ dbPath: ":memory:" })` + `migrateDb`），只有模型走假实现。
 - 收尾前跑 `pnpm typecheck && pnpm test && pnpm lint:arch`；碰了前端再加 `pnpm web:build`。

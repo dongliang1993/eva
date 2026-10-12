@@ -36,6 +36,15 @@ export interface RecordedAssistantRun {
   readonly streamError?: string | undefined;
 }
 
+/**
+ * 流式期间多久至少落一次库。工具与步边界另外立即落 —— 崩溃时最多丢这么长的正文,
+ * 而不会丢一次工具调用或它的结果。
+ */
+const CHECKPOINT_INTERVAL_MS = 1000;
+
+const isCheckpointBoundary = (event: RunAgentStreamEvent): boolean =>
+  event.type === "tool-call" || event.type === "tool-result" || event.type === "step-start";
+
 /** Persists one assistant message throughout the run. */
 export class AssistantMessageRecorder {
   private builder = new UiMessageBuilder(randomUUID());
@@ -44,12 +53,21 @@ export class AssistantMessageRecorder {
   private failureLayer: RunFailureLayer | undefined;
   private usage: StreamTokenUsage | undefined;
   private streamError: string | undefined = "Agent stream ended without a terminal outcome";
+  private lastCheckpointAt = Date.now();
 
   constructor(
     private readonly session: SessionService,
     private readonly options: AssistantMessageRecorderOptions
   ) {
     this.position = options.initialPosition;
+  }
+
+  /** 收一帧,并按边界/节流决定是否落一次检查点。 */
+  record(event: RunAgentStreamEvent): void {
+    this.push(event);
+    if (isCheckpointBoundary(event) || Date.now() - this.lastCheckpointAt >= CHECKPOINT_INTERVAL_MS) {
+      this.checkpoint();
+    }
   }
 
   push(event: RunAgentStreamEvent): void {
@@ -84,6 +102,7 @@ export class AssistantMessageRecorder {
   }
 
   checkpoint(): void {
+    this.lastCheckpointAt = Date.now();
     this.session.recordAssistantMessage(
       this.options.sessionId,
       this.withApprovalDecisions(this.snapshot()),

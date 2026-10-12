@@ -180,7 +180,7 @@ const withStderrDetail = (error: unknown, stderrTail: string): Error => {
  * 一个已连接的 MCP server。
  *
  * 只做三件事：连接时把工具清单拉下来、按名字调用工具、关闭。
- * 不认识 AgentTool，也不认识审批 —— 那是 `mcp-tools.ts` 的事。
+ * 不认识 PipelineTool，也不认识审批 —— 那是 `mcp-tools.ts` 的事。
  */
 export class McpServerClient {
   private constructor(
@@ -250,7 +250,7 @@ export class McpServerClient {
    * 调用一个工具，返回拍平后的文本。
    * @param signal T25:run 取消 ∪ toolMs 超时信号 —— 触发时中断传输层请求
    *   (协议 RequestOptions.signal)。可选,不传行为不变。
-   * @throws server 报 isError 或调用超时/失败时抛出（由 buildJsonSchemaTool 包成 [Tool Error]）
+   * @throws server 报 isError 或调用超时/失败时抛出（由 toolFromJsonSchema 的 guard 包成 Error: 文本）
    */
   async callTool(
     toolName: string,

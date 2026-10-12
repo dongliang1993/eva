@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import {
+  errorResult,
+  textResult,
+  tool,
+  type PipelineTool,
+} from "../tool.js";
 import type {
   PlanGateHandle,
   PlanGateState,
@@ -59,29 +64,33 @@ const exitSchema = z
 export const createEnterPlanModeTool = (
   store: PlanGateStore,
   state: PlanGateState,
-): AgentTool =>
-  buildTool({
+): PipelineTool =>
+  tool({
     name: "enter_plan_mode",
     description:
       "Enter plan mode: a read-mostly planning state where direct file writes are limited to the current plan file. Use before non-trivial implementation.",
     inputSchema: emptySchema,
     // 会写 DB/建文件,不是 readOnly;但进入的是更受限状态,不再弹一次审批。
-    readOnly: false,
-    execute: async () => {
+    annotations: { readOnlyHint: false },
+    async execute() {
       if (state.current().active) {
-        return "Error: Plan mode is already active. Update the current plan file or call exit_plan_mode.";
+        return errorResult(
+          "Plan mode is already active. Update the current plan file or call exit_plan_mode.",
+        );
       }
 
       try {
         const handle = await store.enter();
         state.enter(handle);
-        return [
+        return textResult([
           "Plan mode is now active.",
           `Plan file: ${handle.planPath}`,
           "Write the plan to that file, then call exit_plan_mode for approval.",
-        ].join("\n");
+        ].join("\n"));
       } catch (error) {
-        return `Error: ${error instanceof Error ? error.message : "Failed to enter plan mode."}`;
+        return errorResult(
+          error instanceof Error ? error.message : "Failed to enter plan mode.",
+        );
       }
     },
   });
@@ -90,15 +99,15 @@ export const createExitPlanModeTool = (
   store: PlanGateStore,
   state: PlanGateState,
   requestPlanReview?: RequestPlanReview,
-): AgentTool =>
-  buildTool({
+): PipelineTool =>
+  tool({
     name: "exit_plan_mode",
     description:
       "Submit the current plan for approval and exit plan mode. The plan file must be non-empty.",
     inputSchema: exitSchema,
-    // T45b:有平行通道时不走 boolean withApproval;没有通道(测试桩/旧路径)才退回 boolean。
+    // 有平行通道时不走 boolean 审批;没有通道(测试桩/旧路径)才退回 boolean。
     needsApproval: requestPlanReview === undefined,
-    execute: async (input, execOptions) => {
+    async execute(input, extra) {
       const snap = state.current();
       const handle =
         snap.active && snap.planId && snap.planPath && snap.planRelPath
@@ -110,30 +119,34 @@ export const createExitPlanModeTool = (
           : undefined;
 
       if (!handle) {
-        return "Error: exit_plan_mode can only be called while plan mode is active.";
+        return errorResult("exit_plan_mode can only be called while plan mode is active.");
       }
 
       const content = await store.readPlan(handle);
       if (content.trim().length === 0) {
-        return `Error: No plan content found. Write your plan to ${handle.planPath} first, then call exit_plan_mode.`;
+        return errorResult(
+          `No plan content found. Write your plan to ${handle.planPath} first, then call exit_plan_mode.`,
+        );
       }
 
       const revision = await store.recordRevision(handle);
 
-      // T45a 兼容路径:无平行通道时,withApproval 已在 execute 前问过 boolean(true 才到这)。
+      // 兼容路径:无平行通道时,审批已在 execute 前问过 boolean(true 才到这)。
       if (requestPlanReview === undefined) {
         await store.approve(handle);
         state.exit();
-        return `Plan approved (revision v${revision}). Plan mode deactivated.`;
+        return textResult(`Plan approved (revision v${revision}). Plan mode deactivated.`);
       }
 
       const decision = await requestPlanReview({
-        toolCallId: execOptions?.toolCallId ?? `plan-review-${handle.planId}`,
+        toolCallId: extra.toolUseID ?? `plan-review-${handle.planId}`,
         planId: handle.planId,
         planPath: handle.planPath,
         content,
         revision,
-        ...(input.options !== undefined ? { options: input.options } : {}),
+        ...(input.options !== undefined
+          ? { options: input.options.map((o) => ({ ...o, description: o.description ?? "" })) }
+          : {}),
       });
 
       switch (decision.outcome) {
@@ -143,25 +156,25 @@ export const createExitPlanModeTool = (
           const selected = decision.selectedLabel
             ? `Selected approach: ${decision.selectedLabel}\nExecute ONLY the selected approach. Do not execute any unselected alternatives.\n\n`
             : "";
-          return `${selected}Plan approved (revision v${revision}). Plan mode deactivated.`;
+          return textResult(`${selected}Plan approved (revision v${revision}). Plan mode deactivated.`);
         }
         case "revise": {
           const feedback = decision.feedback ?? "";
-          return `User rejected the plan. Feedback:\n\n${feedback}\n\nRevise the plan and call exit_plan_mode again.`;
+          return textResult(`User rejected the plan. Feedback:\n\n${feedback}\n\nRevise the plan and call exit_plan_mode again.`);
         }
         case "reject": {
           state.requestStopTurn();
           const feedback = decision.feedback ? `\n\n${decision.feedback}` : "";
-          return `Error: Plan rejected. Plan mode remains active.${feedback}`;
+          return errorResult(`Plan rejected. Plan mode remains active.${feedback}`);
         }
         case "reject_and_exit": {
           await store.reject(handle);
           state.exit();
           state.requestStopTurn();
-          return "Error: Plan rejected by user. Plan mode deactivated.";
+          return errorResult("Plan rejected by user. Plan mode deactivated.");
         }
         case "dismissed": {
-          return "Plan approval dismissed. Plan mode remains active.";
+          return textResult("Plan approval dismissed. Plan mode remains active.");
         }
       }
     },

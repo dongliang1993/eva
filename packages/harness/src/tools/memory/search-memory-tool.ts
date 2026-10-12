@@ -1,14 +1,14 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import { textResult, tool, type PipelineTool } from "../tool.js";
 import type { MemoryStore } from "./types.js";
 
 const searchMemorySchema = z.object({
   query: z.string().describe("Keyword or phrase to search for in stored memories.")
 });
 
-export const createSearchMemoryTool = (store: MemoryStore): AgentTool =>
-  buildTool({
+export const createSearchMemoryTool = (store: MemoryStore): PipelineTool =>
+  tool({
     name: "search_memory",
     description: [
       "Search through stored memories about the user.",
@@ -19,15 +19,15 @@ export const createSearchMemoryTool = (store: MemoryStore): AgentTool =>
       "Returns matching memories with their IDs (use ID for updates/deletes)."
     ].join("\n"),
     inputSchema: searchMemorySchema,
-    readOnly: true,
-    execute: async ({ query }) => {
+    annotations: { readOnlyHint: true },
+    async execute({ query }) {
       const results = await store.search(query);
 
       if (results.length === 0) {
-        return "No matching memories found.";
+        return textResult("No matching memories found.");
       }
 
-      return JSON.stringify(
+      return textResult(JSON.stringify(
         results.map((m) => ({
           id: m.id,
           category: m.category,
@@ -35,7 +35,7 @@ export const createSearchMemoryTool = (store: MemoryStore): AgentTool =>
           updatedAt: m.updatedAt
         })),
         null,
-        2
-      );
+        2,
+      ));
     }
   });

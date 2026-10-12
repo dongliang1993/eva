@@ -6,7 +6,7 @@ import {
   createSaveMemoryTool,
   createSearchMemoryTool,
   createUpdateLongTermMemoryTool,
-  type AgentTool,
+  type PipelineTool,
   type MemoryStore
 } from "@eva/harness";
 
@@ -72,7 +72,7 @@ export const createMemoryTools = (
   db: AppDatabase,
   config: AppConfig,
   context: RunMemoryContext = {}
-): readonly AgentTool[] => {
+): readonly PipelineTool[] => {
   const fileStore = new MemoryFileStore(evaDataDir());
   const tools = [
     createReadMemoryFileTool(fileStore),

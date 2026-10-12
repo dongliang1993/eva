@@ -5,9 +5,10 @@ import { z } from "zod";
 
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
 import {
-  buildTool,
   createExitPlanModeTool,
   createPlanGateState,
+  textResult,
+  tool,
   type PlanGateHandle,
   type PlanGateStore
 } from "../../../packages/harness/src/tools/index.js";
@@ -33,11 +34,11 @@ const store: PlanGateStore = {
   reject: async () => undefined
 };
 
-const dummy = buildTool({
+const dummy = tool({
   name: "write",
   description: "dummy",
   inputSchema: z.object({}),
-  execute: async () => "should-not-run"
+  execute: async () => textResult("should-not-run")
 });
 
 const modelWithExitThenText = (counter: { calls: number }) =>

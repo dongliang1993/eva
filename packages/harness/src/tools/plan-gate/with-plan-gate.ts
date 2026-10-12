@@ -1,6 +1,8 @@
 import path from "node:path";
 
-import type { AgentTool } from "../build-tool.js";
+import type { PipelineTool } from "../tool.js";
+import type { ToolExtra } from "../../query/types.js";
+import { textResult } from "../tool.js";
 import type { PlanGateState } from "./state.js";
 
 const HARD_BLOCKED_TOOLS = new Set(["TaskStop", "CronCreate", "CronDelete"]);
@@ -38,49 +40,40 @@ export const planGateDeniedMessage = (planPath: string | undefined): string =>
   `Write the plan to ${planPath ?? "(no plan file)"}, then call exit_plan_mode.`;
 
 /**
- * T45a:plan gate 是最外层闸门(执行序:planGate → approval → cap)。
+ * plan gate 是最外层闸门(执行序:planGate → approval → cap)。
  * 它只回答「挡不挡」：硬挡 write/edit 到非 plan 路径与 TaskStop/Cron*;
  * 免不免审批是 requestApproval 闭包的事,这里不认识审批通道。
  */
 export const withPlanGate = (
-  agentTool: AgentTool,
+  pipelineTool: PipelineTool,
   state: PlanGateState,
-): AgentTool => {
-  const inner = agentTool.tool;
-  const innerExecute = inner.execute;
+): PipelineTool => {
+  const innerExecute = pipelineTool.execute;
 
-  if (typeof innerExecute !== "function") {
-    return agentTool;
-  }
+  const execute: PipelineTool["execute"] = async (input, extra: ToolExtra) => {
+    const snap = state.current();
+    if (!snap.active) {
+      return innerExecute(input, extra);
+    }
 
-  return {
-    ...agentTool,
-    tool: {
-      ...inner,
-      execute: async (input: unknown, options?: unknown) => {
-        const snap = state.current();
-        if (!snap.active) {
-          return innerExecute(input as never, options as never);
-        }
+    if (HARD_BLOCKED_TOOLS.has(pipelineTool.name)) {
+      return textResult(planGateDeniedMessage(snap.planPath));
+    }
 
-        if (HARD_BLOCKED_TOOLS.has(agentTool.name)) {
-          return planGateDeniedMessage(snap.planPath);
-        }
+    if (WRITE_TOOLS.has(pipelineTool.name)) {
+      const target = (input as Record<string, unknown> | undefined)?.path;
+      const ok =
+        typeof target === "string" &&
+        snap.planPath !== undefined &&
+        snap.planRelPath !== undefined &&
+        isPlanPath(target, snap.planPath, snap.planRelPath);
+      if (!ok) {
+        return textResult(planGateDeniedMessage(snap.planPath));
+      }
+    }
 
-        if (WRITE_TOOLS.has(agentTool.name)) {
-          const target = (input as Record<string, unknown> | undefined)?.path;
-          const ok =
-            typeof target === "string" &&
-            snap.planPath !== undefined &&
-            snap.planRelPath !== undefined &&
-            isPlanPath(target, snap.planPath, snap.planRelPath);
-          if (!ok) {
-            return planGateDeniedMessage(snap.planPath);
-          }
-        }
-
-        return innerExecute(input as never, options as never);
-      },
-    } as typeof inner,
+    return innerExecute(input, extra);
   };
+
+  return { ...pipelineTool, execute };
 };

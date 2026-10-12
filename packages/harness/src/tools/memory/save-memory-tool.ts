@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import { textResult, tool, type PipelineTool } from "../tool.js";
 import type { MemoryCategory, MemoryStore } from "./types.js";
 
 const saveMemorySchema = z.object({
@@ -19,8 +19,8 @@ const saveMemorySchema = z.object({
   )
 });
 
-export const createSaveMemoryTool = (store: MemoryStore): AgentTool =>
-  buildTool({
+export const createSaveMemoryTool = (store: MemoryStore): PipelineTool =>
+  tool({
     name: "save_memory",
     description: [
       "Store a fact or insight in the DATABASE (category: user/preference/project/decision/knowledge).",
@@ -45,17 +45,19 @@ export const createSaveMemoryTool = (store: MemoryStore): AgentTool =>
       "- Information already in the conversation history"
     ].join("\n"),
     inputSchema: saveMemorySchema,
-    execute: async ({ content, category, updateId }) => {
+    async execute({ content, category, updateId }) {
       const cat = (category ?? "knowledge") as MemoryCategory;
 
       if (updateId) {
         const updated = await store.update(updateId, content, cat);
-        return updated
-          ? `Memory updated (${updated.id}) [${cat}]: ${content}`
-          : `Memory ${updateId} not found, saved as new: ${(await store.save(content, cat, "tool_saved")).id}`;
+        return textResult(
+          updated
+            ? `Memory updated (${updated.id}) [${cat}]: ${content}`
+            : `Memory ${updateId} not found, saved as new: ${(await store.save(content, cat, "tool_saved")).id}`,
+        );
       }
 
       const entry = await store.save(content, cat, "tool_saved");
-      return `Memory saved (${entry.id}) [${cat}]: ${content}`;
+      return textResult(`Memory saved (${entry.id}) [${cat}]: ${content}`);
     }
   });

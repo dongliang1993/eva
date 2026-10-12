@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
-import { buildTool } from "../../../packages/harness/src/tools/build-tool.js";
+import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -30,7 +30,7 @@ describe("runtime contracts", () => {
 
   it("additional tools use the same approval policy as configured tools", async () => {
     const approve = vi.fn(async () => false);
-    const execute = vi.fn(async () => "mutated");
+    const execute = vi.fn(async () => textResult("mutated"));
     let calls = 0;
     const agent = createAgent({ requestApproval: approve, maxSteps: 3, model: new MockLanguageModelV4({ doStream: async () => ++calls === 1 ? {
       stream: simulateReadableStream({ chunks: [
@@ -39,17 +39,17 @@ describe("runtime contracts", () => {
         { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage },
       ] }),
     } : response("stop") }) });
-    const extra = buildTool({ name: "mutate", description: "mutate", inputSchema: z.object({}), needsApproval: true, execute });
+    const extra = tool({ name: "mutate", description: "mutate", inputSchema: z.object({}), needsApproval: true, execute: execute });
     for await (const _ of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [extra] })) {}
     expect(execute).not.toHaveBeenCalled();
     expect(approve).toHaveBeenCalledOnce();
   });
 
   it("tools cannot replace a configured tool by name", async () => {
-    const tool = buildTool({ name: "same", description: "same", inputSchema: z.object({}), execute: async () => "ok" });
-    const agent = createAgent({ tools: [tool], model: new MockLanguageModelV4({ doStream: async () => response("stop") }) });
+    const sameName = tool({ name: "same", description: "same", inputSchema: z.object({}), execute: async () => textResult("ok") });
+    const agent = createAgent({ tools: [sameName], model: new MockLanguageModelV4({ doStream: async () => response("stop") }) });
     const events = [];
-    for await (const event of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [tool] })) events.push(event);
+    for await (const event of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [sameName] })) events.push(event);
     expect(events).toEqual([{ type: "error", message: "Duplicate tool name: same" }]);
   });
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import { textResult, tool, type PipelineTool } from "../tool.js";
 import type { MemoryFileStore } from "./memory-files.js";
 
 const readMemoryFileSchema = z.object({
@@ -13,8 +13,8 @@ const readMemoryFileSchema = z.object({
     )
 });
 
-export const createReadMemoryFileTool = (store: MemoryFileStore): AgentTool =>
-  buildTool({
+export const createReadMemoryFileTool = (store: MemoryFileStore): PipelineTool =>
+  tool({
     name: "read_memory_file",
     description: [
       "Read the full content of a memory file, or list the available memory files.",
@@ -26,19 +26,21 @@ export const createReadMemoryFileTool = (store: MemoryFileStore): AgentTool =>
       "Paths are confined to the memory root; anything escaping the root is rejected."
     ].join("\n"),
     inputSchema: readMemoryFileSchema,
-    readOnly: true,
-    execute: async ({ from }) => {
+    annotations: { readOnlyHint: true },
+    async execute({ from }) {
       if (from === undefined) {
         const files = await store.list();
         if (files.length === 0) {
-          return "No memory files yet.";
+          return textResult("No memory files yet.");
         }
-        return files.join("\n");
+        return textResult(files.join("\n"));
       }
 
       const content = await store.readFile(from);
-      return content !== undefined
-        ? content
-        : `Memory file not found: ${from}`;
+      return textResult(
+        content !== undefined
+          ? content
+          : `Memory file not found: ${from}`,
+      );
     }
   });

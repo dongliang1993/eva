@@ -1,4 +1,9 @@
-import { buildJsonSchemaTool, type AgentTool } from "@eva/harness";
+import {
+  toolFromJsonSchema,
+  type PipelineTool,
+  type ToolResult,
+} from "@eva/harness";
+import { textResult } from "@eva/harness";
 import type { McpServerConfig, McpToolParam, McpToolSummary } from "@eva/shared";
 
 import type { McpToolDescriptor } from "./mcp-client.js";
@@ -28,7 +33,7 @@ export const mcpToolName = (server: string, tool: string): string =>
  */
 export interface McpToolInvoker {
   readonly tools: readonly McpToolDescriptor[];
-  /** T25:signal = run 取消 ∪ toolMs 超时,触发时中断传输层请求。可选。 */
+  /** signal = run 取消 ∪ toolMs 超时,触发时中断传输层请求。可选。 */
   callTool(
     toolName: string,
     input: unknown,
@@ -95,17 +100,17 @@ const toParams = (inputSchema: unknown): readonly McpToolParam[] => {
 };
 
 /**
- * MCP 工具 → AgentTool。
+ * MCP 工具 → PipelineTool。
  *
- * 不需要新的审批机制：`AgentTool.needsApproval` + `withApproval` 是 R1 T0.4 建好的闸门，
- * MCP 工具只是又一批带标记的工具。
+ * 不需要新的审批机制：`needsApproval` 标记 + pipeline 的 withApproval 是
+ * 建好的闸门，MCP 工具只是又一批带标记的工具。
  */
 export const toAgentTools = (
   server: McpServerConfig,
   invoker: McpToolInvoker,
   logger: McpLogger,
-): readonly AgentTool[] => {
-  const tools: AgentTool[] = [];
+): readonly PipelineTool[] => {
+  const tools: PipelineTool[] = [];
   const tooLong: string[] = [];
 
   for (const descriptor of invoker.tools) {
@@ -117,15 +122,26 @@ export const toAgentTools = (
     }
 
     tools.push(
-      buildJsonSchemaTool({
+      toolFromJsonSchema({
         name,
         description: descriptor.description,
-        inputSchema: descriptor.inputSchema,
-        readOnly: descriptor.readOnly,
+        inputSchema: {
+          type: "json-schema",
+          schema:
+            typeof descriptor.inputSchema === "object" &&
+            descriptor.inputSchema !== null
+              ? (descriptor.inputSchema as Record<string, unknown>)
+              : { type: "object" },
+        },
+        annotations: {
+          readOnlyHint: descriptor.readOnly,
+        },
         ...(isAutoApproved(server, descriptor) ? {} : { needsApproval: true }),
-        // T25:abortSignal 透传给 invoker → 传输层请求可中断。
-        execute: (input, options) =>
-          invoker.callTool(descriptor.name, input, options?.abortSignal),
+        // abortSignal 透传给 invoker → 传输层请求可中断。
+        execute: async (input, extra): Promise<ToolResult> =>
+          textResult(
+            await invoker.callTool(descriptor.name, input, extra.signal),
+          ),
       }),
     );
   }

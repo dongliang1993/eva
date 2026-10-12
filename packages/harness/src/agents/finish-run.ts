@@ -1,6 +1,6 @@
 import type { StreamToolCallSummary } from "@eva/shared";
 
-import { TOOL_CALL_ABORTED_OUTPUT } from "../tools/build-tool.js";
+import { TOOL_CALL_ABORTED_OUTPUT } from "../tools/tool.js";
 import { toStreamTokenUsage, type AgentObserver, type TokenUsage } from "./observer.js";
 import type { ToolCallClock } from "./stream-part-mapper.js";
 import type { AgentStreamEvent, AgentToolCallResult } from "./types.js";

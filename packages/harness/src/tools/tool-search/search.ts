@@ -3,7 +3,7 @@ import {
   sortByRank,
   tokenizeForRank,
 } from "../../search/text-rank.js";
-import type { AgentTool } from "../build-tool.js";
+import type { PipelineTool } from "../tool.js";
 
 export interface ToolCatalogMatch {
   readonly name: string;
@@ -12,12 +12,12 @@ export interface ToolCatalogMatch {
 }
 
 /**
- * T43 首版 ranker：确定性、无额外模型调用。要换 Alma 那种小模型语义搜索时,
+ * 首版 ranker：确定性、无额外模型调用。要换 Alma 那种小模型语义搜索时,
  * 只替换这个纯函数,激活管线(ToolDiscoveryController + activeTools)不动。
  */
 export const rankToolCatalog = (
   query: string,
-  catalog: ReadonlyMap<string, AgentTool>,
+  catalog: ReadonlyMap<string, PipelineTool>,
   limit = 8,
 ): ToolCatalogMatch[] => {
   const queryTokens = tokenizeForRank(query);

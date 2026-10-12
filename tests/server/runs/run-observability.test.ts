@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "../../../apps/server/node_modules/fastify/fastify.js";
 import type { FastifyInstance } from "../../../apps/server/node_modules/fastify";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
+import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 import { z } from "zod";
 
 import {
@@ -52,11 +53,11 @@ const textModel = (text: string): MockLanguageModelV4 =>
     })
   });
 
-const echoTool = buildTool({
+const echoTool = tool({
   name: "echo",
   description: "回显输入",
   inputSchema: z.object({ msg: z.string() }),
-  execute: async ({ msg }) => msg
+  execute: async ({ msg }) => textResult(msg)
 });
 
 /** 第一步产 tool-call(echo),第二步产纯文本。 */

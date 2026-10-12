@@ -4,12 +4,13 @@ import { z } from "zod";
 
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
 import type { AgentTelemetryEvent } from "../../../packages/harness/src/agents/observer.js";
-import { buildJsonSchemaTool } from "../../../packages/harness/src/tools/build-json-schema-tool.js";
+import { toolFromJsonSchema } from "../../../packages/harness/src/tools/tool.js";
 import {
-  buildTool,
-  TOOL_CALL_ABORTED_OUTPUT,
-  type AgentTool,
-} from "../../../packages/harness/src/tools/build-tool.js";
+  textResult,
+  textOf,
+  tool,
+  type PipelineTool,
+} from "../../../packages/harness/src/tools/tool.js";
 import { Semaphore, withConcurrencyCap } from "../../../packages/harness/src/tools/concurrency-cap.js";
 import { createPlanGateState } from "../../../packages/harness/src/tools/plan-gate/state.js";
 import { withPlanGate } from "../../../packages/harness/src/tools/plan-gate/with-plan-gate.js";
@@ -19,37 +20,35 @@ import {
 } from "../../../packages/harness/src/tools/tool-timing.js";
 import { withApproval } from "../../../packages/harness/src/tools/with-approval.js";
 import { withExecTiming } from "../../../packages/harness/src/tools/with-exec-timing.js";
+import { runTool } from "../../helpers/run-tool.js";
+import type { ToolExtra } from "../../../packages/harness/src/query/types.js";
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const execOf = (
-  tool: AgentTool
-): ((input: unknown, options?: unknown) => Promise<unknown>) => {
-  const execute = tool.tool.execute;
-  if (typeof execute !== "function") throw new Error("tool has no execute");
-  return execute as (input: unknown, options?: unknown) => Promise<unknown>;
-};
+const execOf = (t: PipelineTool) =>
+  (input: unknown, extra: Partial<ToolExtra> = {}): Promise<string> =>
+    runTool(t, input, extra).then(textOf);
 
-describe("工具三段计时(T50)", () => {
+describe("工具三段计时", () => {
   it("审批等 100ms、排队等 50ms、执行 50ms 的调用拆成三个独立数字", async () => {
     const timing: ToolTimingState = createToolTimingState();
     const limiter = new Semaphore(1);
-    const tool = buildTool({
+    const timed = tool({
       name: "t",
       description: "t",
       inputSchema: z.object({}),
-      readOnly: true,
+      annotations: { readOnlyHint: true },
       needsApproval: true,
       execute: async () => {
         await sleep(50);
-        return "ok";
+        return textResult("ok");
       }
     });
 
     // 与 createAgent 同序:execTiming 最内 → cap → approval(执行序 approval → cap → exec)。
     const wrapped = withApproval(
-      withConcurrencyCap(withExecTiming(tool, timing), limiter, timing),
+      withConcurrencyCap(withExecTiming(timed, timing), limiter, timing),
       async () => {
         await sleep(100);
         return true;
@@ -61,7 +60,7 @@ describe("工具三段计时(T50)", () => {
     // 先占住唯一的帽位,150ms 后释放 —— 审批要等 100ms,帽在审批结束后还占着,
     // 才能制造出确定的排队等待(过早释放的话 cap.acquire 到的时候帽已经空了)。
     const hold = await limiter.acquire();
-    const pending = execOf(wrapped)({}, { toolCallId: "call-1" });
+    const pending = execOf(wrapped)({}, { toolUseID: "call-1" });
     setTimeout(() => hold(), 150);
     await pending;
 
@@ -77,24 +76,24 @@ describe("工具三段计时(T50)", () => {
 
   it("无审批无排队的只读工具:两个等待字段是 0,exec 与手工计时吻合", async () => {
     const timing = createToolTimingState();
-    const tool = buildTool({
+    const timed = tool({
       name: "t",
       description: "t",
       inputSchema: z.object({}),
-      readOnly: true,
+      annotations: { readOnlyHint: true },
       execute: async () => {
         await sleep(50);
-        return "ok";
+        return textResult("ok");
       }
     });
     const wrapped = withConcurrencyCap(
-      withExecTiming(tool, timing),
+      withExecTiming(timed, timing),
       new Semaphore(10),
       timing
     );
 
     const start = Date.now();
-    await execOf(wrapped)({}, { toolCallId: "call-2" });
+    await execOf(wrapped)({}, { toolUseID: "call-2" });
     const wall = Date.now() - start;
 
     const snap = timing.take("call-2");
@@ -106,12 +105,12 @@ describe("工具三段计时(T50)", () => {
 
   it("plan gate 挡掉的 write:三段全 0,无异常", async () => {
     const timing = createToolTimingState();
-    const tool = buildTool({
+    const timed = tool({
       name: "write",
       description: "t",
       inputSchema: z.object({ path: z.string(), content: z.string() }),
       needsApproval: true,
-      execute: async () => "written"
+      execute: async () => textResult("written")
     });
     const gateState = createPlanGateState({
       active: true,
@@ -119,11 +118,11 @@ describe("工具三段计时(T50)", () => {
       planPath: "/ws/.eva/plan-gate/p1/current.md",
       planRelPath: ".eva/plan-gate/p1/current.md"
     });
-    const wrapped = withPlanGate(withExecTiming(tool, timing), gateState);
+    const wrapped = withPlanGate(withExecTiming(timed, timing), gateState);
 
     const output = await execOf(wrapped)(
       { path: "/ws/src/index.ts", content: "x" },
-      { toolCallId: "call-3" }
+      { toolUseID: "call-3" }
     );
     expect(String(output)).toContain("[Plan Mode]");
 
@@ -138,7 +137,7 @@ describe("工具三段计时(T50)", () => {
 
   it("工具内部抛异常:仍记 exec(到抛出为止),输出是 Error: 前缀", async () => {
     const timing = createToolTimingState();
-    const tool = buildTool({
+    const timed = tool({
       name: "t",
       description: "t",
       inputSchema: z.object({}),
@@ -147,9 +146,9 @@ describe("工具三段计时(T50)", () => {
         throw new Error("boom");
       }
     });
-    const wrapped = withExecTiming(tool, timing);
+    const wrapped = withExecTiming(timed, timing);
 
-    const output = await execOf(wrapped)({}, { toolCallId: "call-4" });
+    const output = await execOf(wrapped)({}, { toolUseID: "call-4" });
     expect(String(output)).toMatch(/^Error:/);
 
     const snap = timing.take("call-4");
@@ -159,50 +158,48 @@ describe("工具三段计时(T50)", () => {
 
   it("abort 抢在 execute 之前完成:exec 有值且标 execAborted", async () => {
     const timing = createToolTimingState();
-    const tool = buildTool({
+    const timed = tool({
       name: "t",
       description: "t",
       inputSchema: z.object({}),
-      execute: async (_input, options) => {
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(resolve, 500);
-          options?.abortSignal?.addEventListener("abort", () => {
+      execute: (_input, extra) =>
+        new Promise((_resolve, reject) => {
+          const timeout = setTimeout(() => _resolve(textResult("late")), 500);
+          extra.signal.addEventListener("abort", () => {
             clearTimeout(timeout);
-            reject(options.abortSignal?.reason);
+            reject(extra.signal.reason);
           }, { once: true });
-        });
-        return "should never reach";
-      }
+        }),
     });
-    const wrapped = withExecTiming(tool, timing);
+    const wrapped = withExecTiming(timed, timing);
 
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 30);
     const output = await execOf(wrapped)({}, {
-      toolCallId: "call-5",
-      abortSignal: controller.signal
+      toolUseID: "call-5",
+      signal: controller.signal,
     });
 
-    expect(output).toBe(TOOL_CALL_ABORTED_OUTPUT);
+    expect(output).toBe("Error: tool call aborted");
     const snap = timing.take("call-5");
     expect(snap.execMs).toBeGreaterThanOrEqual(20);
     expect(snap.execMs).toBeLessThan(400); // 没等满 500ms —— 记的是「到被中止为止」
     expect(snap.execAborted).toBe(true);
   });
 
-  it("MCP 工具(buildJsonSchemaTool)与内建工具(buildTool)都有 exec", async () => {
+  it("MCP 工具(toolFromJsonSchema)与内建工具(tool)都有 exec", async () => {
     const timing = createToolTimingState();
-    const mcpTool = buildJsonSchemaTool({
+    const mcpTool = toolFromJsonSchema({
       name: "mcp__srv__do",
       description: "mcp tool",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "json-schema", schema: { type: "object", properties: {} } },
       execute: async () => {
         await sleep(40);
-        return "mcp ok";
+        return textResult("mcp ok");
       }
     });
 
-    await execOf(withExecTiming(mcpTool, timing))({}, { toolCallId: "call-6" });
+    await execOf(withExecTiming(mcpTool, timing))({}, { toolUseID: "call-6" });
     const snap = timing.take("call-6");
     expect(snap.execMs).toBeGreaterThanOrEqual(35);
   });
@@ -213,14 +210,14 @@ describe("工具三段计时(T50)", () => {
       inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
       outputTokens: { total: 5, text: 5, reasoning: 0 }
     };
-    const dangerousTool = buildTool({
+    const dangerousTool = tool({
       name: "danger",
       description: "t",
       inputSchema: z.object({}),
       needsApproval: true,
       execute: async () => {
         await sleep(30);
-        return "done";
+        return textResult("done");
       }
     });
 

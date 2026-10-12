@@ -1,4 +1,4 @@
-import type { AgentTool } from "@eva/harness";
+import type { PipelineTool } from "@eva/harness";
 import type { McpServerConfig, McpServerStatus } from "@eva/shared";
 
 import { McpServerClient } from "./mcp-client.js";
@@ -61,8 +61,8 @@ export class McpRegistry {
   }
 
   /** 已连上的 server 的全部工具（已带 mcp__ 前缀）。 */
-  listTools(): readonly AgentTool[] {
-    const tools: AgentTool[] = [];
+  listTools(): readonly PipelineTool[] {
+    const tools: PipelineTool[] = [];
 
     for (const server of this.store.listAll()) {
       const connection = this.connections.get(server.id);

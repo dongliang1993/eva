@@ -26,7 +26,7 @@
 
 ## 但要区分「Port」与「能力收窄接口」
 
-为**同一个实现**声明多个受限视图（`RunOpeningLedger` / `RunSettlingLedger`）不受本条约束，
+为**同一个实现**声明多个受限视图（曾经的例子是 `RunOpeningLedger` / `RunSettlingLedger`，已移除）不受本条约束，
 而且鼓励使用：它不是为了替换实现，是为了让调用方**拿不到不该有的方法**，
 把不变量交给编译器而不是 review。
 

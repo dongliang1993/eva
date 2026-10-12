@@ -1,4 +1,4 @@
-import type { AgentTool } from "../tools/index.js";
+import type { PipelineTool } from "../tools/index.js";
 
 export interface SubagentRole {
   readonly type: string;
@@ -58,9 +58,9 @@ export const SUBAGENT_ROLES: readonly SubagentRole[] = [
  *        这里不自己查 crew —— 未知角色在解析期就该暴露,不该在过滤期静默丢工具。
  */
 export const filterToolsForRole = (
-  tools: readonly AgentTool[],
+  tools: readonly PipelineTool[],
   role: SubagentRole
-): readonly AgentTool[] => {
+): readonly PipelineTool[] => {
   const allowed = new Set(role.allowedTools);
   return tools.filter((t) => allowed.has(t.name));
 };
@@ -72,7 +72,7 @@ export const filterToolsForRole = (
  * 那样的子代理"没有手却被要求读代码",实测会编造出看似完整的目录树。调用方据此早爆。
  */
 export const missingRoleTools = (
-  tools: readonly AgentTool[],
+  tools: readonly PipelineTool[],
   role: SubagentRole
 ): readonly string[] => {
   const present = new Set(tools.map((t) => t.name));

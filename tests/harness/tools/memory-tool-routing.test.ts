@@ -24,8 +24,8 @@ describe("memory tool routing (T16 §2.4)", () => {
     writeLongTermMemory: async () => ""
   };
 
-  const saveDesc = createSaveMemoryTool(store).tool.description ?? "";
-  const updateDesc = createUpdateLongTermMemoryTool(fileStore).tool.description ?? "";
+  const saveDesc = createSaveMemoryTool(store).description;
+  const updateDesc = createUpdateLongTermMemoryTool(fileStore).description;
 
   it("save_memory 描述区分位置:稳定偏好归 MEMORY.md, 不是它的领地", () => {
     expect(saveDesc).toMatch(/MEMORY\.md|update_long_term_memory|long.?term/i);

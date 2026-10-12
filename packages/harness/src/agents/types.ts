@@ -7,7 +7,7 @@ import type {
 
 import type { ContextWindowPolicyOptions } from "../context/policy.js";
 import type { AgentModel } from "../models/agent-model.js";
-import type { AgentTool, PlanGateState } from "../tools/index.js";
+import type { PipelineTool, PlanGateState } from "../tools/index.js";
 import type { AgentObserver } from "./observer.js";
 
 export type ToolExecutionEvent =
@@ -20,7 +20,7 @@ export interface AgentRunInput {
   messages: ModelMessage[];
   context?: Record<string, unknown>;
   maxSteps?: number;
-  additionalTools?: AgentTool[];
+  additionalTools?: PipelineTool[];
   /**
    * T39/T43:显式选定本轮生效的工具名(白名单)。设了就照单过滤、绕过数量安全网
    * (显式选择优先);不设 = 走 resolveToolExposure,>40 进 discovery mode
@@ -33,7 +33,6 @@ export interface AgentRunInput {
    */
   preferredToolNames?: readonly string[];
   abortSignal?: AbortSignal;
-
 }
 
 export type { StreamFinishReason, StreamTokenUsage };
@@ -51,7 +50,7 @@ export interface AgentToolCallResult {
   approvalWaitMs?: number;
   /** T50:并发帽排队等待。 */
   queueWaitMs?: number;
-      /** T50:执行观察到 abort 并协作退出。 */
+  /** T50:执行观察到 abort 并协作退出。 */
   execAborted?: boolean;
 }
 
@@ -91,7 +90,7 @@ export interface AgentCallSettings {
 
 export interface CreateAgentOptions {
   model: AgentModel;
-  tools?: AgentTool[];
+  tools?: PipelineTool[];
   systemPrompt?: string | SystemModelMessage;
   maxSteps?: number;
   observer?: AgentObserver;

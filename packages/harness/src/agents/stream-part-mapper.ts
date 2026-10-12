@@ -1,14 +1,15 @@
 import type { TextStreamPart, ToolSet } from "ai";
 
+import type { ToolResult } from "../query/types.js";
+import { textOf } from "../tools/tool.js";
 import type { AgentToolCallResult } from "./types.js";
 import type { AgentStreamEvent } from "./types.js";
-import { TOOL_ERROR_PREFIX } from "../tools/index.js";
 import type { ToolTimingState } from "../tools/tool-timing.js";
 
 /**
  * 工具调用的在飞台账:tool-call 时登记(toolName + 打点),tool-result 时取差并销账。
  * run() 局部持有,跨 step 共享(一个 toolCallId 的 call 与 result 可能跨 step)。
- * abort 收口时,台账里剩下的 entry 就是"已发起、未收口"的在飞调用 —— T26 据此补发取消结果。
+ * abort 收口时,台账里剩下的 entry 就是"已发起、未收口"的在飞调用 —— 据此补发取消结果。
  */
 export interface InFlightToolCall {
   readonly toolName: string;
@@ -28,15 +29,42 @@ export interface MappedPart {
   readonly error?: unknown;
 }
 
-/** 工具 execute 的返回值 → 纯文本。Eva 的工具都返回 string,非 string 是异常情况才 stringify。 */
-export const toOutputText = (output: unknown): string =>
-  typeof output === "string" ? output : JSON.stringify(output);
-
-const readToolStatus = (output: unknown): "success" | "error" =>
-  toOutputText(output).startsWith(TOOL_ERROR_PREFIX) ? "error" : "success";
-
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : "Unknown error";
+
+/** 工具执行结果 → SSE 的 output 文本。 */
+const toResultOutput = (output: ToolResult | undefined): string =>
+  output === undefined ? "" : textOf(output);
+
+const toResultStatus = (output: ToolResult | undefined): "success" | "error" =>
+  output?.isError === true ? "error" : "success";
+
+/** take 一次,快照同时供 event 与 toolCall 汇总共用(第二次 take 会拿到全 0)。 */
+const takeTiming = (timing: ToolTimingState | undefined, toolCallId: string) =>
+  timing?.take(toolCallId);
+
+const timingFields = (
+  snapshot: ReturnType<typeof takeTiming>,
+) =>
+  snapshot === undefined
+    ? {}
+    : {
+      toolExecMs: snapshot.execMs,
+      approvalWaitMs: snapshot.approvalWaitMs,
+      queueWaitMs: snapshot.queueWaitMs,
+    };
+
+const timingFieldsForSummary = (
+  snapshot: ReturnType<typeof takeTiming>,
+) =>
+  snapshot === undefined
+    ? {}
+    : {
+      toolExecMs: snapshot.execMs,
+      approvalWaitMs: snapshot.approvalWaitMs,
+      queueWaitMs: snapshot.queueWaitMs,
+      execAborted: snapshot.execAborted,
+    };
 
 /**
  * SDK stream part → Eva 事件。
@@ -47,7 +75,7 @@ const toErrorMessage = (error: unknown): string =>
 export const mapStreamPart = <TOOLS extends ToolSet>(
   part: TextStreamPart<TOOLS>,
   clock: ToolCallClock,
-  /** T50:三段计时汇聚,tool-result 时 take 取走快照(一次性)。 */
+  /** 三段计时汇聚,tool-result 时 take 取走快照(一次性)。 */
   toolTiming?: ToolTimingState
 ): MappedPart => {
   switch (part.type) {
@@ -83,80 +111,57 @@ export const mapStreamPart = <TOOLS extends ToolSet>(
       };
 
     case "tool-result": {
-      const output = toOutputText(part.output);
-      const status = readToolStatus(part.output);
-      // T51:clock 只在飞销账,不再产出 durationMs —— 对外时间是 T50 的三段计时。
+      // AI SDK 的 tool-result part 拿到的是完整 ToolResult(含 isError)。
+      const output = part.output as ToolResult;
+      const outputText = toResultOutput(output);
+      const status = toResultStatus(output);
+      // clock 只在飞销账,不再产出 durationMs —— 对外时间是三段计时。
       clock.delete(part.toolCallId);
-      const timing = toolTiming?.take(part.toolCallId);
+      // take 只调一次,event 与 toolCall 共享同一份快照。
+      const snapshot = takeTiming(toolTiming, part.toolCallId);
 
       return {
         event: {
           type: "tool-result",
           toolCallId: part.toolCallId,
           toolName: part.toolName,
-          output,
+          output: outputText,
           status,
-          ...(timing !== undefined
-            ? {
-                toolExecMs: timing.execMs,
-                approvalWaitMs: timing.approvalWaitMs,
-                queueWaitMs: timing.queueWaitMs
-              }
-            : {})
+          ...timingFields(snapshot)
         },
         toolCall: {
           toolName: part.toolName,
           toolCallId: part.toolCallId,
           args: (part.input as Record<string, unknown>) ?? {},
-          output,
+          output: outputText,
           status,
-          ...(timing !== undefined
-            ? {
-                toolExecMs: timing.execMs,
-                approvalWaitMs: timing.approvalWaitMs,
-                queueWaitMs: timing.queueWaitMs,
-                execAborted: timing.execAborted
-              }
-            : {})
+          ...timingFieldsForSummary(snapshot)
         }
       };
     }
 
     case "tool-error": {
-      // 工具执行抛出但未被 buildTool 包成异常的情况(ai 层错误)。
-      const output = toErrorMessage(part.error);
+      // 工具执行抛出但未被 tool() 的 guard 包住的情况(ai 层错误)。
+      const outputText = toErrorMessage(part.error);
       clock.delete(part.toolCallId);
-      const timing = toolTiming?.take(part.toolCallId);
+      const snapshot = takeTiming(toolTiming, part.toolCallId);
 
       return {
         event: {
           type: "tool-result",
           toolCallId: part.toolCallId,
           toolName: part.toolName,
-          output,
+          output: outputText,
           status: "error",
-          ...(timing !== undefined
-            ? {
-                toolExecMs: timing.execMs,
-                approvalWaitMs: timing.approvalWaitMs,
-                queueWaitMs: timing.queueWaitMs
-              }
-            : {})
+          ...timingFields(snapshot)
         },
         toolCall: {
           toolName: part.toolName,
           toolCallId: part.toolCallId,
           args: (part.input as Record<string, unknown>) ?? {},
-          output,
+          output: outputText,
           status: "error",
-          ...(timing !== undefined
-            ? {
-                toolExecMs: timing.execMs,
-                approvalWaitMs: timing.approvalWaitMs,
-                queueWaitMs: timing.queueWaitMs,
-                execAborted: timing.execAborted
-              }
-            : {})
+          ...timingFieldsForSummary(snapshot)
         }
       };
     }

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
+import { runToolText } from "../../helpers/run-tool.js";
+
 import { loadConfig } from "../../../apps/server/src/config.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
 import {
@@ -194,13 +196,12 @@ describe("DrizzleMemoryRepository", () => {
       workspaceId: "current", sessionId: "session-a", runId: "run-a", userMessageId: "user-a"
     });
     const save = tools.find((tool) => tool.name === "save_memory")!;
-    const options = { toolCallId: "save", messages: [] };
-    await save.tool.execute!({ content: "This project uses TypeScript", category: "project" }, options);
+    await runToolText(save, { content: "This project uses TypeScript", category: "project" }, { toolUseID: "save" });
     expect(repo.listAll()[0]).toMatchObject({ scopeKey: "workspace:current", sourceSessionId: "session-a",
       sourceRunId: "run-a", sourceMessageId: "user-a" });
     expect(repo.searchRelevant("TypeScript", ["global", "workspace:another"])).toEqual([]);
     repo.save({ id: "other-project", scopeKey: "workspace:another", content: "Original fact" });
-    await save.tool.execute!({ updateId: "other-project", content: "Overwrite", category: "project" }, options);
+    await runToolText(save, { updateId: "other-project", content: "Overwrite", category: "project" }, { toolUseID: "save" });
     expect(repo.findById("other-project")?.content).toBe("Original fact");
   });
 });

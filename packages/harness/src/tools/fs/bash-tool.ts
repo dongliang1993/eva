@@ -2,12 +2,7 @@ import { withWorkspaceWrite } from "./workspace-write.js";
 import { spawn } from "node:child_process";
 import { z } from "zod";
 
-import {
-  buildTool,
-  TOOL_CALL_ABORTED_OUTPUT,
-  type AgentTool,
-  type ToolExecutionOptions,
-} from "../build-tool.js";
+import { aborted, textResult, tool, type PipelineTool } from "../tool.js";
 import type { FsToolBaseOptions } from "./read-file-tool.js";
 import { maybeOverflow } from "./tool-overflow.js";
 
@@ -37,7 +32,7 @@ interface BashResult {
 }
 
 /**
- * T25:用 spawn + detached 让 bash 自成进程组 —— 取消时 kill(-pid) 组杀,
+ * 用 spawn + detached 让 bash 自成进程组 —— 取消时 kill(-pid) 组杀,
  * 否则 bash 不给子孙进程转发 SIGTERM(`sleep 10 && echo x` 里 sleep 会变孤儿,
  * 实测 execFile 的 detached 不生效、pgid 仍挂在父进程组,组杀会 ESRCH)。
  * SIGTERM 先行(给 trap/清理钩子机会),宽限期后 SIGKILL 兜底;
@@ -155,33 +150,33 @@ const runBash = (
     }, BASH_TIMEOUT_MS);
   });
 
-export const createBashTool = (options: FsToolBaseOptions): AgentTool =>
-  buildTool({
+export const createBashTool = (options: FsToolBaseOptions): PipelineTool =>
+  tool({
     name: "bash",
     description:
       "Run a shell command within the workspace root. Requires user approval " +
       "because it can modify files or have side effects.",
     inputSchema: bashSchema,
     needsApproval: true,
-    async execute({ command }, execOptions?: ToolExecutionOptions) {
+    async execute({ command }, extra) {
       return withWorkspaceWrite(options.workRoot, async () => {
         const { stdout, stderr, canceled, timeout } = await runBash(
           command,
           options,
-          execOptions?.abortSignal,
+          extra.signal,
         );
         if (canceled) {
-          return TOOL_CALL_ABORTED_OUTPUT;
+          return aborted();
         }
         if (timeout) {
-          return maybeOverflow(
+          return textResult(maybeOverflow(
             `Exit: SIGTERM\n(command exceeded its time limit)\n${[stdout, stderr].filter(Boolean).join("\n")}`,
             options.overflowDir ?? "",
             "bash",
-          );
+          ));
         }
         const all = [stdout, stderr].filter(Boolean).join("\n");
-        return maybeOverflow(all, options.overflowDir ?? "", "bash");
-      }, execOptions?.abortSignal);
+        return textResult(maybeOverflow(all, options.overflowDir ?? "", "bash"));
+      }, extra.signal);
     },
   });

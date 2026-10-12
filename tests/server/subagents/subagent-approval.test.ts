@@ -7,7 +7,7 @@ import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/i
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
 import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
-import { buildTool } from "../../../packages/harness/src/tools/build-tool.js";
+import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -49,14 +49,14 @@ const dangerousCallModel = (): MockLanguageModelV4 => {
 };
 
 const writeTool = (executed: string[]) =>
-  buildTool({
+  tool({
     name: "write_file",
     description: "write a file",
     inputSchema: z.object({ path: z.string() }),
     needsApproval: true,
     execute: async (input: { path: string }) => {
       executed.push(input.path);
-      return `wrote ${input.path}`;
+      return textResult(`wrote ${input.path}`);
     }
   });
 

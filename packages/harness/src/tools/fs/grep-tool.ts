@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import { textResult, tool, type PipelineTool } from "../tool.js";
 import { resolveWorkspacePath } from "./resolve-workspace-path.js";
 import type { FsToolBaseOptions } from "./read-file-tool.js";
 import { maybeOverflow } from "./tool-overflow.js";
@@ -30,16 +30,16 @@ const walk = (dir: string, depth: number): string[] => {
   return out;
 };
 
-export const createGrepTool = (options: FsToolBaseOptions): AgentTool =>
-  buildTool({
+export const createGrepTool = (options: FsToolBaseOptions): PipelineTool =>
+  tool({
     name: "grep",
     description:
       "Search file contents for a pattern within the workspace. Returns filename + " +
       "matching line. Use this instead of reading many files when you need to find " +
       "what references something.",
     inputSchema: grepSchema,
-    readOnly: true,
-    async execute({ pattern, path: rel, maxMatches }) {
+    annotations: { readOnlyHint: true },
+    async execute({ pattern, path: rel, maxMatches }: z.output<typeof grepSchema>) {
       const absolute = resolveWorkspacePath(rel, options.workRoot);
       const stat = statSync(absolute);
 
@@ -67,6 +67,6 @@ export const createGrepTool = (options: FsToolBaseOptions): AgentTool =>
         ? `No matches for "${pattern}" in ${rel}.`
         : `Matching "${pattern}" (${lines.length} shown):\n${lines.join("\n")}`;
 
-      return maybeOverflow(summary, options.overflowDir ?? "", "grep");
+      return textResult(maybeOverflow(summary, options.overflowDir ?? "", "grep"));
     }
   });

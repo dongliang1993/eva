@@ -5,7 +5,7 @@ import { DrizzleRunRepository, type RunRecord } from "./run-repository.js";
 import { DrizzleSessionRepository } from "../sessions/index.js";
 import type { AppInfrastructure, AppServices } from "../../types/common.js";
 import {
-  RunCoordinator,
+  Coordinator,
   type RunOutcome,
   type RunRequestLog
 } from "./run-coordinator.js";
@@ -33,7 +33,7 @@ export interface RunsApi {
 
 export const createRunsApi = (infra: AppInfrastructure, services: AppServices): RunsApi => {
   const runs = new DrizzleRunRepository(infra.db);
-  const coordinator = new RunCoordinator({
+  const coordinator = new Coordinator({
     config: infra.config,
     db: infra.db,
     logger: infra.logger,

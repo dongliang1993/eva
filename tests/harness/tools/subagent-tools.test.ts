@@ -1,21 +1,25 @@
 import { describe, expect, it } from "vitest";
 
 import { createSubagentTool } from "../../../packages/harness/src/subagents/subagent-tool.js";
-import { toToolSet } from "../../../packages/harness/src/tools/build-tool.js";
+import { toToolSet } from "../../../packages/harness/src/tools/tool.js";
+import { runToolText } from "../../helpers/run-tool.js";
 
-/** 把一个 AgentTool 的 execute 拉出来可单独调用(测试不用跑 Agent)。 */
+/** 把一个 PipelineTool 的 execute 拉出来可单独调用(测试不用跑 Agent)。 */
 const exec =
-  (name: string, tools: readonly { name: string; tool: { execute?: unknown } }[]) =>
+  (name: string, tools: readonly { name: string; execute: unknown }[]) =>
   (input: Record<string, unknown>): Promise<string> => {
-    const t = tools.find((tool) => tool.name === name);
-    if (!t?.tool.execute) throw new Error(`tool ${name} missing execute`);
-    return t.tool.execute(input as never) as Promise<string>;
+    const t = tools.find((entry) => entry.name === name);
+    if (!t) throw new Error(`tool ${name} missing execute`);
+    return runToolText(
+      t as Parameters<typeof runToolText>[0],
+      input,
+    );
   };
 
 describe("subagent 原语 (S7 push 模型)", () => {
   it("只暴露一个工具 —— 没有 join/查询接口(轮询的结构性根源)", () => {
     const tools = createSubagentTool({
-      runFork: async () => ({})
+      runFork: async () => ({ text: "" })
     });
 
     expect(tools.map((t) => t.name)).toEqual(["subagent"]);
@@ -31,7 +35,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
 
   it("description 必填 —— 缺了就报错(否则卡片无法分辨)", async () => {
     const tools = createSubagentTool({
-      runFork: async () => ({ taskId: "t_x" })
+      runFork: async () => ({ taskId: "t_x", text: "" })
     });
 
     const out = await exec("subagent", tools)({ prompt: "做点什么" });
@@ -44,7 +48,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
     const tools = createSubagentTool({
       runFork: async ({ subagentType, taskId }) => {
         got = subagentType;
-        return { taskId };
+        return { taskId, text: "" };
       }
     });
 
@@ -53,21 +57,20 @@ describe("subagent 原语 (S7 push 模型)", () => {
     expect(got).toBe("explorer");
   });
 
-  it("fork 的 parentToolCallId 用 SDK 的 toolCallId(卡片归位的键)", async () => {
+  it("fork 的 parentToolCallId 用 SDK 的 toolUseID(卡片归位的键)", async () => {
     let got = "";
     const tools = createSubagentTool({
       runFork: async ({ parentToolCallId, taskId }) => {
         got = parentToolCallId;
-        return { taskId };
+        return { taskId, text: "" };
       }
     });
 
-    const tool = tools[0]!.tool as {
-      execute: (i: unknown, o: { toolCallId: string }) => Promise<string>;
-    };
-    await tool.execute(
+    const tool = tools[0]!;
+    await runToolText(
+      tool,
       { description: "查一下", prompt: "p" },
-      { toolCallId: "call_00_REAL" }
+      { toolUseID: "call_00_REAL" },
     );
 
     expect(got).toBe("call_00_REAL");
@@ -75,7 +78,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
 
   it("进 toolSet 后名字是 subagent(供 SDK 装配)", () => {
     const tools = createSubagentTool({
-      runFork: async () => ({})
+      runFork: async () => ({ text: "" })
     });
 
     expect(Object.keys(toToolSet([...tools]))).toEqual(["subagent"]);

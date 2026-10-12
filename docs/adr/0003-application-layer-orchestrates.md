@@ -8,8 +8,8 @@
 应用层回答一个问题：**完成一个用户动作，需要按什么顺序调用哪些能力？**
 顺序写在一个文件里，装配、审批、终态各自搬出去。
 
-今天的形态：`RunCoordinator` 只有五个阶段的顺序（①输入 ②装配 ③上下文 ④开流 ⑤流式），
-装配在 `run-runtime-builder`，审批在 `run-approval-channel`，终态在 `run-finalizer`，
+今天的形态：`Coordinator` 只有五个阶段的顺序（①输入 ②装配 ③上下文 ④开流 ⑤流式），
+装配在 `run-runtime-builder`，审批在 `run-approval-channel`，终态在 `Coordinator.settle()`，
 协议在 `route.ts`。
 
 应用层可以依赖领域规则与 Port，不能依赖 Fastify Reply、SQL 细节或 React 状态。

@@ -1,4 +1,5 @@
-import type { AgentTool } from "./build-tool.js";
+import type { PipelineTool } from "./tool.js";
+import type { ToolExtra } from "../query/types.js";
 import type { ToolTimingState } from "./tool-timing.js";
 
 /** 只读工具的默认并发帽(Claude Code 同款默认)。 */
@@ -43,41 +44,32 @@ export class Semaphore {
 }
 
 export const withConcurrencyCap = (
-  agentTool: AgentTool,
+  pipelineTool: PipelineTool,
   limiter: Semaphore,
   timing?: ToolTimingState
-): AgentTool => {
-  if (agentTool.readOnly !== true) {
-    return agentTool;
+): PipelineTool => {
+  if (pipelineTool.annotations?.readOnlyHint !== true) {
+    return pipelineTool;
   }
 
-  const inner = agentTool.tool;
-  const innerExecute = inner.execute;
+  const innerExecute = pipelineTool.execute;
 
-  if (typeof innerExecute !== "function") {
-    return agentTool;
-  }
-
-  return {
-    ...agentTool,
-    tool: {
-      ...inner,
-      execute: async (input: unknown, options?: unknown) => {
-        // T50:排队等待单独成段 —— 无竞争时是 0,不是 undefined。
-        const queueStart = Date.now();
-        const signal = (options as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
-        const release = await limiter.acquire(signal);
-        const toolCallId = (options as { toolCallId?: string } | undefined)?.toolCallId;
-        if (toolCallId !== undefined) {
-          timing?.record(toolCallId, "queue", Date.now() - queueStart);
-        }
-        try {
-          signal?.throwIfAborted();
-          return await innerExecute(input as never, options as never);
-        } finally {
-          release();
-        }
-      },
-    } as typeof inner,
+  const execute: PipelineTool["execute"] = async (input, extra: ToolExtra) => {
+    // 排队等待单独成段 —— 无竞争时是 0,不是 undefined。
+    const queueStart = Date.now();
+    const signal = extra.signal;
+    const release = await limiter.acquire(signal);
+    const toolCallId = extra.toolUseID;
+    if (toolCallId !== undefined) {
+      timing?.record(toolCallId, "queue", Date.now() - queueStart);
+    }
+    try {
+      signal.throwIfAborted();
+      return await innerExecute(input, extra);
+    } finally {
+      release();
+    }
   };
+
+  return { ...pipelineTool, execute };
 };

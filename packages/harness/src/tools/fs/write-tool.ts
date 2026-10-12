@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import { textResult, tool, type PipelineTool } from "../tool.js";
 import { resolveWorkspacePath } from "./resolve-workspace-path.js";
 import type { FsToolBaseOptions } from "./read-file-tool.js";
 import { atomicWrite } from "./atomic-write.js";
@@ -17,23 +17,26 @@ const writeFileSchema = z.object({
     .describe("Append to file instead of overwriting."),
 });
 
-export const createWriteTool = (options: FsToolBaseOptions): AgentTool =>
-  buildTool({
+export const createWriteTool = (options: FsToolBaseOptions): PipelineTool =>
+  tool({
     name: "write",
     description:
       "Write (or append to) a file within the workspace. Requires user approval " +
       "because it modifies the filesystem.",
     inputSchema: writeFileSchema,
     needsApproval: true,
-    async execute({ path: rel, content, append }, execOptions) {
+    async execute(
+      { path: rel, content, append }: z.output<typeof writeFileSchema>,
+      extra,
+    ) {
       return withWorkspaceWrite(options.workRoot, async () => {
         const absolute = resolveWorkspacePath(rel, options.workRoot);
         await fs.mkdir(path.dirname(absolute), { recursive: true });
 
         if (append) {
-          // T23:append 不校验 —— 语义是"追加到终态",不依赖读时状态,O_APPEND 原子性已保证。
+          // append 不校验 —— 语义是"追加到终态",不依赖读时状态,O_APPEND 原子性已保证。
           await fs.writeFile(absolute, content, { flag: "a", encoding: "utf-8" });
-          return `Wrote ${content.length} chars to ${rel} (append).`;
+          return textResult(`Wrote ${content.length} chars to ${rel} (append).`);
         }
 
         const expected = await fs.readFile(absolute, "utf8").then(
@@ -43,9 +46,9 @@ export const createWriteTool = (options: FsToolBaseOptions): AgentTool =>
             throw error;
           },
         );
-        execOptions?.abortSignal?.throwIfAborted();
+        extra.signal.throwIfAborted();
         await atomicWrite(absolute, content, expected);
-        return `Wrote ${content.length} chars to ${rel} (overwrite).`;
-      }, execOptions?.abortSignal);
+        return textResult(`Wrote ${content.length} chars to ${rel} (overwrite).`);
+      }, extra.signal);
     },
   });

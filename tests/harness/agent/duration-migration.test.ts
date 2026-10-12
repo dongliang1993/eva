@@ -6,8 +6,9 @@ import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 
 import {
-  buildTool,
   createAgent,
+  textResult,
+  tool,
   type AgentStreamEvent,
   type AgentTelemetryEvent
 } from "../../../packages/harness/src/index.js";
@@ -33,13 +34,13 @@ const sleep = (ms: number): Promise<void> =>
 
 describe("T51 durationMs 迁移", () => {
   it("abort 补发:帧形状不变(拉出 running 态),observer 记 tool_call_abandoned 不伪造三段", async () => {
-    const slowTool = buildTool({
+    const slowTool = tool({
       name: "slow",
       description: "t",
       inputSchema: z.object({}),
       execute: async () => {
         await sleep(2_000);
-        return "late";
+        return textResult("late");
       }
     });
 

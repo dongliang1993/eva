@@ -2,7 +2,7 @@ import { recordToolExecution } from "./tool-operations.js";
 import {
   createPlanGateState,
   createSubagentTool,
-  type AgentTool,
+  type PipelineTool,
   type PlanGateState,
   type RequestPlanReview,
   type Skill
@@ -31,7 +31,6 @@ import { evaDataDir } from "../../paths.js";
 import type { RunApprovalChannel } from "./run-approval-channel.js";
 import type { RunInput } from "./run-preparation.js";
 import type { MemoryAutomationService } from "../memory/index.js";
-import type { AppSettings } from "@eva/shared";
 import { loadAppSettings } from "../settings/index.js";
 import type { MemoryRetrievalResult } from "../memory/index.js";
 
@@ -47,13 +46,12 @@ export interface RunRuntimeBuilderDependencies {
   readonly memoryAutomation?: MemoryAutomationService | undefined;
 }
 
+/** 装配一次 run 需要知道的「这一轮是谁」。 */
 export interface RunRuntimeScope {
   readonly runId: string;
   readonly sessionId: string;
   readonly input: RunInput;
   readonly approvals: RunApprovalChannel;
-  readonly captureLevel: CaptureLevel;
-  readonly observabilityEnabled: boolean;
   readonly abortSignal: AbortSignal;
   readonly emit: (event: RunStreamEvent) => void;
 }
@@ -64,29 +62,40 @@ export interface RunObservability {
   readonly observer: AgentObserver;
 }
 
-export interface AgentRuntime {
-  readonly resolved: ResolvedAgent;
-  /** MCP/memory capabilities frozen once for this run and reused by child agents. */
-  readonly sharedTools: readonly AgentTool[];
-  readonly memorySettings: AppSettings["memory"];
-  readonly memoryRetrieval?: MemoryRetrievalResult | undefined;
+/**
+ * run 成功收尾后要入队的记忆提取 —— 装配时一次算好,收尾只管照着入队。
+ * 不需要提取(关着 / 没有 memory 服务)时为 undefined。
+ */
+export interface MemoryExtractionPlan {
+  readonly modelId: string;
+  readonly mode: "review" | "automatic";
+  readonly workspaceId?: string | undefined;
 }
 
-export interface SubagentRuntime {
-  readonly tools: readonly AgentTool[];
+/** 这一轮 agent 有什么 —— 装配阶段的全部产出。 */
+export interface AgentRuntime {
+  readonly resolved: ResolvedAgent;
+  /** 主 agent 之外、本轮追加的工具(子代理)。 */
+  readonly additionalTools: readonly PipelineTool[];
+  readonly extraction?: MemoryExtractionPlan | undefined;
+  readonly memoryRetrieval?: MemoryRetrievalResult | undefined;
 }
 
 export class RunRuntimeBuilder {
   constructor(private readonly deps: RunRuntimeBuilderDependencies) { }
 
-  createObservability(
-    scope: Pick<RunRuntimeScope, "runId" | "sessionId" | "captureLevel" | "observabilityEnabled">
-  ): RunObservability {
+  /** 本轮的诊断记录器。观测关着时 recorder 照样返回,只是不写。 */
+  createObservability(scope: {
+    readonly runId: string;
+    readonly sessionId: string;
+    readonly enabled: boolean;
+    readonly captureLevel: CaptureLevel;
+  }): RunObservability {
     const recorder = createRunRecorder(
       {
         db: this.deps.db,
         logger: this.deps.logger,
-        enabled: scope.observabilityEnabled,
+        enabled: scope.enabled,
         captureLevel: scope.captureLevel
       },
       { runId: scope.runId, sessionId: scope.sessionId }
@@ -101,10 +110,13 @@ export class RunRuntimeBuilder {
     };
   }
 
-  async buildAgent(
-    scope: RunRuntimeScope,
-    observability: RunObservability
-  ): Promise<AgentRuntime> {
+  /**
+   * 装出这一轮的 agent:MCP 与记忆能力 → 模型与 prompt → 子代理工具。
+   *
+   * MCP/记忆工具在这里冻结一次,子代理复用同一份 —— 主/子在同一个 run 里
+   * 看到的能力必须一致。
+   */
+  async assemble(scope: RunRuntimeScope, observability: RunObservability): Promise<AgentRuntime> {
     scope.abortSignal.throwIfAborted();
     const { input } = scope;
 
@@ -115,12 +127,12 @@ export class RunRuntimeBuilder {
     const memoryFilesSection = await loadMemoryFilesSection(evaDataDir(), todayString());
     const memorySettings = this.deps.memoryAutomation?.settingsSnapshot()
       ?? loadAppSettings(this.deps.db, this.deps.config).memory;
-    const retrievedMemorySection = this.deps.memoryAutomation?.retrieve({
+    const memoryRetrieval = this.deps.memoryAutomation?.retrieve({
       query: input.humanText,
       ...(input.workspace ? { workspaceId: input.workspace.id } : {}),
       settings: memorySettings
     });
-    const tools = [
+    const sharedTools = [
       ...this.deps.mcp.listTools(),
       ...createMemoryTools(this.deps.db, this.deps.config, {
         workspaceId: input.workspace?.id,
@@ -135,19 +147,28 @@ export class RunRuntimeBuilder {
     const resolved = this.deps.agents.build({
       modelId: input.modelId,
       observer: observability.observer,
-      extraTools: tools,
+      extraTools: sharedTools,
       requestApproval: scope.approvals.requestApproval,
       ...defined("workspace", input.workspace),
       ...defined("planGate", this.buildPlanGate(scope)),
       ...defined("memoryFilesSection", memoryFilesSection),
-      ...defined("retrievedMemorySection", retrievedMemorySection?.section)
+      ...defined("retrievedMemorySection", memoryRetrieval?.section)
     });
+
+    const extraction: MemoryExtractionPlan | undefined =
+      this.deps.memoryAutomation && memorySettings.enabled && memorySettings.autoSummarize
+        ? {
+          modelId: resolved.toolModel.qualifiedModelId,
+          mode: memorySettings.autoSummarizeMode,
+          ...(input.workspace ? { workspaceId: input.workspace.id } : {})
+        }
+        : undefined;
 
     return {
       resolved,
-      sharedTools: tools,
-      memorySettings,
-      ...defined("memoryRetrieval", retrievedMemorySection)
+      additionalTools: this.buildSubagentTools(scope, resolved, sharedTools, observability.bridge),
+      ...defined("extraction", extraction),
+      ...defined("memoryRetrieval", memoryRetrieval)
     };
   }
 
@@ -185,13 +206,16 @@ export class RunRuntimeBuilder {
     };
   }
 
-  buildSubagents(
+  /**
+   * 子代理是 awaited 工具:构造只是备好 runner,它的事件要等工具在流式循环里
+   * 被调用才发出 —— 所以这里不依赖 SSE 是否已经打开。
+   */
+  private buildSubagentTools(
     scope: RunRuntimeScope,
-    runtime: AgentRuntime,
+    resolved: ResolvedAgent,
+    sharedTools: readonly PipelineTool[],
     bridge: ObserverBridge
-  ): SubagentRuntime {
-    const { emit } = scope;
-    const { resolved } = runtime;
+  ): readonly PipelineTool[] {
     const runner = new SubagentRunner(this.deps.agents, {
       sessionId: scope.sessionId,
       db: this.deps.db,
@@ -199,19 +223,16 @@ export class RunRuntimeBuilder {
       model: resolved.toolModel,
       observerForTask: (taskId) => fanout(bridge.forAgent(taskId), this.deps.baseObserver),
       ...(scope.input.workspace !== undefined ? { workspace: scope.input.workspace } : {}),
-      extraTools: runtime.sharedTools,
+      extraTools: sharedTools,
       abortSignal: scope.abortSignal,
       requestApproval: scope.approvals.requestApproval,
       toolExecutionForTask: (taskId) =>
         recordToolExecution(this.deps.db, scope.runId, taskId),
       onSubagentEvent: (event) => {
-        emit({ type: "subagent_update", ...event });
+        scope.emit({ type: "subagent_update", ...event });
       },
-
     });
 
-    return {
-      tools: createSubagentTool({ runFork: runner.runFork })
-    };
+    return createSubagentTool({ runFork: runner.runFork });
   }
 }

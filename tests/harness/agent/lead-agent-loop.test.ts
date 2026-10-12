@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
 import type { AgentTelemetryEvent } from "../../../packages/harness/src/agents/observer.js";
 import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
-import { buildTool } from "../../../packages/harness/src/tools/build-tool.js";
+import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 
 type FinishEvent = Extract<AgentStreamEvent, { type: "finish" }>;
 
@@ -62,15 +62,15 @@ const toolThenTextModel = (): MockLanguageModelV4 => {
 };
 
 const echoTool = () =>
-  buildTool({
+  tool({
     name: "echo",
     description: "echo the msg",
     inputSchema: z.object({ msg: z.string() }),
-    execute: async (input: { msg: string }) => input.msg,
+    execute: async (input: { msg: string }) => textResult(input.msg),
   });
 
 const failingTool = () =>
-  buildTool({
+  tool({
     name: "fail",
     description: "always throws",
     inputSchema: z.object({}),
@@ -341,11 +341,11 @@ describe("abort 在飞工具收口(T26)", () => {
     });
 
   const neverTool = () =>
-    buildTool({
+    tool({
       name: "hung",
       description: "never resolves",
       inputSchema: z.object({}),
-      execute: () => new Promise<string>(() => {}),
+      execute: () => new Promise(() => {}),
     });
 
   const collectUntilFinish = (
@@ -510,15 +510,15 @@ describe("工具超时(T25 toolTimeout 配置)", () => {
     });
   };
   const hungTool = () =>
-    buildTool({
+    tool({
       name: "hung",
       description: "never resolves",
       inputSchema: z.object({}),
       // 模拟长时 I/O，但遵守工具契约：取消时停止底层工作后 reject。
-      execute: (_input, options) => new Promise<string>((_resolve, reject) => {
-        options?.abortSignal?.addEventListener(
+      execute: (_input, extra) => new Promise((_resolve, reject) => {
+        extra.signal.addEventListener(
           "abort",
-          () => reject(options.abortSignal?.reason),
+          () => reject(extra.signal.reason),
           { once: true },
         );
       }),

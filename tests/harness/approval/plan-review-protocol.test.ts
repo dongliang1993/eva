@@ -7,6 +7,7 @@ import {
   type PlanGateStore,
   type RequestPlanReview
 } from "../../../packages/harness/src/tools/index.js";
+import { runToolText } from "../../helpers/run-tool.js";
 import type { PlanReviewDecision } from "@eva/shared";
 
 const handle: PlanGateHandle = {
@@ -35,10 +36,11 @@ const callExit = (
   requestPlanReview: RequestPlanReview,
   options?: Array<{ label: string; description: string }>
 ) =>
-  createExitPlanModeTool(store, state, requestPlanReview).tool.execute!(
+  runToolText(
+    createExitPlanModeTool(store, state, requestPlanReview),
     options === undefined ? {} : { options },
-    { toolCallId: "tc-review" } as never
-  ) as Promise<string>;
+    { toolUseID: "tc-review" },
+  );
 
 describe("exit_plan_mode 五分支", () => {
   it("approve + selectedLabel:解闸、approve 落库、输出选中方案", async () => {

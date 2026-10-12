@@ -12,7 +12,7 @@ import { z } from "zod";
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
 import type { AgentTelemetryEvent } from "../../../packages/harness/src/agents/observer.js";
 import { TOOL_COUNT_SAFETY_LIMIT } from "../../../packages/harness/src/agents/tool-safety-net.js";
-import { buildTool, type AgentTool } from "../../../packages/harness/src/tools/index.js";
+import { textResult, tool, type PipelineTool } from "../../../packages/harness/src/tools/index.js";
 
 const usage = {
   inputTokens: { total: 5, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
@@ -21,17 +21,17 @@ const usage = {
 };
 
 /** 名为 name 的最小工具。 */
-const probeTool = (name: string): AgentTool =>
-  buildTool({
+const probeTool = (name: string): PipelineTool =>
+  tool({
     name,
     description: `probe ${name}`,
     inputSchema: z.object({ n: z.number().optional() }),
-    execute: async () => `${name} ok`,
+    execute: async () => textResult(`${name} ok`),
   });
 
 /** count 个工具:filler-0..N,外加 extraNames 里的具名工具。 */
 const toolMap = (count: number, extraNames: readonly string[] = []) => {
-  const map = new Map<string, AgentTool>();
+  const map = new Map<string, PipelineTool>();
   for (let i = 0; i < count; i += 1) map.set(`filler-${i}`, probeTool(`filler-${i}`));
   for (const name of extraNames) map.set(name, probeTool(name));
   return map;
@@ -74,7 +74,7 @@ describe("agent 接线", () => {
     const telemetry: AgentTelemetryEvent[] = [];
     const tools = toolMap(45, [
       "read_file",
-      "write_file",
+      "write",
       "bash",
       "mcp__github__create_issue",
     ]);
@@ -89,11 +89,12 @@ describe("agent 接线", () => {
     }
 
     expect(captured.calls).toHaveLength(2);
+    // 首步核心集含 write(实际工具名;CORE 名单曾写错成 write_file 导致写工具缺席首步)。
     expect(captured.calls[0]!.sort()).toEqual([
       "bash",
       "read_file",
       "tool_search",
-      "write_file",
+      "write",
     ]);
     expect(captured.calls[1]).toContain("mcp__github__create_issue");
     expect(captured.calls[1]).toContain("tool_search");

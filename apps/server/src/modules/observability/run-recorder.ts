@@ -108,6 +108,7 @@ export const createRunRecorder = (
       if (!deps.enabled) {
         return undefined;
       }
+
       try {
         // off:正文整条不留,结构列(kind/时间/duration 等)照记。
         const payload =

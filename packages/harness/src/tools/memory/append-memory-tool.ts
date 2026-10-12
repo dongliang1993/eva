@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import { errorResult, textResult, tool, type PipelineTool } from "../tool.js";
 import type { MemoryFileStore } from "./memory-files.js";
 
 const appendMemorySchema = z.object({
@@ -17,8 +17,8 @@ const appendMemorySchema = z.object({
     )
 });
 
-export const createAppendMemoryTool = (store: MemoryFileStore): AgentTool =>
-  buildTool({
+export const createAppendMemoryTool = (store: MemoryFileStore): PipelineTool =>
+  tool({
     name: "append_memory",
     description: [
       "Append a line to TODAY's daily memory note (`memory/YYYY-MM-DD.md`), creating the file and its `# date` heading if missing.",
@@ -30,15 +30,18 @@ export const createAppendMemoryTool = (store: MemoryFileStore): AgentTool =>
       "Prefer note-taking that reads like a diary: the date is the file; you do not need to repeat the date in each line."
     ].join("\n"),
     inputSchema: appendMemorySchema,
-    execute: async ({ note, date }) => {
+    async execute({ note, date }) {
       const today = todayString();
       const targetDate = date ?? today;
 
       try {
         const savedPath = await store.appendDailyNote(targetDate, note);
-        return `Appended (${savedPath}): ${note}`;
+        return textResult(`Appended (${savedPath}): ${note}`);
       } catch (error) {
-        return error instanceof Error ? error.message : "Failed to append memory";
+        // store 抛错带具体原因;errorResult 只负责统一前缀与 isError。
+        return errorResult(
+          error instanceof Error ? error.message : "Failed to append memory",
+        );
       }
     }
   });

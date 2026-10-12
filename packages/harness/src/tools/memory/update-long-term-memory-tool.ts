@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import { errorResult, textResult, tool, type PipelineTool } from "../tool.js";
 import type { MemoryFileStore } from "./memory-files.js";
 
 const updateLongTermMemorySchema = z.object({
@@ -12,8 +12,8 @@ const updateLongTermMemorySchema = z.object({
     )
 });
 
-export const createUpdateLongTermMemoryTool = (store: MemoryFileStore): AgentTool =>
-  buildTool({
+export const createUpdateLongTermMemoryTool = (store: MemoryFileStore): PipelineTool =>
+  tool({
     name: "update_long_term_memory",
     description: [
       "Replace the ENTIRE MEMORY.md file with the given content. This tool **REPLACES the whole file**.",
@@ -25,12 +25,14 @@ export const createUpdateLongTermMemoryTool = (store: MemoryFileStore): AgentToo
       "Stable user identity, preferences, and durable constraints live here; everything else goes in `save_memory` (DB)."
     ].join("\n"),
     inputSchema: updateLongTermMemorySchema,
-    execute: async ({ content }) => {
+    async execute({ content }) {
       try {
         const savedPath = await store.writeLongTermMemory(content);
-        return `REPLACED ${savedPath} (${content.length} chars)`;
+        return textResult(`REPLACED ${savedPath} (${content.length} chars)`);
       } catch (error) {
-        return error instanceof Error ? error.message : "Failed to update long-term memory";
+        return errorResult(
+          error instanceof Error ? error.message : "Failed to update long-term memory",
+        );
       }
     }
   });

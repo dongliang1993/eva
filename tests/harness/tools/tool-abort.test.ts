@@ -1,10 +1,9 @@
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  buildTool,
-  type ToolExecutionOptions,
-} from "../../../packages/harness/src/index.js";
+import { textOf, tool } from "../../../packages/harness/src/index.js";
+import { runTool } from "../../helpers/run-tool.js";
+import type { ToolExtra } from "../../../packages/harness/src/query/types.js";
 
 const hungSchema = z.object({ a: z.number() });
 
@@ -17,96 +16,93 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
-const optWith = (abortSignal?: AbortSignal): ToolExecutionOptions => ({
-  toolCallId: "t-abort",
-  ...(abortSignal !== undefined ? { abortSignal } : {}),
+const extraWith = (signal?: AbortSignal): Partial<ToolExtra> => ({
+  toolUseID: "t-abort",
+  ...(signal !== undefined ? { signal } : {}),
 });
 
-describe("buildTool cooperative cancellation", () => {
+describe("tool() cooperative cancellation", () => {
   it("挂死工具 + 已 abort 的 signal → 立即返回 Error:,不再悬着", async () => {
-    const hung = buildTool({
+    const hung = tool({
       name: "hung",
       description: "never resolves",
       inputSchema: hungSchema,
-      execute: () => new Promise<string>(() => {}),
+      execute: () => new Promise(() => {}),
     });
     const controller = new AbortController();
     controller.abort();
-    const res = await hung.tool.execute!(
-      { a: 1 },
-      optWith(controller.signal) as never,
-    );
-    expect(String(res)).toContain("Error:");
+    const res = await runTool(hung, { a: 1 }, extraWith(controller.signal));
+    expect(textOf(res)).toContain("Error:");
   });
 
   it("取消必须等待执行真正结束", async () => {
     const gate = deferred<string>();
-    const tool = buildTool({
+    const gated = tool({
       name: "gated",
       description: "resolves only when the gate opens",
       inputSchema: hungSchema,
-      execute: () => gate.promise,
+      execute: () => gate.promise.then((value) => ({
+        content: [{ type: "text", text: value }],
+      })),
     });
     const controller = new AbortController();
-    const pending = tool.tool.execute!(
-      { a: 1 },
-      optWith(controller.signal) as never,
-    );
+    const pending = runTool(gated, { a: 1 }, extraWith(controller.signal));
     let settled = false;
     void Promise.resolve(pending).then(() => { settled = true; });
     controller.abort();
     await Promise.resolve();
     expect(settled).toBe(false);
     gate.resolve("execution completed");
-    expect(await pending).toBe("execution completed");
+    expect(textOf(await pending)).toBe("execution completed");
   });
 
   it("正常完成先于 abort → 业务返回值原样透传", async () => {
-    const tool = buildTool({
+    const fast = tool({
       name: "fast",
       description: "resolves immediately",
       inputSchema: hungSchema,
-      execute: async () => "done-quick",
+      execute: async () => ({
+        content: [{ type: "text", text: "done-quick" }],
+      }),
     });
     const controller = new AbortController();
-    const res = await tool.tool.execute!(
-      { a: 1 },
-      optWith(controller.signal) as never,
-    );
-    expect(res).toBe("done-quick");
+    const res = await runTool(fast, { a: 1 }, extraWith(controller.signal));
+    expect(textOf(res)).toBe("done-quick");
   });
 
-  it("execute 收到的 options 带上 abortSignal(透传断言)", async () => {
+  it("execute 收到的 extra 带上 signal(透传断言)", async () => {
     const seen = vi.fn();
-    const tool = buildTool({
+    const spy = tool({
       name: "echo",
-      description: "records options",
+      description: "records extra",
       inputSchema: hungSchema,
-      execute: async (_input, options) => {
-        seen(options);
-        return "ok";
+      execute: async (_input, extra) => {
+        seen(extra);
+        return { content: [{ type: "text", text: "ok" }] };
       },
     });
     const controller = new AbortController();
-    await tool.tool.execute!({ a: 1 }, optWith(controller.signal) as never);
+    await runTool(spy, { a: 1 }, extraWith(controller.signal));
     expect(seen).toHaveBeenCalledWith(
       expect.objectContaining({
-        toolCallId: "t-abort",
-        abortSignal: controller.signal,
+        toolUseID: "t-abort",
+        signal: controller.signal,
       }),
     );
   });
 
   it("无 signal → 行为与现状一致(正常返回;抛错仍包 Error:)", async () => {
-    const ok = buildTool({
+    const ok = tool({
       name: "ok",
       description: "fine",
       inputSchema: hungSchema,
-      execute: async () => "plain",
+      execute: async () => ({
+        content: [{ type: "text", text: "plain" }],
+      }),
     });
-    expect(await ok.tool.execute!({ a: 1 }, optWith() as never)).toBe("plain");
+    expect(textOf(await runTool(ok, { a: 1 }))).toBe("plain");
 
-    const boom = buildTool({
+    const boom = tool({
       name: "boom",
       description: "throws",
       inputSchema: hungSchema,
@@ -114,24 +110,23 @@ describe("buildTool cooperative cancellation", () => {
         throw new Error("kaput");
       },
     });
-    const res = await boom.tool.execute!({ a: 1 }, optWith() as never);
-    expect(String(res)).toContain("Error:");
-    expect(String(res)).toContain("kaput");
+    const res = await runTool(boom, { a: 1 });
+    expect(textOf(res)).toContain("Error:");
+    expect(textOf(res)).toContain("kaput");
   });
 
   it("工具返回后 signal 才 abort → 监听器已清理,不抛不告警", async () => {
-    const tool = buildTool({
+    const quick = tool({
       name: "quick2",
       description: "finishes then signal fires",
       inputSchema: hungSchema,
-      execute: async () => "done",
+      execute: async () => ({
+        content: [{ type: "text", text: "done" }],
+      }),
     });
     const controller = new AbortController();
-    const res = await tool.tool.execute!(
-      { a: 1 },
-      optWith(controller.signal) as never,
-    );
-    expect(res).toBe("done");
+    const res = await runTool(quick, { a: 1 }, extraWith(controller.signal));
+    expect(textOf(res)).toBe("done");
     controller.abort(); // 工具已 settle,race 输家的监听器应已被移除,不抛
   });
 });

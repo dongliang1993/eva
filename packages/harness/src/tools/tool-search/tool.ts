@@ -1,11 +1,11 @@
 import { z } from "zod";
 
-import { buildTool, type AgentTool } from "../build-tool.js";
+import { textResult, tool, type PipelineTool } from "../tool.js";
 import { rankToolCatalog } from "./search.js";
 
 /** 结构性接口:tools 层不反向 import agents 层,避免 barrel 环。 */
 export interface ToolSearchController {
-  searchCatalog(): ReadonlyMap<string, AgentTool>;
+  searchCatalog(): ReadonlyMap<string, PipelineTool>;
   activateTools(names: readonly string[]): {
     added: string[];
     alreadyActive: string[];
@@ -30,20 +30,20 @@ const toolSearchSchema = z.object({
 
 export const createToolSearchTool = (
   controller: ToolSearchController,
-): AgentTool =>
-  buildTool({
+): PipelineTool =>
+  tool({
     name: "tool_search",
     description:
       "Search the available tool catalog and activate matching tools. In discovery mode, activated tools become callable from the next model step.",
     inputSchema: toolSearchSchema,
-    readOnly: true,
-    execute: async ({ query, limit }) => {
+    annotations: { readOnlyHint: true },
+    async execute({ query, limit }) {
       const catalog = new Map(controller.searchCatalog());
       catalog.delete("tool_search");
 
       const matches = rankToolCatalog(query, catalog, limit ?? 8);
       if (matches.length === 0) {
-        return (
+        return textResult(
           `No tools matched "${query}". Try a tool name, an MCP server name ` +
           "(mcp__<server>__<tool>), or a domain such as fs, bash, web, memory, skill."
         );
@@ -82,6 +82,6 @@ export const createToolSearchTool = (
         );
       }
 
-      return lines.join("\n");
+      return textResult(lines.join("\n"));
     },
   });

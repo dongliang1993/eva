@@ -38,7 +38,7 @@
 | 能力 | 证据 |
 |---|---|
 | **文档四层分工** | `docs/current`（今天的事实）/ `adr`（为什么）/ `plans`（在建）/ `archive`（考古）。`docs/README.md` 与 `AGENTS.md` 都明文规定冲突时以 `current` 为准并一起改 |
-| **不变量交给编译器，而非注释** | `RunOpeningLedger` / `RunSettlingLedger` 让"在 coordinator 里结算终态"编译不过（`docs/current/run-lifecycle.md` §3） |
+| **终态只写一次** | ~~`RunOpeningLedger` / `RunSettlingLedger` 让"在 coordinator 里结算终态"编译不过~~ —— **更正（2026-10-12）**：评审时照着文档写的，未对照代码；窄接口与 `RunFinalizer` 当时已不存在。实际的保证是 `runs.settle` 的条件更新（只改 `status = 'running'` 的行），收尾路径已收成 `Coordinator.settle()` 一个出口 |
 | **可判定边界被自动化守** | `scripts/check-architecture.mjs`；route 只能拿 `app.api`，拿不到 `db` / Repository |
 | **测试策略正确** | 真 SQLite + 真迁移（39 个文件），只假模型（`MockLanguageModelV4`，114 处引用）。`tests/README.md` 明确解释了为什么不用假 DB |
 | **自己给自己做手术** | `2026-09-05` 那份评审是真做了的：六项缺陷每项给了动态复现，`refactor-progress.md` 逐条记了修法 |

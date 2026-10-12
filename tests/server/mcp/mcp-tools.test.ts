@@ -8,8 +8,9 @@ import {
   toToolSummaries,
   type McpToolInvoker,
 } from "../../../apps/server/src/modules/mcp/index.js";
+import { runToolText } from "../../helpers/run-tool.js";
 
-const TOOL_CALL_OPTIONS = { messages: [], toolCallId: "c1", context: {} };
+
 
 const server = (over: Partial<McpServerConfig> = {}): McpServerConfig => ({
   id: "km",
@@ -62,7 +63,7 @@ describe("toAgentTools", () => {
     );
 
     expect(tool?.name).toBe("mcp__km__search");
-    expect(tool?.readOnly).toBe(true);
+    expect(tool?.annotations?.readOnlyHint).toBe(true);
     expect(tool?.needsApproval).toBeUndefined();
   });
 
@@ -94,10 +95,10 @@ describe("toAgentTools", () => {
       error: vi.fn(),
     });
 
-    const result = await tool!.tool.execute!({ q: "eva" }, TOOL_CALL_OPTIONS);
+    const result = await runToolText(tool!, { q: "eva" }, { toolUseID: "c1" });
 
-    // T25:execute 把 options.abortSignal 透传给 invoker(无信号时是 undefined)。
-    expect(callTool).toHaveBeenCalledWith("search", { q: "eva" }, undefined);
+    // runTool 造了未 abort 的 signal 透传给 invoker。
+    expect(callTool).toHaveBeenCalledWith("search", { q: "eva" }, expect.any(AbortSignal));
     expect(String(result)).toBe("hit");
   });
 
@@ -110,7 +111,7 @@ describe("toAgentTools", () => {
       { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     );
 
-    const result = await tool!.tool.execute!({ q: "x" }, TOOL_CALL_OPTIONS);
+    const result = await runToolText(tool!, { q: "x" }, { toolUseID: "c1" });
 
     expect(String(result)).toContain("Error:");
     expect(String(result)).toContain("timed out");
@@ -125,10 +126,7 @@ describe("toAgentTools", () => {
     });
 
     const controller = new AbortController();
-    await tool!.tool.execute!(
-      { q: "eva" },
-      { ...TOOL_CALL_OPTIONS, abortSignal: controller.signal },
-    );
+    await runToolText(tool!, { q: "eva" }, { toolUseID: "c1", signal: controller.signal });
 
     expect(callTool).toHaveBeenCalledWith(
       "search",
