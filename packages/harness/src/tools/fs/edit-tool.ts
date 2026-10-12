@@ -25,7 +25,6 @@ export const createEditTool = (options: FsToolBaseOptions): PipelineTool =>
       "`before` must match exactly once, and is replaced by `after`. " +
       "Requires user approval because it modifies the filesystem.",
     inputSchema: editFileSchema,
-    needsApproval: true,
     async execute({ path: rel, before, after }, extra) {
       return withWorkspaceWrite(options.workRoot, async () => {
         if (before.length > EDIT_MAX_BEFORE) {

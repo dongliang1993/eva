@@ -24,7 +24,6 @@ export const createWriteTool = (options: FsToolBaseOptions): PipelineTool =>
       "Write (or append to) a file within the workspace. Requires user approval " +
       "because it modifies the filesystem.",
     inputSchema: writeFileSchema,
-    needsApproval: true,
     async execute(
       { path: rel, content, append }: z.output<typeof writeFileSchema>,
       extra,

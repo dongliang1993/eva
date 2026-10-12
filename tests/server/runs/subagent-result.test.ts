@@ -83,7 +83,13 @@ let app: FastifyInstance;
 let db: AppDatabase;
 
 const startApp = async (agentOverride?: Agent): Promise<void> => {
-  const mainAgent = agentOverride ?? createAgent({ model: forkingModel(), tools: [], maxSteps: 6 });
+  const mainAgent = agentOverride ?? createAgent({
+    model: forkingModel(),
+    tools: [],
+    maxSteps: 6,
+    // 测试环境无审批 UI:全放行(生产由权限链注入)。
+    canUseTool: async () => ({ behavior: "allow" as const })
+  });
 
   app = Fastify();
   app.decorate("infra", {
@@ -103,7 +109,9 @@ const startApp = async (agentOverride?: Agent): Promise<void> => {
         createAgent({
           model: reportingSubagentModel(),
           tools: [...((extraTools ?? []) as never[])],
-          maxSteps: 4
+          maxSteps: 4,
+          // 测试环境无审批 UI:子代理的权限链全放行(生产由 SubagentRunner 注入)。
+          canUseTool: async () => ({ behavior: "allow" as const })
         })
     },
     session: new SessionService(

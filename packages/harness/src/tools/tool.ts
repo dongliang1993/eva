@@ -19,15 +19,8 @@ export type {
  * 前缀只活在 `errorResult` 拼出的文本里，判定与文案不再各自抄字面量。
  */
 
-/**
- * T1 过渡形状：`ToolDefinition` + 审批标记。T2 把审批收进 `canUseTool` 后删除，
- * 契约类型（query/types.ts）不携带它。
- */
-export interface PipelineTool<Input = Record<string, unknown>>
-  extends ToolDefinition<Input> {
-  /** 危险工具标记；pipeline 用 withApproval 包住它的 execute 实现闸门。 */
-  readonly needsApproval?: boolean;
-}
+/** pipeline 内流转的工具形状 —— 与契约 ToolDefinition 同一个东西(命名给读代码的人)。 */
+export type PipelineTool<Input = Record<string, unknown>> = ToolDefinition<Input>;
 
 /** 取消/超时统一收口文案（dsh 同款，文案保持不变）。 */
 export const TOOL_CALL_ABORTED_OUTPUT = "Error: tool call aborted";

@@ -1,4 +1,4 @@
-import { buildPolicyKeys } from "@eva/harness";
+import { buildPolicyKeys } from "../runs/index.js";
 import type { PlanReviewDecision } from "@eva/shared";
 
 import type { ApprovalGateway, PendingApprovalView } from "./approval-gateway.js";
@@ -13,7 +13,7 @@ export interface ApprovalsApi {
   /**
    * T31「始终允许」:从 {tool, sessionId, args} 算出 policy key 并记住它。
    *
-   * key 由 harness 的 buildPolicyKeys 生成 —— **前端不拼 key**,否则就有第二个事实源。
+   * key 由 runs 的 buildPolicyKeys 生成 —— **前端不拼 key**,否则就有第二个事实源。
    * 返回 null = 这个工具不可记忆(destructive 双保险 / 只读或未知工具),不落库。
    */
   grantPolicy(input: {

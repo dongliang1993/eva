@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isSafeReadOnlyCommand } from "../../../packages/harness/src/tools/safe-readonly.js";
+import { isSafeReadOnlyCommand } from "../../../apps/server/src/modules/runs/index.js";
 
 /**
  * T29:bash 只读命令直放(docs/archive/plans/r7/T29 §2.1)。

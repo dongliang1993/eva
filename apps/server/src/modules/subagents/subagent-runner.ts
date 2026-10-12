@@ -2,9 +2,9 @@ import {
   SUBAGENT_ROLES,
   type AgentObserver,
   type AgentRunInput,
+  type CanUseTool,
   type PipelineTool,
   type ForkRunner,
-  type RequestApproval,
   type SubagentEventSink,
 } from "@eva/harness";
 import type { AppDatabase } from "../../db/index.js";
@@ -22,7 +22,8 @@ export interface SubagentRunnerOptions {
   readonly workspace?: WorkspaceContext;
   readonly extraTools?: readonly PipelineTool[];
   readonly abortSignal: AbortSignal;
-  readonly requestApproval: RequestApproval;
+  /** 与父 run 共用同一份权限链(同一个实例);子代理调用带 agentID = taskId。 */
+  readonly canUseTool: CanUseTool;
   readonly observerForTask: (taskId: string) => AgentObserver;
   readonly onSubagentEvent?: SubagentEventSink;
 }
@@ -53,13 +54,15 @@ export class SubagentRunner {
       const agent = this.agents.buildSubagent({
         role, model: this.options.model,
         observer: this.options.observerForTask(taskId),
-        requestApproval: this.options.requestApproval,
+        canUseTool: (toolName, input, options) =>
+          this.options.canUseTool(toolName, input, { ...options, agentID: taskId }),
         ...(this.options.workspace ? { workspace: this.options.workspace } : {}),
         extraTools: [...(this.options.extraTools ?? [])],
       });
       for await (const event of agent.stream({
         messages: [{ role: "user", content: prompt }],
         abortSignal: signal,
+        agentID: taskId,
         onToolExecution: this.options.toolExecutionForTask?.(taskId),
       })) {
         recorder.push(event);

@@ -7,7 +7,12 @@ import type {
 
 import type { ContextWindowPolicyOptions } from "../context/policy.js";
 import type { AgentModel } from "../models/agent-model.js";
-import type { PipelineTool, PlanGateState } from "../tools/index.js";
+import type { PipelineTool } from "../tools/index.js";
+import type {
+  CanUseTool,
+  HookCallbackMatcher,
+  HookEvent,
+} from "../query/types.js";
 import type { AgentObserver } from "./observer.js";
 
 export type ToolExecutionEvent =
@@ -20,7 +25,9 @@ export interface AgentRunInput {
   messages: ModelMessage[];
   context?: Record<string, unknown>;
   maxSteps?: number;
-  additionalTools?: PipelineTool[];
+  additionalTools?: readonly PipelineTool[];
+  /** 子代理 run 带它(= taskId);主 agent 不带。进 canUseTool 的 options.agentID。 */
+  agentID?: string;
   /**
    * T39/T43:显式选定本轮生效的工具名(白名单)。设了就照单过滤、绕过数量安全网
    * (显式选择优先);不设 = 走 resolveToolExposure,>40 进 discovery mode
@@ -71,17 +78,6 @@ export interface Agent {
   stream(input: AgentRunInput): AsyncIterable<AgentStreamEvent>;
 }
 
-export interface ToolApprovalRequest {
-  readonly toolName: string;
-  readonly toolCallId: string;
-  readonly args: Record<string, unknown>;
-}
-
-/** 危险工具执行前的用户审批入口；缺省时拒绝执行。 */
-export type RequestApproval = (
-  request: ToolApprovalRequest,
-) => Promise<boolean>;
-
 /** 每次模型调用的 call settings(AI SDK 语义:不属于 model 实例,属于调用)。 */
 export interface AgentCallSettings {
   readonly temperature?: number;
@@ -90,12 +86,16 @@ export interface AgentCallSettings {
 
 export interface CreateAgentOptions {
   model: AgentModel;
-  tools?: PipelineTool[];
+  tools?: readonly PipelineTool[];
   systemPrompt?: string | SystemModelMessage;
   maxSteps?: number;
   observer?: AgentObserver;
   contextPolicy?: ContextWindowPolicyOptions;
-  requestApproval?: RequestApproval;
+  /** 唯一权限入口(FR-003);未提供时走到 canUseTool 的调用全 deny。 */
+  canUseTool?: CanUseTool;
+  /** 每步注入、不进历史的 system 段;每次调模型前读一次。plan mode 的提醒走这里。 */
+  dynamicInstructions?: () => readonly string[];
+  hooks?: Partial<Record<HookEvent, readonly HookCallbackMatcher[]>>;
   callSettings?: AgentCallSettings;
   /**
    * T25:SDK TimeoutConfiguration 的工具子集 —— streamText 的
@@ -118,6 +118,4 @@ export interface CreateAgentOptions {
    * 模型身份只用于把 reactive context overflow 诊断事件关联到实际路由结果。
    */
   modelIdentity?: { providerId: string; modelId: string };
-  /** T45a:run-scoped plan gate 状态。传了就在最外层包 withPlanGate + 每步注 reminder。 */
-  planGateState?: PlanGateState;
 }

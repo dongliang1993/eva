@@ -53,7 +53,6 @@ const writeTool = (executed: string[]) =>
     name: "write_file",
     description: "write a file",
     inputSchema: z.object({ path: z.string() }),
-    needsApproval: true,
     execute: async (input: { path: string }) => {
       executed.push(input.path);
       return textResult(`wrote ${input.path}`);
@@ -126,18 +125,22 @@ describe("子代理审批分支 (T17)", () => {
       const gateway = new ApprovalGateway(new ApprovalRepository(db));
       const executed: string[] = [];
 
-      // routes/runs.ts 派生的子代理闭包同款形态:进闸门,第一个分支放行,记录照落。
-      const subagentRequestApproval = async ({ toolCallId, toolName, args }: {
-        toolCallId: string;
-        toolName: string;
-        args: Record<string, unknown>;
-      }): Promise<boolean> =>
-        gateway.autoApprove(toolCallId, { runId: "run-1", sessionId: "s-1", tool: toolName, args });
+      // server 权限链同款形态:canUseTool 第一分支放行(autoApprove),记录照落。
+      const subagentCanUseTool = async (
+        toolName: string,
+        input: Record<string, unknown>,
+        options: { toolUseID: string },
+      ) => {
+        gateway.autoApprove(options.toolUseID, {
+          runId: "run-1", sessionId: "s-1", tool: toolName, args: input,
+        });
+        return { behavior: "allow" as const };
+      };
 
       const agent = createAgent({
         model: dangerousCallModel(),
         tools: [writeTool(executed)],
-        requestApproval: subagentRequestApproval
+        canUseTool: subagentCanUseTool
       });
 
       const events = await collect(agent);
@@ -160,19 +163,24 @@ describe("子代理审批分支 (T17)", () => {
       const emitSpy = vi.fn();
 
       // 主 agent 闭包形态:白名单未命中 → emit 卡片 + ask 挂起。
-      const mainRequestApproval = async ({ toolCallId, toolName, args }: {
-        toolCallId: string;
-        toolName: string;
-        args: Record<string, unknown>;
-      }): Promise<boolean> => {
-        emitSpy({ type: "approval_request", callId: toolCallId, toolName });
-        return gateway.ask(toolCallId, { runId: "run-1", sessionId: "s-1", tool: toolName, args });
+      const mainCanUseTool = async (
+        toolName: string,
+        input: Record<string, unknown>,
+        options: { toolUseID: string },
+      ) => {
+        emitSpy({ type: "approval_request", callId: options.toolUseID, toolName });
+        const granted = await gateway.ask(options.toolUseID, {
+          runId: "run-1", sessionId: "s-1", tool: toolName, args: input,
+        });
+        return granted
+          ? { behavior: "allow" as const }
+          : { behavior: "deny" as const, message: "[Approval Denied]" };
       };
 
       const agent = createAgent({
         model: dangerousCallModel(),
         tools: [writeTool(executed)],
-        requestApproval: mainRequestApproval
+        canUseTool: mainCanUseTool
       });
 
       const eventsPromise = collect(agent);

@@ -6,11 +6,7 @@ import {
   tool,
   type PipelineTool,
 } from "../tool.js";
-import type {
-  PlanGateHandle,
-  PlanGateState,
-  RequestPlanReview
-} from "./state.js";
+import type { PlanGateHandle, PlanGateState } from "./state.js";
 
 /** server 侧实现；harness 不认识 DB/文件系统细节。 */
 export interface PlanGateStore {
@@ -38,6 +34,14 @@ const optionSchema = z
   })
   .strict();
 
+const exitDecisionSchema = z
+  .object({
+    outcome: z.literal("approve"),
+    selectedLabel: z.string().optional(),
+    decidedAt: z.string().optional(),
+  })
+  .passthrough();
+
 const exitSchema = z
   .object({
     options: z
@@ -57,7 +61,9 @@ const exitSchema = z
           ),
         "Option labels must not use reserved approval labels."
       )
-      .optional()
+      .optional(),
+    // server canUseTool 经 updatedInput 注入的审批决策;无 server 时缺席 → 直接批准。
+    decision: exitDecisionSchema.optional(),
   })
   .strict();
 
@@ -95,19 +101,25 @@ export const createEnterPlanModeTool = (
     },
   });
 
+/**
+ * exit_plan_mode 的 execute 只剩 approve 分支(plan §3.4):
+ * server 的 canUseTool 做完 plan review,经 updatedInput 注入 decision;
+ * revise / reject / reject_and_exit / dismissed 都在 canUseTool 里 deny 掉,
+ * execute 永远到不了。没有 decision(无 server 的测试场景)就当作直接批准。
+ *
+ * 前置校验(plan 未激活、plan 文件为空)留在这里兜底,但 server 必须在
+ * 发审批帧之前做同样检查并直接 deny —— 不能为一个空 plan 弹审批卡。
+ */
 export const createExitPlanModeTool = (
   store: PlanGateStore,
   state: PlanGateState,
-  requestPlanReview?: RequestPlanReview,
 ): PipelineTool =>
   tool({
     name: "exit_plan_mode",
     description:
       "Submit the current plan for approval and exit plan mode. The plan file must be non-empty.",
     inputSchema: exitSchema,
-    // 有平行通道时不走 boolean 审批;没有通道(测试桩/旧路径)才退回 boolean。
-    needsApproval: requestPlanReview === undefined,
-    async execute(input, extra) {
+    async execute(input) {
       const snap = state.current();
       const handle =
         snap.active && snap.planId && snap.planPath && snap.planRelPath
@@ -131,51 +143,13 @@ export const createExitPlanModeTool = (
 
       const revision = await store.recordRevision(handle);
 
-      // 兼容路径:无平行通道时,审批已在 execute 前问过 boolean(true 才到这)。
-      if (requestPlanReview === undefined) {
-        await store.approve(handle);
-        state.exit();
-        return textResult(`Plan approved (revision v${revision}). Plan mode deactivated.`);
-      }
-
-      const decision = await requestPlanReview({
-        toolCallId: extra.toolUseID ?? `plan-review-${handle.planId}`,
-        planId: handle.planId,
-        planPath: handle.planPath,
-        content,
-        revision,
-        ...(input.options !== undefined
-          ? { options: input.options.map((o) => ({ ...o, description: o.description ?? "" })) }
-          : {}),
-      });
-
-      switch (decision.outcome) {
-        case "approve": {
-          await store.approve(handle);
-          state.exit();
-          const selected = decision.selectedLabel
-            ? `Selected approach: ${decision.selectedLabel}\nExecute ONLY the selected approach. Do not execute any unselected alternatives.\n\n`
-            : "";
-          return textResult(`${selected}Plan approved (revision v${revision}). Plan mode deactivated.`);
-        }
-        case "revise": {
-          const feedback = decision.feedback ?? "";
-          return textResult(`User rejected the plan. Feedback:\n\n${feedback}\n\nRevise the plan and call exit_plan_mode again.`);
-        }
-        case "reject": {
-          state.requestStopTurn();
-          const feedback = decision.feedback ? `\n\n${decision.feedback}` : "";
-          return errorResult(`Plan rejected. Plan mode remains active.${feedback}`);
-        }
-        case "reject_and_exit": {
-          await store.reject(handle);
-          state.exit();
-          state.requestStopTurn();
-          return errorResult("Plan rejected by user. Plan mode deactivated.");
-        }
-        case "dismissed": {
-          return textResult("Plan approval dismissed. Plan mode remains active.");
-        }
-      }
+      // server 注入的决策(canUseTool 的 updatedInput);无 server 时视为直接批准。
+      // 非 approve 的分支到不了这里:canUseTool 只在 approve 时 allow。
+      await store.approve(handle);
+      state.exit();
+      const selected = input.decision?.selectedLabel
+        ? `Selected approach: ${input.decision.selectedLabel}\nExecute ONLY the selected approach. Do not execute any unselected alternatives.\n\n`
+        : "";
+      return textResult(`${selected}Plan approved (revision v${revision}). Plan mode deactivated.`);
     },
   });

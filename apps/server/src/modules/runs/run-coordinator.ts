@@ -25,7 +25,7 @@ import type { WorkspaceStore } from "../workspaces/index.js";
 import type { RunEventStream } from "../../transports/sse/event-stream.js";
 import { runRequestSchema, type RunRequest } from "../../types/runs.js";
 import { AssistantMessageRecorder, type RecordedAssistantRun } from "./assistant-message-recorder.js";
-import { RunApprovalChannel } from "./run-approval-channel.js";
+import { createRunPermissions, type RunPermissions } from "./run-permissions.js";
 import { runStatusFor } from "./run-repository.js";
 import {
   prepareRunContext,
@@ -98,10 +98,10 @@ interface AcceptedRun {
   readonly observability: AppSettings["observability"];
 }
 
-/** ② 的产出:带工作区的输入、审批通道,以及装好的 agent。 */
+/** ② 的产出:带工作区的输入、权限链,以及装好的 agent。 */
 interface AssembledRun extends AgentRuntime {
   readonly input: RunInput;
-  readonly approvals: RunApprovalChannel;
+  readonly permissions: RunPermissions;
 }
 
 /** 进入一个准备阶段:在这期间抛出的错误,台账记为这一层的失败。 */
@@ -146,6 +146,8 @@ export class Coordinator {
       mcp: deps.mcp,
       baseObserver: deps.baseObserver,
       plans: deps.plans,
+      approvals: deps.approvals,
+      approvalPolicies: deps.approvalPolicies,
       memoryAutomation: deps.memoryAutomation
     });
   }
@@ -221,13 +223,9 @@ export class Coordinator {
   /** ② 绑工作区、装 agent,并把「实际用了哪个模型」记进台账。 */
   private async assemble(run: ActiveRun, accepted: AcceptedRun): Promise<AssembledRun> {
     const input = await prepareRunWorkspace(this.preparation, accepted.input);
-    const approvals = new RunApprovalChannel({
-      approvals: this.deps.approvals,
-      approvalPolicies: this.deps.approvalPolicies,
-      runId: run.id,
-      sessionId: input.sessionId,
-      emit: run.emit
-    });
+    // 权限链在 agent 之前建:它的 planGate.state 与 enter/exit 工具共用同一引用。
+    // state/store 从 builder 借出(同一 workspace/plan 事实源),permissions 造好后回传。
+    const permissions = this.builder.createPermissions(run, input);
     const observability = this.builder.createObservability({
       runId: run.id,
       sessionId: input.sessionId,
@@ -247,7 +245,7 @@ export class Coordinator {
       runId: run.id,
       sessionId: input.sessionId,
       input,
-      approvals,
+      permissions,
       abortSignal: run.controller.signal,
       emit: run.emit
     }, observability);
@@ -259,7 +257,7 @@ export class Coordinator {
       kind: "routing_resolved",
       payload: { requestedModel: input.modelId, resolvedModel }
     });
-    return { ...runtime, input, approvals };
+    return { ...runtime, input, permissions };
   }
 
   /**
@@ -284,8 +282,8 @@ export class Coordinator {
       runId: run.id,
       model: assembled.resolved.mainModel.qualifiedModelId,
       initialPosition: assembled.input.assistantPosition,
-      lookupDecision: assembled.approvals.lookupApprovalDecision,
-      lookupPlanReviewDecision: assembled.approvals.lookupPlanReviewDecision
+      lookupDecision: assembled.permissions.lookupApprovalDecision,
+      lookupPlanReviewDecision: assembled.permissions.lookupPlanReviewDecision
     });
     progress.recorder = recorder;
     progress.extraction = assembled.extraction;

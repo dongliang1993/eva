@@ -61,6 +61,7 @@ const toolThenTextModel = (): MockLanguageModelV4 => {
   });
 };
 
+const allowAll = { canUseTool: async () => ({ behavior: "allow" as const }) };
 const echoTool = () =>
   tool({
     name: "echo",
@@ -96,6 +97,7 @@ describe("工具循环", () => {
     const agent = createAgent({
       model: toolThenTextModel(),
       tools: [echoTool()],
+      ...allowAll,
     });
 
     const events = await collect(agent);
@@ -123,7 +125,7 @@ describe("工具循环", () => {
         }),
       }),
     });
-    const agent = createAgent({ model, tools: [failingTool()] });
+    const agent = createAgent({ model, tools: [failingTool()], ...allowAll });
 
     const events = await collect(agent);
     const toolResults = events.filter((e) => e.type === "tool-result");
@@ -138,6 +140,7 @@ describe("工具循环", () => {
     const agent = createAgent({
       model: toolThenTextModel(),
       tools: [echoTool()],
+      ...allowAll,
     });
 
     const events = await collect(agent);
@@ -235,7 +238,7 @@ describe("工具循环", () => {
         };
       },
     });
-    const agent = createAgent({ model, tools: [echoTool()] });
+    const agent = createAgent({ model, tools: [echoTool()], ...allowAll });
 
     const events = await collect(agent);
     const finishes = events.filter(isFinish);
@@ -369,7 +372,7 @@ describe("abort 在飞工具收口(T26)", () => {
 
   it("工具在飞时 abort → finish 前补发取消 tool-result,finish 汇总带它", async () => {
     const controller = new AbortController();
-    const agent = createAgent({ model: twoCallModel(), tools: [neverTool()] });
+    const agent = createAgent({ model: twoCallModel(), tools: [neverTool()], ...allowAll });
 
     const events = await collectUntilFinish(agent, controller, (e) => {
       // 两个 tool-call 都发起后 abort;工具永不 resolve,SDK 丢弃在飞结果。
@@ -455,7 +458,7 @@ describe("abort 在飞工具收口(T26)", () => {
         }),
       }),
     });
-    const agent = createAgent({ model, tools: [neverTool()] });
+    const agent = createAgent({ model, tools: [neverTool()], ...allowAll });
 
     const events = await collectUntilFinish(
       agent,
@@ -530,6 +533,7 @@ describe("工具超时(T25 toolTimeout 配置)", () => {
       model: hungThenTextModel(),
       tools: [hungTool()],
       toolTimeout: { toolMs: 100 },
+      ...allowAll,
     });
 
     const events = await collect(agent);
@@ -553,6 +557,7 @@ describe("工具超时(T25 toolTimeout 配置)", () => {
     const agent = createAgent({
       model: hungThenTextModel(),
       tools: [hungTool()],
+      ...allowAll,
     });
 
     // 断言"不配超时就没有隐形兜底"(T25 坑 6:harness 不默认开启):

@@ -35,7 +35,6 @@ describe("plan gate agent 集成（同 run 进出）", () => {
       name: "write",
       description: "write file",
       inputSchema: z.object({ path: z.string(), content: z.string() }),
-      needsApproval: true,
       execute: async ({ path: target, content }) => {
         writes.push(target);
         if (target === handle.planRelPath) planContent = content;
@@ -84,6 +83,7 @@ describe("plan gate agent 集成（同 run 进出）", () => {
       }
     });
 
+    // T2:放行链在 canUseTool(测试里直接给);harness 不再认识 withPlanGate/withApproval。
     const agent = createAgent({
       model,
       tools: [
@@ -92,10 +92,9 @@ describe("plan gate agent 集成（同 run 进出）", () => {
         createExitPlanModeTool(store, state)
       ],
       maxSteps: 10,
-      planGateState: state,
-      requestApproval: async ({ toolName }) => {
+      canUseTool: async (toolName) => {
         approvals.push(toolName);
-        return true;
+        return { behavior: "allow" } as const;
       }
     });
 
@@ -104,8 +103,9 @@ describe("plan gate agent 集成（同 run 进出）", () => {
     }
 
     expect(writes).toEqual([handle.planRelPath, "src/a.ts"]);
-    // write 走审批(测试闭包全 true),enter 不审批,exit 审批一次;exit 后 write 恢复正常审批路径。
-    expect(approvals).toEqual(["write", "exit_plan_mode", "write"]);
+    // FR-004:非 readOnlyHint 的调用全走 canUseTool(enter 不再是例外 —— 放行链里
+    // 它更受限,不该免询问);顺序即调用顺序。
+    expect(approvals).toEqual(["enter_plan_mode", "write", "exit_plan_mode", "write"]);
     expect(state.current().active).toBe(false);
     expect(planContent).toBe("# Plan");
   });

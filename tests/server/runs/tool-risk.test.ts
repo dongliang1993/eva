@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyToolRisk } from "../../../packages/harness/src/tools/risk.js";
+import { classifyToolRisk } from "../../../apps/server/src/modules/runs/index.js";
 
 /**
  * T14 §2.2 危险形态表逐行钉死。

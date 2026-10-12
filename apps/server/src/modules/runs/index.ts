@@ -18,3 +18,12 @@ export {
   listToolExecutions,
   recordToolExecution,
 } from "./tool-operations.js";
+
+export {
+  buildPolicyKeys,
+  classifyToolRisk,
+  isSafeReadOnlyCommand,
+  matchesPlanGatePath,
+  planGateDeniedMessage,
+} from "./tool-policy.js";
+export { createRunPermissions, type RunPermissions } from "./run-permissions.js";

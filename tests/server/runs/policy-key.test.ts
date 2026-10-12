@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPolicyKeys } from "../../../packages/harness/src/approval/policy-key.js";
+import { buildPolicyKeys } from "../../../apps/server/src/modules/runs/index.js";
 
 /**
  * T27 §4 RED 1：thread 作用域 policy key 的纯函数形态。

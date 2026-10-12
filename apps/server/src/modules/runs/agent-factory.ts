@@ -21,12 +21,11 @@ import {
   SUBAGENT_MAX_STEPS,
   type Agent,
   type AgentObserver,
+  type CanUseTool,
   type PipelineTool,
   type PlanGateState,
   type PlanGateStore,
   type PromptSection,
-  type RequestPlanReview,
-  type RequestApproval,
   type Skill,
 } from "@eva/harness";
 
@@ -45,6 +44,22 @@ import { loadAppSettings } from "../settings/index.js";
  * 步数闸不该比上下文闸先响 —— 25 对"读一个模块再改三个文件"的日常任务都不够。
  */
 export const MAIN_AGENT_MAX_STEPS = 100;
+
+/**
+ * plan mode 的每步提醒(文案逐字搬自 harness 的 plan-gate/reminder.ts)。
+ * 走 dynamicInstructions:它不能活在 enter_plan_mode 的工具结果里 ——
+ * 那条消息会被 tool-result budget / compact 折走,plan 路径就丢 了。
+ */
+const planGateReminder = (
+  snap: { readonly active: boolean; readonly planPath?: string },
+): readonly string[] => {
+  if (!snap.active || !snap.planPath) return [];
+  return [
+    `Plan mode is active. Plan file: ${snap.planPath}. ` +
+    "Direct file writes are limited to this plan file; use write/edit only on it. " +
+    "When the plan is ready, call exit_plan_mode for approval.",
+  ];
+};
 
 /**
  * T25:工具超时默认值 —— harness 不设默认(最小使用者不该被强加隐形行为),
@@ -80,7 +95,7 @@ export interface AgentBuildOptions {
    * (agent="main" | taskId),不再有 infra 进程级单例兜底 —— 没有隐式 current run。
    */
   readonly observer: AgentObserver;
-  readonly requestApproval?: RequestApproval | undefined;
+  readonly canUseTool?: CanUseTool | undefined;
   readonly workspace?: WorkspaceContext | undefined;
   /** 本轮已固定的附加能力（MCP、memory 等）。 */
   readonly extraTools?: readonly PipelineTool[] | undefined;
@@ -88,12 +103,11 @@ export interface AgentBuildOptions {
   readonly memoryFilesSection?: PromptSection | undefined;
   /** Deterministically retrieved cross-session facts for this request. */
   readonly retrievedMemorySection?: PromptSection | undefined;
-  /** T45a:run-scoped plan gate。仅在绑了 workspace 时由路由注入。 */
+  /** run-scoped plan gate(工具集 + 每步提醒)。仅在绑了 workspace 时由路由注入。 */
   readonly planGate?:
   | {
     readonly state: PlanGateState;
     readonly store: PlanGateStore;
-    readonly requestPlanReview?: RequestPlanReview | undefined;
   }
   | undefined;
 }
@@ -161,8 +175,7 @@ export const buildBaseTools = (
     | {
       readonly state: PlanGateState;
       readonly store: PlanGateStore;
-      readonly requestPlanReview?: RequestPlanReview | undefined;
-    }
+      }
     | undefined;
   },
 ): PipelineTool[] => {
@@ -196,11 +209,7 @@ export const buildBaseTools = (
     if (planGate) {
       tools.push(
         createEnterPlanModeTool(planGate.store, planGate.state),
-        createExitPlanModeTool(
-          planGate.store,
-          planGate.state,
-          planGate.requestPlanReview,
-        ),
+        createExitPlanModeTool(planGate.store, planGate.state),
       );
     }
   }
@@ -308,8 +317,15 @@ export class AgentFactory {
         temperature: models.temperature,
         ...defined("maxOutputTokens", models.chat.maxOutputTokens),
       },
-      ...defined("requestApproval", options.requestApproval),
-      ...defined("planGateState", options.planGate?.state),
+      ...defined("canUseTool", options.canUseTool),
+      // plan mode 提醒走 dynamicInstructions:它不能活在工具结果里(会被压缩折走),
+      // 每次调模型前读一次 state —— enter/exit 中途变化下一步就能看见。
+      ...options.planGate
+        ? {
+          dynamicInstructions: () =>
+            planGateReminder(options.planGate!.state.current()),
+        }
+        : {},
       contextPolicy: {
         ...defined("contextWindow", models.chat.contextWindow),
         ...defined("reservedOutputTokens", models.chat.maxOutputTokens),
@@ -356,7 +372,11 @@ export class AgentFactory {
     /**
      * 子代理与父 Run 共用审批通道。缺省时 harness 会拒绝危险工具。
      */
-    readonly requestApproval?: RequestApproval | undefined;
+    readonly canUseTool?: CanUseTool | undefined;
+  readonly planGate?: {
+    readonly state: PlanGateState;
+    readonly store: PlanGateStore;
+  } | undefined;
     /** 主代理装配时已解析并冻结的 tool-model binding。 */
     readonly model: ModelBinding;
     /** run-scoped observer：与父 Run 共用 recorder，并绑定到 taskId。 */
@@ -392,7 +412,7 @@ export class AgentFactory {
       callSettings: {
         ...defined("temperature", options.temperature),
       },
-      ...defined("requestApproval", options.requestApproval),
+      ...defined("canUseTool", options.canUseTool),
       observer: options.observer,
     });
   }

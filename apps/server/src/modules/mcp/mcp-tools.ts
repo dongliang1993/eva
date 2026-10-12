@@ -43,7 +43,9 @@ export interface McpToolInvoker {
 
 /**
  * 免审批的两种情形：协议自己声明了 readOnlyHint，或用户把它写进了白名单。
- * 其余一律需审批 —— MCP server 是第三方代码，能发 HTTP、能改文件、能花钱。
+ * 其余一律走权限链问人 —— MCP server 是第三方代码，能发 HTTP、能改文件、能花钱。
+ * 判定只在 UI 摘要(toToolSummaries)与 readOnlyHint 注入时用;权限链由
+ * canUseTool 统一判定(不依赖工具自带标记)。
  */
 const isAutoApproved = (
   server: McpServerConfig,
@@ -102,8 +104,8 @@ const toParams = (inputSchema: unknown): readonly McpToolParam[] => {
 /**
  * MCP 工具 → PipelineTool。
  *
- * 不需要新的审批机制：`needsApproval` 标记 + pipeline 的 withApproval 是
- * 建好的闸门，MCP 工具只是又一批带标记的工具。
+ * 不需要新的审批机制：权限链(run-permissions)是统一的闸门，
+ * MCP 工具只是又一批非只读工具。
  */
 export const toAgentTools = (
   server: McpServerConfig,
@@ -136,7 +138,6 @@ export const toAgentTools = (
         annotations: {
           readOnlyHint: descriptor.readOnly,
         },
-        ...(isAutoApproved(server, descriptor) ? {} : { needsApproval: true }),
         // abortSignal 透传给 invoker → 传输层请求可中断。
         execute: async (input, extra): Promise<ToolResult> =>
           textResult(

@@ -58,3 +58,96 @@ export interface ToolResult {
   readonly content: readonly { readonly type: "text"; readonly text: string }[];
   readonly isError?: boolean;
 }
+
+// ─────────────────────────────────────────────────────────────── 权限
+
+/** 同 SDK 签名,options 只保留 Eva 用得上的字段。 */
+export type CanUseTool = (
+  toolName: string,
+  input: Record<string, unknown>,
+  options: {
+    readonly signal: AbortSignal;
+    readonly toolUseID: string;
+    /** 子代理发起的调用带它(= taskId);主 agent 不带。 */
+    readonly agentID?: string;
+  },
+) => Promise<PermissionResult>;
+
+/** 同 SDK。 */
+export type PermissionResult =
+  | {
+      readonly behavior: "allow";
+      /** 替换传给 execute 的 input。exit_plan_mode 用它把审批决策交给工具。 */
+      readonly updatedInput?: Record<string, unknown>;
+    }
+  | {
+      readonly behavior: "deny";
+      /** 原样作为工具结果给模型。isError 为 false:拒绝不是工具故障(与今天 status=success 的行为一致)。 */
+      readonly message: string;
+      /** true:本步工具收口后结束本轮,result.subtype 为 "success"、result 为本轮已产出的文本。 */
+      readonly interrupt?: boolean;
+      /**
+       * SDK 没有。true 时 message 作为 isError: true 的结果给模型(UI 显示为失败)。
+       * plan gate 的 reject 用它保持今天「Error: Plan rejected…」的语义。默认 false。
+       */
+      readonly isError?: boolean;
+    };
+
+// ─────────────────────────────────────────────────────────────── Hooks
+
+/** SDK 有 30+ 种;本次只实现这三种。 */
+export type HookEvent = "PreToolUse" | "PostToolUse" | "PostToolUseFailure";
+
+/** 同 SDK。matcher 是工具名的正则源串;省略 = 匹配所有。 */
+export interface HookCallbackMatcher {
+  readonly matcher?: string;
+  readonly hooks: readonly HookCallback[];
+}
+
+/** 同 SDK 签名(第二参数 toolUseID)。必须 await 完才继续 —— intent 写库靠这一点。 */
+export type HookCallback = (
+  input: HookInput,
+  toolUseID: string | undefined,
+  options: { readonly signal: AbortSignal },
+) => Promise<HookJSONOutput>;
+
+interface BaseHookInput {
+  /** 子代理调用带它;主 agent 不带。同 SDK 的 agent_id。 */
+  readonly agent_id?: string;
+}
+
+/** 字段名照 SDK 的 snake_case。 */
+export type HookInput =
+  | (BaseHookInput & {
+      readonly hook_event_name: "PreToolUse";
+      readonly tool_name: string;
+      readonly tool_input: Record<string, unknown>;
+      readonly tool_use_id: string;
+    })
+  | (BaseHookInput & {
+      readonly hook_event_name: "PostToolUse";
+      readonly tool_name: string;
+      readonly tool_input: Record<string, unknown>;
+      readonly tool_response: ToolResult;
+      readonly tool_use_id: string;
+      readonly duration_ms: number;
+    })
+  | (BaseHookInput & {
+      readonly hook_event_name: "PostToolUseFailure";
+      readonly tool_name: string;
+      readonly tool_input: Record<string, unknown>;
+      readonly tool_use_id: string;
+      readonly error: string;
+      /** 同 SDK:因 abort 结束。 */
+      readonly is_interrupt: boolean;
+      readonly duration_ms: number;
+    });
+
+/** SDK SyncHookJSONOutput 的子集。只有 PreToolUse 的 deny 有效果,其余返回 {} 即可。 */
+export interface HookJSONOutput {
+  readonly hookSpecificOutput?: {
+    readonly hookEventName: "PreToolUse";
+    readonly permissionDecision?: "deny";
+    readonly permissionDecisionReason?: string;
+  };
+}

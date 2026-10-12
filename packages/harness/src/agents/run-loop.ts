@@ -5,10 +5,7 @@ import {
   type SystemModelMessage,
   type ToolSet,
 } from "ai";
-import {
-  planGateInstructions,
-  toToolSet,
-} from "../tools/index.js";
+import type { ToolTimingMutable } from "../query/tool-call.js";
 import { buildToolPipeline } from "../tools/tool-pipeline.js";
 import { buildAgentSystemPrompt } from "../prompts/prompt-builder.js";
 import {
@@ -37,7 +34,7 @@ import {
 import {
   createPrepareStep,
 } from "./context-strategy.js";
-import { mapStreamPart, type ToolCallClock } from "./stream-part-mapper.js";
+import { mapStreamPart, type ToolCallClock, type ToolTimingState } from "./stream-part-mapper.js";
 import {
   abortInFlightToolCalls,
   finishRun,
@@ -184,10 +181,11 @@ class RunLoopAgent implements AgentInterface {
       ...this.options,
       onToolExecution: input.onToolExecution,
       tools: [...(this.options.tools ?? []), ...(input.additionalTools ?? [])],
+      ...(input.agentID !== undefined ? { agentID: input.agentID } : {}),
     });
     try {
-      const resolvedTools = new Map(pipeline.tools.map(tool => [tool.name, tool]));
-      const { toolDiscovery, toolTiming } = pipeline;
+      const { toolDiscovery, catalog: resolvedTools } = pipeline;
+      const toolTiming = timingAdapter(pipeline.timings);
       const exposure = resolveToolExposure(
         resolvedTools,
         input.activeToolNames,
@@ -202,7 +200,7 @@ class RunLoopAgent implements AgentInterface {
           limit: TOOL_COUNT_SAFETY_LIMIT,
         });
       }
-      const toolSet: ToolSet = toToolSet([...resolvedTools.values()]);
+      const toolSet: ToolSet = pipeline.toolSet as ToolSet;
       const maxSteps = input.maxSteps ?? this.maxSteps;
       const clock: ToolCallClock = new Map();
       const toolCalls: AgentToolCallResult[] = [];
@@ -266,10 +264,10 @@ class RunLoopAgent implements AgentInterface {
             toolDiscovery.activeTools() as
             | readonly (keyof ToolSet & string)[]
             | undefined,
-          getExtraInstructions: () =>
-            planGateInstructions(
-              this.options.planGateState?.current() ?? { active: false },
-            ),
+          getExtraInstructions: () => {
+            const dynamic = this.options.dynamicInstructions?.() ?? [];
+            return dynamic.map((content) => ({ role: "system" as const, content }));
+          },
           extraInstructions: [
             ...fixedInstructions,
             ...hoistedSystemMessages,
@@ -312,7 +310,7 @@ class RunLoopAgent implements AgentInterface {
             : {}),
           stopWhen: [
             stepCountIs(1),
-            () => this.options.planGateState?.shouldStopTurn() === true,
+            () => pipeline.tookInterruptSignal(),
           ],
           prepareStep,
           ...(input.abortSignal !== undefined
@@ -525,7 +523,7 @@ class RunLoopAgent implements AgentInterface {
         messages = [...messages, ...await result.responseMessages];
         const finishReason = await result.finishReason;
 
-        if (this.options.planGateState?.shouldStopTurn() !== true &&
+        if (pipeline.tookInterruptSignal() !== true &&
           step.toolCalls.length > 0 && step.toolResults.length === step.toolCalls.length) {
           continuedText += text;
           continue;
@@ -568,6 +566,31 @@ class RunLoopAgent implements AgentInterface {
   }
 
 }
+
+/**
+ * runToolCall 的计时 Map → mapper 的 ToolTimingState 适配。
+ * take 一次性:取走快照即删(没跑过的 toolCallId 返回全 0,plan gate 语义)。
+ */
+const timingAdapter = (
+  timings: Map<string, ToolTimingMutable>,
+): ToolTimingState => ({
+  record: () => {
+    // runToolCall 已直接写 Map;record 不会再被调(适配只为 mapper 的 take)。
+  },
+  take: (toolCallId: string) => {
+    const fallback: ToolTimingMutable = {
+      approval_wait_ms: 0, queue_wait_ms: 0, exec_ms: 0, aborted: false,
+    };
+    const timing = timings.get(toolCallId) ?? fallback;
+    timings.delete(toolCallId);
+    return {
+      approvalWaitMs: timing.approval_wait_ms,
+      queueWaitMs: timing.queue_wait_ms,
+      execMs: timing.exec_ms,
+      execAborted: timing.aborted,
+    };
+  },
+});
 
 export const createRunLoopAgent = (options: RunLoopOptions): AgentInterface => {
   return new RunLoopAgent(options);

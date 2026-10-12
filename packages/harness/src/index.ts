@@ -1,5 +1,22 @@
 // Agent runtime
 export { createAgent } from "./agents/agent.js";
+export { evaluatePermission } from "./query/permission.js";
+export { runPreToolUse, runPostToolUse, runPostToolUseFailure } from "./query/hooks.js";
+export { runToolCall } from "./query/tool-call.js";
+export type {
+  ToolCallContext,
+  ToolCallResult,
+  ToolTimingMutable,
+} from "./query/tool-call.js";
+export type {
+  CanUseTool,
+  HookCallback,
+  HookCallbackMatcher,
+  HookEvent,
+  HookInput,
+  HookJSONOutput,
+  PermissionResult,
+} from "./query/types.js";
 export type {
   Agent,
   AgentCallSettings,
@@ -8,8 +25,6 @@ export type {
   AgentStreamEvent,
   AgentToolCallResult,
   CreateAgentOptions,
-  RequestApproval,
-  ToolApprovalRequest,
 } from "./agents/types.js";
 export type { AgentObserver, AgentTelemetryEvent } from "./agents/observer.js";
 
@@ -37,7 +52,6 @@ export type { Skill } from "./skills/index.js";
 // Tool construction and built-in tools
 export {
   aborted,
-  classifyToolRisk,
   createAppendMemoryTool,
   createBashTool,
   createDuckDuckGoWebSearchTool,
@@ -56,8 +70,6 @@ export {
   createWebFetchTool,
   createWriteTool,
   errorResult,
-  isSafeReadOnlyCommand,
-  matchesPlanGatePath,
   textOf,
   textResult,
   tool,
@@ -72,10 +84,8 @@ export type {
   PlanGateHandle,
   PlanGateState,
   PlanGateStore,
-  RequestPlanReview,
   ToolResult,
 } from "./tools/index.js";
-export { buildPolicyKeys } from "./approval/policy-key.js";
 
 // Subagent host contract
 export {

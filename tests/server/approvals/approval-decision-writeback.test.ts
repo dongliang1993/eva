@@ -117,17 +117,17 @@ describe("T30 决策回写消息 part", () => {
     // 钉死两件事:① 帧里查的是 approvals.getRequest(台账),不是现造时间;
     // ② decision 字段真实存在于 emit payload。
     //
-    // Wave 1 起接线搬到 run-approval-channel.ts(原先在 routes/runs.ts)。断言本身没动,
+    // T2 起接线在 run-permissions.ts(原 run-approval-channel.ts)。断言本身没动,
     // 只换了读哪个文件 —— 这条钉的是接线形态,接线搬家它就得跟着搬。
     const source = readFileSync(
       new URL(
-        "../../../apps/server/src/modules/runs/run-approval-channel.ts",
+        "../../../apps/server/src/modules/runs/run-permissions.ts",
         import.meta.url
       ),
       "utf8"
     );
     const resolvedFrame = source.slice(source.indexOf('type: "approval_resolved"'));
-    expect(resolvedFrame).toContain("decision: this.lookupApprovalDecision(toolCallId)");
+    expect(resolvedFrame).toContain("decision: lookupApprovalDecisionOf(toolUseID)");
     expect(source).toContain("approvals.getRequest(callId)");
   });
 });

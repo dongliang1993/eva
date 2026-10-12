@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildPolicyKeys } from "../../../packages/harness/src/approval/policy-key.js";
+import { buildPolicyKeys } from "../../../apps/server/src/modules/runs/index.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
 import { ApprovalPolicyStore } from "../../../apps/server/src/modules/approvals/index.js";
 import {

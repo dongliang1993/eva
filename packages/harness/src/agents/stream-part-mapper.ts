@@ -4,7 +4,14 @@ import type { ToolResult } from "../query/types.js";
 import { textOf } from "../tools/tool.js";
 import type { AgentToolCallResult } from "./types.js";
 import type { AgentStreamEvent } from "./types.js";
-import type { ToolTimingState } from "../tools/tool-timing.js";
+/**
+ * 三段计时的消费面(take 一次性取走快照)。
+ * runToolCall 侧的 Map 经 run-loop 的 timingAdapter 适配到这里。
+ */
+export interface ToolTimingState {
+  record(toolCallId: string, phase: "approval" | "queue" | "exec", ms: number, meta?: { aborted?: boolean }): void;
+  take(toolCallId: string): { approvalWaitMs: number; queueWaitMs: number; execMs: number; execAborted: boolean };
+}
 
 /**
  * 工具调用的在飞台账:tool-call 时登记(toolName + 打点),tool-result 时取差并销账。

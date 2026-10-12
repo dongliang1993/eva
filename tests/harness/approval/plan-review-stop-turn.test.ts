@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
 import {
+  createEnterPlanModeTool,
   createExitPlanModeTool,
   createPlanGateState,
   textResult,
@@ -13,6 +14,7 @@ import {
   type PlanGateStore
 } from "../../../packages/harness/src/tools/index.js";
 import type { PlanReviewDecision } from "@eva/shared";
+import type { PermissionResult } from "../../../packages/harness/src/query/types.js";
 
 const usage = {
   inputTokens: { total: 5, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
@@ -68,18 +70,50 @@ const modelWithExitThenText = (counter: { calls: number }) =>
     }
   });
 
-const runOnce = async (decision: PlanReviewDecision) => {
+/**
+ * plan review 搬进 canUseTool(plan §3.4):server 在里面读 plan、发审批帧、
+ * 拿决策,然后按 outcome 返回 allow(deny)/deny。
+ */
+const permissionForDecision = (decision: PlanReviewDecision["outcome"]): PermissionResult => {
+  switch (decision) {
+    case "approve":
+      return { behavior: "allow", updatedInput: { decision: { outcome: "approve" } } };
+    case "revise":
+      return {
+        behavior: "deny",
+        message: "User rejected the plan. Feedback:\n\n改\n\nRevise the plan and call exit_plan_mode again.",
+      };
+    case "reject":
+      return {
+        behavior: "deny",
+        message: "Plan rejected. Plan mode remains active.",
+        interrupt: true,
+        isError: true,
+      };
+    case "reject_and_exit":
+      return {
+        behavior: "deny",
+        message: "Plan rejected by user. Plan mode deactivated.",
+        interrupt: true,
+        isError: true,
+      };
+    case "dismissed":
+      return { behavior: "deny", message: "Plan approval dismissed. Plan mode remains active." };
+  }
+};
+
+const runOnce = async (decision: PlanReviewDecision["outcome"]) => {
   const state = createPlanGateState({ active: false });
   state.enter(handle);
   const counter = { calls: 0 };
   const agent = createAgent({
     model: modelWithExitThenText(counter),
     tools: [
-      createExitPlanModeTool(store, state, async () => decision),
+      createExitPlanModeTool(store, state),
       dummy
     ],
     maxSteps: 5,
-    planGateState: state
+    canUseTool: async () => permissionForDecision(decision),
   });
 
   for await (const _ of agent.stream({ messages: [{ role: "user", content: "exit" }] })) {
@@ -90,14 +124,16 @@ const runOnce = async (decision: PlanReviewDecision) => {
 };
 
 describe("plan review stopTurn", () => {
-  it("reject / reject_and_exit 后 loop 不再进下一步", async () => {
-    expect(await runOnce({ outcome: "reject", decidedAt: new Date().toISOString() })).toBe(1);
-    expect(await runOnce({ outcome: "reject_and_exit", decidedAt: new Date().toISOString() })).toBe(1);
+  it("reject / reject_and_exit 后 loop 不再进下一步(interrupt 结束本轮)", async () => {
+    expect(await runOnce("reject")).toBe(1);
+    expect(await runOnce("reject_and_exit")).toBe(1);
   });
 
   it("revise 不终止,loop 继续进下一步", async () => {
-    expect(
-      await runOnce({ outcome: "revise", feedback: "改", decidedAt: new Date().toISOString() })
-    ).toBe(2);
+    expect(await runOnce("revise")).toBe(2);
+  });
+
+  it("dismissed 不终止,loop 继续进下一步", async () => {
+    expect(await runOnce("dismissed")).toBe(2);
   });
 });

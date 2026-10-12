@@ -29,20 +29,20 @@ describe("runtime contracts", () => {
   });
 
   it("additional tools use the same approval policy as configured tools", async () => {
-    const approve = vi.fn(async () => false);
+    const canUseTool = vi.fn(async () => ({ behavior: "deny" } as const));
     const execute = vi.fn(async () => textResult("mutated"));
     let calls = 0;
-    const agent = createAgent({ requestApproval: approve, maxSteps: 3, model: new MockLanguageModelV4({ doStream: async () => ++calls === 1 ? {
+    const agent = createAgent({ canUseTool, maxSteps: 3, model: new MockLanguageModelV4({ doStream: async () => ++calls === 1 ? {
       stream: simulateReadableStream({ chunks: [
         { type: "stream-start", warnings: [] },
         { type: "tool-call", toolCallId: "tc", toolName: "mutate", input: "{}" },
         { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage },
       ] }),
     } : response("stop") }) });
-    const extra = tool({ name: "mutate", description: "mutate", inputSchema: z.object({}), needsApproval: true, execute: execute });
+    const extra = tool({ name: "mutate", description: "mutate", inputSchema: z.object({}), execute: execute });
     for await (const _ of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [extra] })) {}
     expect(execute).not.toHaveBeenCalled();
-    expect(approve).toHaveBeenCalledOnce();
+    expect(canUseTool).toHaveBeenCalledOnce();
   });
 
   it("tools cannot replace a configured tool by name", async () => {

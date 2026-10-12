@@ -64,27 +64,22 @@ describe("toAgentTools", () => {
 
     expect(tool?.name).toBe("mcp__km__search");
     expect(tool?.annotations?.readOnlyHint).toBe(true);
-    expect(tool?.needsApproval).toBeUndefined();
+    expect(tool?.annotations?.readOnlyHint).toBe(true);
   });
 
-  it("命中 autoApproveTools 白名单 → 免审批（白名单写 MCP 侧原名）", () => {
-    const [tool] = toAgentTools(
+  it("命中 autoApproveTools 白名单 → UI 摘要标 autoApproved(权限链统一判定)", () => {
+    const [summary] = toToolSummaries(
       server({ autoApproveTools: ["search"] }),
       invoker([descriptor()]),
-      { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     );
 
-    expect(tool?.needsApproval).toBeUndefined();
+    expect(summary.autoApproved).toBe(true);
   });
 
-  it("既非只读也不在白名单 → 需要审批", () => {
-    const [tool] = toAgentTools(server(), invoker([descriptor()]), {
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    });
+  it("既非只读也不在白名单 → UI 摘要不免审批(权限链问人)", () => {
+    const [summary] = toToolSummaries(server(), invoker([descriptor()]));
 
-    expect(tool?.needsApproval).toBe(true);
+    expect(summary.autoApproved).toBe(false);
   });
 
   it("JSON Schema 原样交给工具，execute 转调 client.callTool", async () => {

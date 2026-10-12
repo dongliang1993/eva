@@ -131,11 +131,11 @@ export type AgentTelemetryEvent =
       readonly status: "success" | "error";
       /** T50 起逐步退役:三段计时(toolExecMs 等)取代这个含糊值。 */
       readonly durationMs?: number;
-      /** 真实执行时长(withExecTiming 打点)。 */
+      /** 真实执行时长(runToolCall 打点)。 */
       readonly toolExecMs?: number;
-      /** T50:审批等待(withApproval 打点)。 */
+      /** 审批等待(canUseTool 打点)。 */
       readonly approvalWaitMs?: number;
-      /** T50:并发帽排队等待(withConcurrencyCap 打点)。 */
+      /** 并发帽排队等待(readOnlyLimiter 打点)。 */
       readonly queueWaitMs?: number;
       /** T50:执行被 abort 截断(race 兜底抢先)。 */
       readonly execAborted?: boolean;
@@ -154,7 +154,7 @@ export type AgentTelemetryEvent =
       readonly waitedMs: number;
     }
   | {
-      /**进入审批闸(withApproval 调 requestApproval 前)。 */
+      /** 进入审批闸(server 权限链问人前)。 */
       readonly type: "approval_asked";
       readonly toolName: string;
       readonly toolCallId: string;

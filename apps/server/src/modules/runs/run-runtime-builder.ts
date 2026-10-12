@@ -1,10 +1,7 @@
 import { recordToolExecution } from "./tool-operations.js";
 import {
-  createPlanGateState,
   createSubagentTool,
   type PipelineTool,
-  type PlanGateState,
-  type RequestPlanReview,
   type Skill
 } from "@eva/harness";
 import type { AgentObserver } from "@eva/harness";
@@ -13,6 +10,10 @@ import type { RunStreamEvent } from "@eva/shared";
 import type { AppDatabase } from "../../db/index.js";
 import type { AppConfig } from "../../config.js";
 import type { DrizzlePlanRepository } from "../plan-gate/index.js";
+import type {
+  ApprovalGateway,
+  ApprovalPolicyStore,
+} from "../approvals/index.js";
 import type { AgentFactory, ResolvedAgent } from "./agent-factory.js";
 import { defined } from "./agent-factory.js";
 import type { McpRegistry } from "../mcp/index.js";
@@ -26,9 +27,11 @@ import {
   type RunRecorder,
 } from "../observability/index.js";
 import { createPlanGateStore, planGateRelPath } from "../plan-gate/index.js";
+import { createPlanGateState } from "@eva/harness";
+import { createRunPermissions, type RunPermissions } from "./run-permissions.js";
 import { SubagentRunner } from "../subagents/index.js";
 import { evaDataDir } from "../../paths.js";
-import type { RunApprovalChannel } from "./run-approval-channel.js";
+
 import type { RunInput } from "./run-preparation.js";
 import type { MemoryAutomationService } from "../memory/index.js";
 import { loadAppSettings } from "../settings/index.js";
@@ -42,6 +45,8 @@ export interface RunRuntimeBuilderDependencies {
   readonly agents: AgentFactory;
   readonly mcp: McpRegistry;
   readonly plans: DrizzlePlanRepository;
+  readonly approvals: ApprovalGateway;
+  readonly approvalPolicies: ApprovalPolicyStore;
   readonly baseObserver: AgentObserver | undefined;
   readonly memoryAutomation?: MemoryAutomationService | undefined;
 }
@@ -51,7 +56,7 @@ export interface RunRuntimeScope {
   readonly runId: string;
   readonly sessionId: string;
   readonly input: RunInput;
-  readonly approvals: RunApprovalChannel;
+  readonly permissions: RunPermissions;
   readonly abortSignal: AbortSignal;
   readonly emit: (event: RunStreamEvent) => void;
 }
@@ -83,6 +88,48 @@ export interface AgentRuntime {
 
 export class RunRuntimeBuilder {
   constructor(private readonly deps: RunRuntimeBuilderDependencies) { }
+
+  /**
+   * 权限链(coordinator 在 agent 装配之前调):
+   * plan gate 的 state/store 在这里定形,permissions 与 agent 工具集共用同一引用。
+   * 无 workspace 的 run 不带 planGate(enter/exit 工具与 plan 路径直放都缺席)。
+   */
+  createPermissions(
+    run: { readonly id: string; readonly emit: (event: RunStreamEvent) => void },
+    input: RunInput
+  ): RunPermissions {
+    const planGate = input.workspace
+      ? (() => {
+        const activePlan = this.deps.plans.findActive(input.sessionId);
+        const state = createPlanGateState(
+          activePlan
+            ? {
+              active: true,
+              planId: activePlan.id,
+              planPath: activePlan.path,
+              planRelPath: planGateRelPath(activePlan.id)
+            }
+            : { active: false }
+        );
+        return {
+          state,
+          store: createPlanGateStore({
+            db: this.deps.db,
+            sessionId: input.sessionId,
+            workspace: input.workspace
+          })
+        };
+      })()
+      : undefined;
+    return createRunPermissions({
+      approvals: this.deps.approvals,
+      approvalPolicies: this.deps.approvalPolicies,
+      runId: run.id,
+      sessionId: input.sessionId,
+      emit: run.emit,
+      ...(planGate !== undefined ? { planGate } : {})
+    });
+  }
 
   /** 本轮的诊断记录器。观测关着时 recorder 照样返回,只是不写。 */
   createObservability(scope: {
@@ -144,13 +191,16 @@ export class RunRuntimeBuilder {
     ];
 
     scope.abortSignal.throwIfAborted();
+    // plan gate 工具(enter/exit)与权限链共用同一个 state 引用 ——
+    // permissions.planGate 是装配期定下来的,工具执行中途 enter/exit 改的就是它。
+    const planGate = scope.permissions.planGate;
     const resolved = this.deps.agents.build({
       modelId: input.modelId,
       observer: observability.observer,
       extraTools: sharedTools,
-      requestApproval: scope.approvals.requestApproval,
+      canUseTool: scope.permissions.canUseTool,
       ...defined("workspace", input.workspace),
-      ...defined("planGate", this.buildPlanGate(scope)),
+      ...defined("planGate", planGate),
       ...defined("memoryFilesSection", memoryFilesSection),
       ...defined("retrievedMemorySection", memoryRetrieval?.section)
     });
@@ -169,40 +219,6 @@ export class RunRuntimeBuilder {
       additionalTools: this.buildSubagentTools(scope, resolved, sharedTools, observability.bridge),
       ...defined("extraction", extraction),
       ...defined("memoryRetrieval", memoryRetrieval)
-    };
-  }
-
-  private buildPlanGate(scope: RunRuntimeScope):
-    | {
-      state: PlanGateState;
-      store: ReturnType<typeof createPlanGateStore>;
-      requestPlanReview: RequestPlanReview;
-    }
-    | undefined {
-    if (!scope.input.workspace) return undefined;
-
-    const activePlan = this.deps.plans.findActive(scope.sessionId);
-    const state = createPlanGateState(
-      activePlan
-        ? {
-          active: true,
-          planId: activePlan.id,
-          planPath: activePlan.path,
-          planRelPath: planGateRelPath(activePlan.id)
-        }
-        : { active: false }
-    );
-    // 同一个引用交给两边:agent 的 enter/exit 工具在上面改,审批通道读它判「plan 文件写直放」。
-    scope.approvals.bindPlanGate(state);
-
-    return {
-      state,
-      store: createPlanGateStore({
-        db: this.deps.db,
-        sessionId: scope.sessionId,
-        workspace: scope.input.workspace
-      }),
-      requestPlanReview: scope.approvals.requestPlanReview
     };
   }
 
@@ -225,7 +241,7 @@ export class RunRuntimeBuilder {
       ...(scope.input.workspace !== undefined ? { workspace: scope.input.workspace } : {}),
       extraTools: sharedTools,
       abortSignal: scope.abortSignal,
-      requestApproval: scope.approvals.requestApproval,
+      canUseTool: scope.permissions.canUseTool,
       toolExecutionForTask: (taskId) =>
         recordToolExecution(this.deps.db, scope.runId, taskId),
       onSubagentEvent: (event) => {

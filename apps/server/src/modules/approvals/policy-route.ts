@@ -16,7 +16,7 @@ const grantBodySchema = z.object({
 /**
  * T31:「始终允许」写入口(docs/plans/r7/T31 §2.1)。
  *
- * policy key 生成必须在后端(buildPolicyKeys 是 harness 纯函数,单一事实来源)——
+ * policy key 生成必须在后端(buildPolicyKeys 是 runs 的纯函数,单一事实来源)——
  * 前端只传 {tool, sessionId, args},由这里选精确 key(keys[0],T27 顺序保证)再 grant。
  * 前端不拼 key,就不会有第二个事实源。
  */

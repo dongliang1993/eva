@@ -20,7 +20,7 @@ const config = { LOG_LEVEL: "info", PORT: 8082, HOST: "127.0.0.1", DB_PATH: "" }
  */
 /** 放行链的源码 —— 两条「钉接线」的测试共用,读一次就够。 */
 const approvalChannelSource = readFileSync(
-  new URL("../../../apps/server/src/modules/runs/run-approval-channel.ts", import.meta.url),
+  new URL("../../../apps/server/src/modules/runs/run-permissions.ts", import.meta.url),
   "utf8"
 );
 
@@ -122,7 +122,7 @@ describe("T28 policy 短路", () => {
     // 短路放进 ask() 内部会让「没问过人」的卡片在前端闪一帧(T28 §1.2)。
     // 这里直接钉源码形态:match 必须出现在 approval_request 帧之前。
     //
-    // Wave 1 起放行链搬到 run-approval-channel.ts(原先在 routes/runs.ts)。
+    // T2 起放行链在 run-permissions.ts(原 run-approval-channel.ts)。
     const matchAt = approvalChannelSource.indexOf("approvalPolicies.match(");
     const emitAt = approvalChannelSource.indexOf('type: "approval_request"');
     expect(matchAt).toBeGreaterThan(-1);
@@ -130,23 +130,28 @@ describe("T28 policy 短路", () => {
     expect(matchAt).toBeLessThan(emitAt);
   });
 
-  it("四级放行链的顺序是 bash只读 → plan文件 → policy → 弹窗(§7.2)", () => {
-    // 这四级的**顺序本身**是产品行为,不是实现细节。举一个具体的错法:把 policy
+  it("放行链的顺序是 plan拦写 → plan review → bash只读 → plan文件 → policy → 弹窗(§7.2)", () => {
+    // 这六级的**顺序本身**是产品行为,不是实现细节。举一个具体的错法:把 policy
     // 提到 plan 文件之前,用户点过一次「始终允许 write」之后,plan 文件写会记在
     // write:thread:<id>:all 这个 key 上 —— 该会话此后所有写全免弹窗,而不只是 plan 文件。
     //
-    // Wave 1 把四级收进同一个文件,顺序第一次变得可以一眼验证 —— 于是把它钉下来。
+    // T2 把放行链收进 run-permissions,顺序第一次变得可以一眼验证 —— 于是把它钉下来。
     const at = (needle: string): number => {
       const index = approvalChannelSource.indexOf(needle);
       expect(index, `找不到放行链的这一级: ${needle}`).toBeGreaterThan(-1);
       return index;
     };
 
-    const readonlyBash = at("isSafeReadOnlyCommand(");
-    const planFile = at("matchesPlanGatePath(");
+    const planGate = at("denyIfPlanGateBlocks(");
+    const planReview = at("exit_plan_mode\" && deps.planGate");
+    // 用调用处的字面量(③/④级),避开文件顶部的 import 行。
+    const readonlyBash = at("isSafeReadOnlyCommand(String(input.command");
+    const planFile = at("matchesPlanGatePath(input.path");
     const policy = at("approvalPolicies.match(");
     const ask = at("approvals.ask(");
 
+    expect(planGate).toBeLessThan(planReview);
+    expect(planReview).toBeLessThan(readonlyBash);
     expect(readonlyBash).toBeLessThan(planFile);
     expect(planFile).toBeLessThan(policy);
     expect(policy).toBeLessThan(ask);

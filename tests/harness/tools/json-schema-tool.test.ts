@@ -62,17 +62,15 @@ describe("toolFromJsonSchema", () => {
     expect(textOf(result)).toContain("connection lost");
   });
 
-  it("readOnlyHint / needsApproval 元数据原样带出", () => {
+  it("readOnlyHint 元数据原样带出", () => {
     const jsonTool = toolFromJsonSchema({
       name: "mcp__km__read",
       description: "read",
       inputSchema: { type: "json-schema", schema: { type: "object" } },
       annotations: { readOnlyHint: true },
-      needsApproval: true,
       execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
     });
 
     expect(jsonTool.annotations?.readOnlyHint).toBe(true);
-    expect(jsonTool.needsApproval).toBe(true);
   });
 });

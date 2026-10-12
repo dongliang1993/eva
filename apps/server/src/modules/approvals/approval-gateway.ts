@@ -1,4 +1,4 @@
-import { classifyToolRisk } from "@eva/harness";
+import { classifyToolRisk } from "../runs/index.js";
 import type { PlanReviewDecision, ToolRisk } from "@eva/shared";
 
 import {

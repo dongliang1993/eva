@@ -1,4 +1,16 @@
-import { classifyToolRisk } from "../tools/risk.js";
+import path from "node:path";
+
+import { classifyToolRisk } from "./tool-risk.js";
+import { isSafeReadOnlyCommand } from "./safe-readonly.js";
+
+/**
+ * 工具策略 —— 从 harness 原样搬来(spec FR-010:这些判断属于 server)。
+ *
+ * 纯函数、无 IO;放行链(run-permissions)与 policy key 生成共用,
+ * 判定源单一,两处不会漂移。
+ */
+
+export { classifyToolRisk, isSafeReadOnlyCommand };
 
 /**
  * thread 作用域 policy key 生成器。
@@ -29,7 +41,7 @@ export const buildPolicyKeys = (input: PolicyKeyInput): string[] => {
   if (input.toolName === "bash") {
     const command = typeof input.args.command === "string" ? input.args.command.trim() : "";
     // 双保险:destructive 永不进 policy。即便有人手改 settings 写入,
-    // 后端也不会为它生成可记忆的 key(r7 §4.3)。
+    // 后端也不会为它生成可记忆的 key。
     if (command && classifyToolRisk("bash", { command }).level === "destructive") {
       return [];
     }
@@ -48,3 +60,36 @@ export const buildPolicyKeys = (input: PolicyKeyInput): string[] => {
 
   return [];
 };
+
+// ─────────────────────────────────────────────── plan gate 路径判定
+
+const normalizeInputPath = (input: string): string =>
+  input.replace(/^\.\/+/, "");
+
+const isPlanPath = (
+  input: string,
+  planPath: string,
+  planRelPath: string,
+): boolean => {
+  const normalized = normalizeInputPath(input);
+  if (normalized === planRelPath || normalized === normalizeInputPath(planRelPath)) {
+    return true;
+  }
+  if (path.isAbsolute(input)) {
+    return path.resolve(input) === path.resolve(planPath);
+  }
+  return false;
+};
+
+/** 与免弹窗短路共用的同一份路径判定（契约:planPath 单一事实源）。 */
+export const matchesPlanGatePath = (
+  input: string,
+  snapshot: { readonly planPath?: string; readonly planRelPath?: string },
+): boolean =>
+  snapshot.planPath !== undefined &&
+  snapshot.planRelPath !== undefined &&
+  isPlanPath(input, snapshot.planPath, snapshot.planRelPath);
+
+export const planGateDeniedMessage = (planPath: string | undefined): string =>
+  `[Plan Mode] Only read-only tools and the current plan file are available. ` +
+  `Write the plan to ${planPath ?? "(no plan file)"}, then call exit_plan_mode.`;

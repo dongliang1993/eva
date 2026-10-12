@@ -239,6 +239,7 @@ describe("装配层帽(createAgent readOnlyConcurrency)", () => {
       model: multiToolCallModel(["ro0", "ro1", "w0"]),
       tools: [...readOnly, writeTool],
       readOnlyConcurrency: 2,
+      canUseTool: async () => ({ behavior: "allow" } as const),
     });
 
     const events = await collectEvents(agent);

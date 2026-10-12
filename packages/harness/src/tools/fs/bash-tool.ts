@@ -157,7 +157,6 @@ export const createBashTool = (options: FsToolBaseOptions): PipelineTool =>
       "Run a shell command within the workspace root. Requires user approval " +
       "because it can modify files or have side effects.",
     inputSchema: bashSchema,
-    needsApproval: true,
     async execute({ command }, extra) {
       return withWorkspaceWrite(options.workRoot, async () => {
         const { stdout, stderr, canceled, timeout } = await runBash(

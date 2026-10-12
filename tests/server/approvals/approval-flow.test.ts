@@ -4,11 +4,18 @@ import { z } from "zod";
 
 import { createAgent } from "../../../packages/harness/src/agents/agent.js";
 import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
-import { APPROVAL_DENIED_PREFIX, withApproval } from "../../../packages/harness/src/tools/with-approval.js";
 import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
+import { loadConfig } from "../../../apps/server/src/config.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
-import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
+import {
+  ApprovalGateway,
+  ApprovalPolicyStore,
+  ApprovalRepository,
+} from "../../../apps/server/src/modules/approvals/index.js";
+import {
+  createRunPermissions,
+  isSafeReadOnlyCommand,
+} from "../../../apps/server/src/modules/runs/index.js";
 
 type FinishEvent = Extract<AgentStreamEvent, { type: "finish" }>;
 
@@ -84,16 +91,27 @@ const dangerousTool = () =>
     name: "dangerous_a",
     description: "a dangerous tool",
     inputSchema: z.object({ value: z.string() }),
-    needsApproval: true,
     execute: async () => textResult("executed dangerous_a")
   });
 
-describe("withApproval 单元", () => {
-  it("只读工具不经过审批:原样返回,spy 未调用", () => {
-    const spy = vi.fn();
-    const tool = readFileTool();
+describe("runToolCall 单元(FR-004:readOnlyHint 直放)", () => {
+  it("只读工具不调 canUseTool:原样执行,spy 未调用", async () => {
+    const spy = vi.fn(async () => ({ behavior: "allow" as const }));
+    const { runToolCall } = await import("../../../packages/harness/src/query/tool-call.js");
+    const { Semaphore } = await import("../../../packages/harness/src/tools/concurrency-cap.js");
+    const readTool = readFileTool();
+    const { textOf } = await import("../../../packages/harness/src/tools/tool.js");
 
-    expect(withApproval(tool, spy)).toBe(tool);
+    const { result } = await runToolCall(readTool, { path: "a.ts" }, {
+      toolUseID: "tc-ro",
+      signal: new AbortController().signal,
+    }, {
+      canUseTool: spy,
+      hooks: {},
+      readOnlyLimiter: new Semaphore(10),
+      timings: new Map(),
+    });
+    expect(textOf(result)).toContain("content of a.ts");
     expect(spy).not.toHaveBeenCalled();
   });
 });
@@ -110,7 +128,16 @@ describe("agent 级审批流", () => {
     const agent = createAgent({
       model: toolCallThenTextModel("dangerous_a", { value: "x" }),
       tools: [dangerous],
-      requestApproval: approve
+      canUseTool: async (toolName, input, options) => {
+        const granted = await approve({
+          toolName, toolCallId: options.toolUseID, args: input,
+        });
+        return granted ? { behavior: "allow" as const } : {
+          behavior: "deny" as const,
+          message:
+            "[Approval Denied] The user rejected the `dangerous_a` call. Do not retry.",
+        };
+      }
     });
 
     const events: AgentStreamEvent[] = [];
@@ -146,7 +173,16 @@ describe("agent 级审批流", () => {
     const agent = createAgent({
       model: toolCallThenTextModel("dangerous_a", { value: "x" }),
       tools: [dangerous],
-      requestApproval: approve
+      canUseTool: async (toolName, input, options) => {
+        const granted = await approve({
+          toolName, toolCallId: options.toolUseID, args: input,
+        });
+        return granted ? { behavior: "allow" as const } : {
+          behavior: "deny" as const,
+          message:
+            "[Approval Denied] The user rejected the `dangerous_a` call. Do not retry.",
+        };
+      }
     });
 
     const events: AgentStreamEvent[] = [];
@@ -161,7 +197,7 @@ describe("agent 级审批流", () => {
     const toolResults = events.filter((e) => e.type === "tool-result");
     expect(toolResults.length).toBeGreaterThan(0);
     const output = (toolResults[0] as { output: string }).output;
-    expect(output.startsWith(APPROVAL_DENIED_PREFIX)).toBe(true);
+    expect(output.startsWith("[Approval Denied]")).toBe(true);
     // 拒绝时绝不真的执行
     expect(output).not.toContain("executed dangerous_a");
 
@@ -172,14 +208,14 @@ describe("agent 级审批流", () => {
 describe("agent 级回归(只读工具全链路)", () => {
   it("工具真的执行并可读到输出,(T0.4 之前的两个报错回归)", async () => {
     const model = toolCallThenTextModel("read_file", { path: "a.ts" });
-    let requestApprovalCalls = 0;
+    let canUseToolCalls = 0;
 
     const agent = createAgent({
       model,
       tools: [readFileTool()],
-      requestApproval: async () => {
-        requestApprovalCalls += 1;
-        return true;
+      canUseTool: async () => {
+        canUseToolCalls += 1;
+        return { behavior: "allow" as const };
       }
     });
 
@@ -198,8 +234,8 @@ describe("agent 级回归(只读工具全链路)", () => {
     const finishes = events.filter(isFinish);
     expect(finishes).toHaveLength(1);
     expect(finishes[0]?.finishReason).toBe("stop");
-    // 只读工具不该问审批
-    expect(requestApprovalCalls).toBe(0);
+    // 只读工具不该问权限(FR-004:readOnlyHint 直放)
+    expect(canUseToolCalls).toBe(0);
   });
 });
 
@@ -324,11 +360,11 @@ describe("启动清扫:遗留 pending 审批", () => {
 });
 
 /**
- * T29:bash 只读命令直放(docs/archive/plans/r7/T29)。
- * 短路由 harness 的 withApproval 做(requestApproval 不被调),台账由 server 的
- * requestApproval 回调做(autoApprove 落 granted)—— 两处用同一个 isSafeReadOnlyCommand。
+ * bash 只读直放:短路由在 server 权限链的 ③ 级(run-permissions),
+ * 台账 autoApprove 落 granted(reason=readonly-safe)。
+ * 行为断言搬自 harness 时代的 withApproval 短路用例(文案与判定源不变)。
  */
-describe("bash 只读直放(T29)", () => {
+describe("bash 只读直放(server 权限链)", () => {
   let db: AppDatabase;
 
   beforeEach(() => {
@@ -340,21 +376,40 @@ describe("bash 只读直放(T29)", () => {
     closeDb(db);
   });
 
-  const bashTool = () =>
-    tool({
+  const makePermissions = () => {
+    const approvals = new ApprovalGateway(new ApprovalRepository(db));
+    const asked: string[] = [];
+    const permissions = createRunPermissions({
+      approvals,
+      approvalPolicies: new ApprovalPolicyStore(db, loadConfig({ env: {}, cwd: "/tmp" })),
+      runId: "run-1",
+      sessionId: "session-1",
+      emit: () => {},
+    });
+    // 弹窗级(⑥):ask 永远等人 —— 用 decide 收口并记下问过谁。
+    const originalCanUseTool = permissions.canUseTool;
+    const trackedCanUseTool: typeof originalCanUseTool = async (toolName, input, options) => {
+      if (toolName === "bash" && !isSafeReadOnlyCommand(String(input.command ?? ""))) {
+        asked.push(input.command as string);
+        setTimeout(() => approvals.decide(options.toolUseID, true), 10);
+      }
+      return originalCanUseTool(toolName, input, options);
+    };
+    return { approvals, asked, permissions: { ...permissions, canUseTool: trackedCanUseTool } };
+  };
+
+  const runOnce = async (command: string, toolCallId = "tc-1") => {
+    const fx = makePermissions();
+    const bashTool = tool({
       name: "bash",
       description: "run a shell command",
       inputSchema: z.object({ command: z.string(), description: z.string() }),
-      needsApproval: true,
       execute: async () => textResult("ran")
     });
-
-  const runOnce = async (command: string) => {
-    const spy = vi.fn(async () => true);
     const agent = createAgent({
-      model: toolCallThenTextModel("bash", { command, description: "d" }),
-      tools: [bashTool()],
-      requestApproval: spy
+      model: toolCallThenTextModel("bash", { command, description: "d" }, toolCallId),
+      tools: [bashTool],
+      canUseTool: fx.permissions.canUseTool,
     });
 
     const events: AgentStreamEvent[] = [];
@@ -362,31 +417,32 @@ describe("bash 只读直放(T29)", () => {
       events.push(event);
     }
     const toolResults = events.filter((e) => e.type === "tool-result");
-    return { spy, toolResults };
+    return { asked: fx.asked, approvals: fx.approvals, toolResults };
   };
 
-  it("ls -la 直放:requestApproval 未被调,工具真执行", async () => {
-    const { spy, toolResults } = await runOnce("ls -la");
-    expect(spy).not.toHaveBeenCalled();
+  it("ls -la 直放:无弹窗,工具真执行,台账 granted + readonly-safe", async () => {
+    const { asked, approvals, toolResults } = await runOnce("ls -la");
+    expect(asked).toHaveLength(0);
     expect((toolResults[0] as { output: string }).output).toBe("ran");
+    expect(approvals.getRequest("tc-1")?.reason).toBe("readonly-safe");
   });
 
   it("git status 直放;cat a.ts 直放", async () => {
-    for (const command of ["git status", "cat a.ts"]) {
-      const { spy, toolResults } = await runOnce(command);
-      expect(spy).not.toHaveBeenCalled();
+    for (const [i, command] of ["git status", "cat a.ts"].entries()) {
+      const { asked, toolResults } = await runOnce(command, `tc-ro-${i}`);
+      expect(asked).toHaveLength(0);
       expect((toolResults[0] as { output: string }).output).toBe("ran");
     }
   });
 
   it("ls > out.txt 仍弹审批(重定向不直放)", async () => {
-    const { spy } = await runOnce("ls > out.txt");
-    expect(spy).toHaveBeenCalledTimes(1);
+    const { asked } = await runOnce("ls > out.txt", "tc-redir");
+    expect(asked).toEqual(["ls > out.txt"]);
   });
 
   it("ls && rm x 仍弹审批(拼接不直放)", async () => {
-    const { spy } = await runOnce("ls && rm x");
-    expect(spy).toHaveBeenCalledTimes(1);
+    const { asked } = await runOnce("ls && rm x", "tc-chain");
+    expect(asked).toEqual(["ls && rm x"]);
   });
 
   it("台账:server 回调对只读命令 autoApprove 落 granted + reason=readonly-safe,无 pending", () => {
