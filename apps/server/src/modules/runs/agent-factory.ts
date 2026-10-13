@@ -15,10 +15,7 @@ import {
   createWebFetchTool,
   createWebSearchPromptSection,
   createWriteTool,
-  filterToolsForRole,
-  missingRoleTools,
   skillsToPromptSection,
-  SUBAGENT_MAX_STEPS,
   type Agent,
   type AgentObserver,
   type CanUseTool,
@@ -30,6 +27,11 @@ import {
 } from "@eva/harness";
 
 import { toolOverflowDir } from "../../paths.js";
+import {
+  SUBAGENT_MAX_STEPS,
+  filterToolsForRole,
+  missingRoleTools,
+} from "../subagents/index.js";
 import type { AppInfrastructure } from "../../types/common.js";
 import {
   resolveModelSlot,
@@ -365,7 +367,7 @@ export class AgentFactory {
    * @throws AgentUnavailableError 没配好 provider 时(与主 agent 同一路径)。
    */
   buildSubagent(options: {
-    readonly role: import("@eva/harness").SubagentRole;
+    readonly role: import("../subagents/index.js").SubagentRole;
     readonly workspace?: WorkspaceContext | undefined;
     readonly extraTools?: readonly PipelineTool[] | undefined;
     readonly temperature?: number | undefined;

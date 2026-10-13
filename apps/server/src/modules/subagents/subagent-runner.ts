@@ -1,5 +1,4 @@
 import {
-  SUBAGENT_ROLES,
   type AgentObserver,
   type AgentRunInput,
   type CanUseTool,
@@ -9,6 +8,7 @@ import {
 } from "@eva/harness";
 import type { AppDatabase } from "../../db/index.js";
 import { DrizzleMessageRepository } from "../sessions/index.js";
+import { SUBAGENT_ROLES } from "./index.js";
 import { toRunStreamFrames } from "../runs/index.js";
 import type { RunAgentStreamEvent, RunStreamEvent } from "@eva/shared";
 import type { AgentFactory, ResolvedAgent, WorkspaceContext } from "../runs/index.js";

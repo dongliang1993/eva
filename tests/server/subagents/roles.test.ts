@@ -4,13 +4,13 @@ import {
   SUBAGENT_ROLES,
   filterToolsForRole,
   missingRoleTools,
-} from "../../../packages/harness/src/subagents/crew.js";
-import type { SubagentRole } from "../../../packages/harness/src/subagents/crew.js";
-import type { AgentTool } from "../../../packages/harness/src/tools/build-tool.js";
+  type SubagentRole,
+} from "../../../apps/server/src/modules/subagents/index.js";
+import { textResult, tool, type PipelineTool } from "../../../packages/harness/src/index.js";
 
-// a stub AgentTool
-const stubTool = (name: string): AgentTool =>
-  ({ name, tool: {} as never }) as unknown as AgentTool;
+// a stub PipelineTool
+const stubTool = (name: string): PipelineTool =>
+  ({ name, tool: {} as never }) as unknown as PipelineTool;
 
 const ALL_TOOLS = [
   "read_file", "list_dir", "grep", "read_skill",

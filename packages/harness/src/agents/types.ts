@@ -45,6 +45,8 @@ export interface AgentRunInput {
    */
   preferredToolNames?: readonly string[];
   abortSignal?: AbortSignal;
+  /** true 时产出 text/reasoning 的 stream_event(契约 Options.includePartialMessages)。 */
+  includePartialMessages?: boolean;
 }
 
 export type { StreamFinishReason, StreamTokenUsage };

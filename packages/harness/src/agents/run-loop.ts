@@ -363,7 +363,7 @@ class RunLoopAgent implements AgentInterface {
         const turnStream = runTurnStream({
           turn: stepsUsed,
           parentToolUseID: null,
-          includePartialMessages: true,
+          includePartialMessages: input.includePartialMessages ?? true,
           stream: abortableStream,
           turnStartedAt: stepStartTime,
         });

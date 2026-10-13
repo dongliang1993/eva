@@ -1,4 +1,4 @@
-import type { PipelineTool } from "../tools/index.js";
+import type { PipelineTool } from "@eva/harness";
 
 export interface SubagentRole {
   readonly type: string;

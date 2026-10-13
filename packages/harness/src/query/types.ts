@@ -6,7 +6,7 @@
  * 权限 / hooks / 消息输出 / Options 留在后续任务逐批落地,不提前放。
  */
 
-import type { ModelMessage } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
 import type { z } from "zod";
 
 // ─────────────────────────────────────────────────────────────── 工具
@@ -77,22 +77,22 @@ export type CanUseTool = (
 /** 同 SDK。 */
 export type PermissionResult =
   | {
-      readonly behavior: "allow";
-      /** 替换传给 execute 的 input。exit_plan_mode 用它把审批决策交给工具。 */
-      readonly updatedInput?: Record<string, unknown>;
-    }
+    readonly behavior: "allow";
+    /** 替换传给 execute 的 input。exit_plan_mode 用它把审批决策交给工具。 */
+    readonly updatedInput?: Record<string, unknown>;
+  }
   | {
-      readonly behavior: "deny";
-      /** 原样作为工具结果给模型。isError 为 false:拒绝不是工具故障(与今天 status=success 的行为一致)。 */
-      readonly message: string;
-      /** true:本步工具收口后结束本轮,result.subtype 为 "success"、result 为本轮已产出的文本。 */
-      readonly interrupt?: boolean;
-      /**
-       * SDK 没有。true 时 message 作为 isError: true 的结果给模型(UI 显示为失败)。
-       * plan gate 的 reject 用它保持今天「Error: Plan rejected…」的语义。默认 false。
-       */
-      readonly isError?: boolean;
-    };
+    readonly behavior: "deny";
+    /** 原样作为工具结果给模型。isError 为 false:拒绝不是工具故障(与今天 status=success 的行为一致)。 */
+    readonly message: string;
+    /** true:本步工具收口后结束本轮,result.subtype 为 "success"、result 为本轮已产出的文本。 */
+    readonly interrupt?: boolean;
+    /**
+     * SDK 没有。true 时 message 作为 isError: true 的结果给模型(UI 显示为失败)。
+     * plan gate 的 reject 用它保持今天「Error: Plan rejected…」的语义。默认 false。
+     */
+    readonly isError?: boolean;
+  };
 
 // ─────────────────────────────────────────────────────────────── Hooks
 
@@ -120,29 +120,29 @@ interface BaseHookInput {
 /** 字段名照 SDK 的 snake_case。 */
 export type HookInput =
   | (BaseHookInput & {
-      readonly hook_event_name: "PreToolUse";
-      readonly tool_name: string;
-      readonly tool_input: Record<string, unknown>;
-      readonly tool_use_id: string;
-    })
+    readonly hook_event_name: "PreToolUse";
+    readonly tool_name: string;
+    readonly tool_input: Record<string, unknown>;
+    readonly tool_use_id: string;
+  })
   | (BaseHookInput & {
-      readonly hook_event_name: "PostToolUse";
-      readonly tool_name: string;
-      readonly tool_input: Record<string, unknown>;
-      readonly tool_response: ToolResult;
-      readonly tool_use_id: string;
-      readonly duration_ms: number;
-    })
+    readonly hook_event_name: "PostToolUse";
+    readonly tool_name: string;
+    readonly tool_input: Record<string, unknown>;
+    readonly tool_response: ToolResult;
+    readonly tool_use_id: string;
+    readonly duration_ms: number;
+  })
   | (BaseHookInput & {
-      readonly hook_event_name: "PostToolUseFailure";
-      readonly tool_name: string;
-      readonly tool_input: Record<string, unknown>;
-      readonly tool_use_id: string;
-      readonly error: string;
-      /** 同 SDK:因 abort 结束。 */
-      readonly is_interrupt: boolean;
-      readonly duration_ms: number;
-    });
+    readonly hook_event_name: "PostToolUseFailure";
+    readonly tool_name: string;
+    readonly tool_input: Record<string, unknown>;
+    readonly tool_use_id: string;
+    readonly error: string;
+    /** 同 SDK:因 abort 结束。 */
+    readonly is_interrupt: boolean;
+    readonly duration_ms: number;
+  });
 
 /** SDK SyncHookJSONOutput 的子集。只有 PreToolUse 的 deny 有效果,其余返回 {} 即可。 */
 export interface HookJSONOutput {
@@ -267,11 +267,11 @@ export interface CompactBoundaryMessage {
 export type ResultMessage =
   | (ResultBase & { readonly subtype: "success"; readonly result: string })
   | (ResultBase & {
-      readonly subtype: "error_max_turns" | "error_during_execution" | "interrupted";
-      readonly errors: readonly string[];
-      /** error_during_execution 时：失败发生在哪一层。 */
-      readonly failure_layer?: "context" | "model";
-    });
+    readonly subtype: "error_max_turns" | "error_during_execution" | "interrupted";
+    readonly errors: readonly string[];
+    /** error_during_execution 时：失败发生在哪一层。 */
+    readonly failure_layer?: "context" | "model";
+  });
 
 interface ResultBase {
   readonly type: "result";
@@ -289,4 +289,88 @@ export interface TokenUsage {
   readonly cache_read_input_tokens?: number;
   readonly cache_creation_input_tokens?: number;
   readonly reasoning_tokens?: number;
+}
+
+
+// ─────────────────────────────────────────────────────────────── 入口
+
+/**
+ * 跑一轮 agent:从 prompt 开始,循环「模型 → 工具 → 模型」,直到模型不再调用工具、
+ * 达到 maxTurns、被 interrupt,或出错。
+ *
+ * SDK 的 prompt 是 string | AsyncIterable<SDKUserMessage>,因为 Claude Code 自己持有会话。
+ * Eva 的会话在 SQLite,server 每轮给出完整历史,所以这里是 ModelMessage[]。
+ */
+export declare function query(params: {
+  readonly prompt: readonly ModelMessage[];
+  readonly options: Options;
+}): Query;
+
+export interface Query extends AsyncGenerator<HarnessMessage, void> {
+  /** 中止本轮:abort 所有在飞调用,等已派发的工具收口后结束迭代。等价于 options.abortController.abort()。 */
+  interrupt(): Promise<void>;
+}
+
+// ─────────────────────────────────────────────────────────────── Options
+
+export interface Options {
+  /**
+   * SDK 是 `model: string`。Eva 支持多个 provider,模型的身份、窗口、输出上限要一起给,
+   * 所以是对象。上下文压缩阈值从 contextWindow / maxOutputTokens 推导。
+   */
+  readonly model: ModelBinding;
+  /** 同 SDK。数组按段拼接,段间空一行。 */
+  readonly systemPrompt?: string | readonly string[];
+  /** 同 SDK 的语义;SDK 用名字列表 + MCP 注册自定义工具,Eva 直接传定义。名字重复时 query() 同步抛错。 */
+  readonly tools?: readonly ToolDefinition[];
+  /** 同 SDK。键是 subagent 类型名,模型调用内置的 `subagent` 工具时按 `subagent_type` 选取。 */
+  readonly agents?: Readonly<Record<string, AgentDefinition>>;
+  /** 同 SDK。权限评估走到最后一步时调用;不提供则所有走到这一步的调用被 deny。 */
+  readonly canUseTool?: CanUseTool;
+  /** 同 SDK。本次只实现下面三种事件。 */
+  readonly hooks?: Partial<Record<HookEvent, readonly HookCallbackMatcher[]>>;
+  /** 同 SDK:模型调用次数上限(含最后一次不带工具的回答)。默认 100。 */
+  readonly maxTurns?: number;
+  /** 同 SDK。不提供时 query() 内部 new 一个,interrupt() 用它。 */
+  readonly abortController?: AbortController;
+  /** 同 SDK。true 时产出 stream_event(文本/推理/工具入参增量)。默认 false。 */
+  readonly includePartialMessages?: boolean;
+  /**
+   * SDK 没有。调用时参数(AI SDK 语义,不属于模型实例)。
+   */
+  readonly callSettings?: { readonly temperature?: number; readonly maxOutputTokens?: number };
+  /**
+   * SDK 没有(Claude Code 内部写死)。readOnlyHint 工具的并发上限,默认 10;单个工具调用超时,
+   * 默认不设,server 注入 { defaultMs: 60_000, byTool: { bash: 150_000 } }。
+   */
+  readonly limits?: {
+    readonly readOnlyConcurrency?: number;
+    readonly toolTimeoutMs?: { readonly defaultMs: number; readonly byTool?: Readonly<Record<string, number>> };
+  };
+  /**
+   * SDK 没有(Claude Code 的 plan mode 由它自己的工具实现)。每步注入、不进历史的 system 段,
+   * 每次调模型前读一次。plan mode 的提醒走这里 —— 它不能活在工具结果里,会被压缩折掉。
+   */
+  readonly dynamicInstructions?: () => readonly string[];
+}
+
+export interface ModelBinding {
+  readonly languageModel: LanguageModel;
+  /** "providerId:modelId",进 system init 消息与 result 消息。 */
+  readonly id: string;
+  readonly contextWindow?: number;
+  readonly maxOutputTokens?: number;
+}
+
+export interface AgentDefinition {
+  /** 同 SDK:模型据此决定派哪个子代理。 */
+  readonly description: string;
+  /** 同 SDK:子代理的 system prompt。 */
+  readonly prompt: string;
+  /** 同 SDK:工具名白名单,从父 query 的 tools 里过滤;省略 = 继承全部(除 subagent 自身)。 */
+  readonly tools?: readonly string[];
+  /** 同 SDK 语义;省略 = 继承父 model。 */
+  readonly model?: ModelBinding;
+  /** 同 SDK。默认 50。 */
+  readonly maxTurns?: number;
 }

@@ -98,17 +98,10 @@ export type {
   ToolResult,
 } from "./tools/index.js";
 
-// Subagent host contract
-export {
-  createSubagentTool,
-  SUBAGENT_ROLES,
-  filterToolsForRole,
-  missingRoleTools,
-  SUBAGENT_MAX_STEPS,
-} from "./subagents/index.js";
+// Subagent host contract(角色已搬 server:modules/subagents/roles.ts)
+export { createSubagentTool } from "./subagents/index.js";
 export type {
   ForkRunner,
   SubagentEventSink,
-  SubagentRole,
   TaskRecord,
 } from "./subagents/index.js";
