@@ -50,19 +50,195 @@ export interface ToolResultOnStream {
   readonly isError: boolean;
 }
 
-/** ToolResultOutput → (text, isError)。Error: 前缀是 runToolCall 的 errorResult 拼的。 */
+/**
+ * part.output → (text, isError)。
+ *
+ * Eva 的工具(toAiTool)execute 返回 ToolResult:{ content: [{type:"text", text}], isError? }。
+ * part.output 是这个对象原样(回灌给模型的 toModelOutput 是另一条路)。
+ * Error: 前缀是 runToolCall 的 errorResult 拼的 —— isError 优先读对象字段,前缀是兜底
+ * (历史消息 / abort 补发只有文本)。
+ */
 const toolResultFromOutput = (
-  output: { type: string; value?: unknown } | { type: "text"; value: string },
-): ToolResultOnStream => {
-  const text =
-    output.type === "text" && typeof (output as { value?: unknown }).value === "string"
-      ? (output as { value: string }).value
-      : JSON.stringify((output as { value?: unknown }).value ?? null);
+  output: unknown,
+): { outputText: string; isError: boolean } => {
+  if (
+    typeof output === "object" && output !== null &&
+    "content" in output && Array.isArray((output as { content?: unknown }).content)
+  ) {
+    const evaResult = output as {
+      content: readonly { readonly type: string; readonly text?: string }[];
+      isError?: boolean;
+    };
+    const text = evaResult.content
+      .map((part2) => (part2.type === "text" ? part2.text ?? "" : ""))
+      .join("");
+    return { outputText: text, isError: evaResult.isError === true || text.startsWith("Error:") };
+  }
+  if (
+    typeof output === "object" && output !== null && "type" in output &&
+    (output as { type?: unknown }).type === "text"
+  ) {
+    const value = (output as { value?: unknown }).value;
+    const text = typeof value === "string" ? value : JSON.stringify(value ?? null);
+    return { outputText: text, isError: text.startsWith("Error:") };
+  }
+  const text = JSON.stringify(output ?? null);
+  return { outputText: text, isError: text.startsWith("Error:") };
+};
+
+/**
+ * runTurn 的流式版:逐消息产出(生成器),终局(toolResults/ttft)由 final() 取。
+ * run-loop 边消费边 yield —— abort 发生在流的中间时,消费者在任一 yield 点叫停。
+ */
+export const runTurnStream = (
+  input: TurnInput,
+): {
+  [Symbol.asyncIterator](): AsyncGenerator<HarnessMessage>;
+  final(): Promise<{ toolResults: readonly ToolResultOnStream[]; ttftMs: number | null }>;
+} => {
+  const collected: ToolResultOnStream[] = [];
+  let ttftMs: number | null = null;
+
+  const inner = (async function* (): AsyncGenerator<HarnessMessage> {
+    // step_start 恒发:先于本次调用的任何其他消息。
+    yield streamEventMessage(
+      { type: "step_start", turn: input.turn },
+      input.parentToolUseID,
+    );
+
+    const textBuffers = new Map<string, string>();
+    const reasoningBuffers = new Map<string, string>();
+    let sawFirstToken = false;
+
+    const assistant = (content: AssistantModelMessage["content"]): HarnessMessage =>
+      assistantMessage({
+        message: { role: "assistant", content },
+        turn: input.turn,
+        parentToolUseID: input.parentToolUseID,
+      });
+
+    for await (const part of input.stream) {
+      if (!sawFirstToken && isTokenPart(part)) {
+        sawFirstToken = true;
+        ttftMs = Date.now() - input.turnStartedAt;
+      }
+
+      switch (part.type) {
+        case "text-delta": {
+          textBuffers.set(part.id, (textBuffers.get(part.id) ?? "") + part.text);
+          if (input.includePartialMessages) {
+            yield streamEventMessage(
+              { type: "text_delta", text: part.text },
+              input.parentToolUseID,
+            );
+          }
+          break;
+        }
+        case "reasoning-delta": {
+          reasoningBuffers.set(part.id, (reasoningBuffers.get(part.id) ?? "") + part.text);
+          if (input.includePartialMessages) {
+            yield streamEventMessage(
+              { type: "reasoning_delta", text: part.text },
+              input.parentToolUseID,
+            );
+          }
+          break;
+        }
+        case "text-start":
+          textBuffers.set(part.id, "");
+          break;
+        case "reasoning-start":
+          reasoningBuffers.set(part.id, "");
+          break;
+        case "text-end":
+          yield assistant([{ type: "text", text: textBuffers.get(part.id) ?? "" }]);
+          textBuffers.delete(part.id);
+          break;
+        case "reasoning-end": {
+          const text = reasoningBuffers.get(part.id) ?? "";
+          if (text.length > 0) {
+            yield assistant([{ type: "reasoning", text, providerOptions: {} }]);
+          }
+          reasoningBuffers.delete(part.id);
+          break;
+        }
+        case "tool-input-start":
+          yield streamEventMessage(
+            {
+              type: "tool_input_start",
+              tool_use_id: part.id,
+              tool_name: part.toolName,
+            },
+            input.parentToolUseID,
+          );
+          break;
+        case "tool-input-delta":
+          yield streamEventMessage(
+            {
+              type: "tool_input_delta",
+              tool_use_id: part.id,
+              delta: part.delta,
+            },
+            input.parentToolUseID,
+          );
+          break;
+        case "tool-input-end":
+          break;
+        case "tool-call":
+          // 到达即发:工具执行(AI SDK 内部)与审批紧随其后。
+          yield assistant([{
+            type: "tool-call",
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            input: (part.input as Record<string, unknown>) ?? {},
+          }]);
+          break;
+        case "tool-result": {
+          const collectedResult = toolResultFromOutput(part.output);
+          collected.push({
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            outputText: collectedResult.outputText,
+            isError: collectedResult.isError,
+          });
+          break;
+        }
+        case "error":
+          // 流级错误:往上抛,run-loop 的 catch 接住走 reactive compact / 终态。
+          throw part.error;
+        case "tool-error": {
+          // ai 层错误(execute 之外):折叠成已收口的结果,状态 error。
+          const collectedResult = toolResultFromOutput({ type: "text", value: `Error: ${part.error instanceof Error ? part.error.message : String(part.error)}` });
+          collected.push({
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            outputText: collectedResult.outputText,
+            isError: true,
+          });
+          break;
+        }
+        default:
+          // start/start-step/finish-step/finish/raw/source/file:
+          // 控制流与终态由调用方(run-loop)处理。
+          break;
+      }
+    }
+
+    // 流中途断在文本块里(abort/异常):缓冲里剩下的文本不丢,补一条 assistant。
+    for (const text of textBuffers.values()) {
+      if (text.length > 0) yield assistant([{ type: "text", text }]);
+    }
+  })();
+
   return {
-    toolCallId: "",
-    toolName: "",
-    outputText: text,
-    isError: text.startsWith("Error:"),
+    [Symbol.asyncIterator]: () => inner,
+    final: async () => {
+      // 驱动到底(调用方可能中途 break);生成器幂等,重复驱动只是快速走完。
+      for await (const _ of inner) {
+        void _;
+      }
+      return { toolResults: collected, ttftMs };
+    },
   };
 };
 
@@ -201,9 +377,22 @@ export const runTurn = async (input: TurnInput): Promise<TurnOutput> => {
         break;
       }
 
+      case "error":
+        // 流级错误:往上抛,调用方的 catch 接住。
+        throw part.error;
+      case "tool-error": {
+        const collectedResult = toolResultFromOutput({ type: "text", value: `Error: ${part.error instanceof Error ? part.error.message : String(part.error)}` });
+        toolResults.push({
+          toolCallId: part.toolCallId,
+          toolName: part.toolName,
+          outputText: collectedResult.outputText,
+          isError: true,
+        });
+        break;
+      }
       default:
-        // start / start-step / finish-step / finish / raw / source / file /
-        // tool-error / abort / error:控制流与终态由调用方(run-loop)处理。
+        // start / start-step / finish-step / finish / raw / source / file:
+        // 控制流与终态由调用方(run-loop)处理。
         break;
     }
   }

@@ -1,3 +1,4 @@
+import { toRunStreamFrames } from "../../helpers/frames.js";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
@@ -166,10 +167,13 @@ const collectEvents = async (
   agent: ReturnType<typeof createAgent>,
 ): Promise<AgentStreamEvent[]> => {
   const events: AgentStreamEvent[] = [];
-  for await (const event of agent.stream({
+  for await (const message of agent.stream({
     messages: [{ role: "user", content: "hi" }],
   })) {
+    for (const event of toRunStreamFrames(message)) {
     events.push(event);
+  
+    }
   }
   return events;
 };

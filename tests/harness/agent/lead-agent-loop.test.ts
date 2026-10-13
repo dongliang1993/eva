@@ -1,3 +1,4 @@
+import { toRunStreamFrames } from "../../helpers/frames.js";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
@@ -84,10 +85,13 @@ const collect = async (
   agent: ReturnType<typeof createAgent>,
 ): Promise<AgentStreamEvent[]> => {
   const events: AgentStreamEvent[] = [];
-  for await (const event of agent.stream({
+  for await (const message of agent.stream({
     messages: [{ role: "user", content: "hi" }],
   })) {
+    for (const event of toRunStreamFrames(message)) {
     events.push(event);
+  
+    }
   }
   return events;
 };
@@ -296,13 +300,16 @@ describe("abort", () => {
     const agent = createAgent({ model });
     const events: AgentStreamEvent[] = [];
 
-    for await (const event of agent.stream({
+    for await (const message of agent.stream({
       messages: [{ role: "user", content: "hi" }],
       abortSignal: controller.signal,
     })) {
+      for (const event of toRunStreamFrames(message)) {
       events.push(event);
       if (event.type === "text-delta" && !controller.signal.aborted) {
         controller.abort();
+      }
+    
       }
     }
 
@@ -358,13 +365,16 @@ describe("abort 在飞工具收口(T26)", () => {
   ): Promise<AgentStreamEvent[]> =>
     (async () => {
       const events: AgentStreamEvent[] = [];
-      for await (const event of agent.stream({
+      for await (const message of agent.stream({
         messages: [{ role: "user", content: "hi" }],
         abortSignal: controller.signal,
       })) {
+        for (const event of toRunStreamFrames(message)) {
         events.push(event);
         if (abortWhen(event) && !controller.signal.aborted) {
           controller.abort();
+        }
+      
         }
       }
       return events;
@@ -402,9 +412,8 @@ describe("abort 在飞工具收口(T26)", () => {
       ).toBe(true);
     }
 
-    const summary = finishes[0]!.toolCalls;
-    expect(summary.map((t) => t.toolCallId)).toEqual(["tc-1", "tc-2"]);
-    expect(summary.every((t) => t.status === "error")).toBe(true);
+    // finish.toolCalls 已退役(全仓零消费):同一信息由补发的 tool-result 帧承担
+    // (上面的 canceled 断言);result 消息的 errors/usage 走 run_events。
   });
 
   it("无在飞工具时 abort(纯文本)→ 不补发任何 tool-result", async () => {
@@ -565,10 +574,13 @@ describe("工具超时(T25 toolTimeout 配置)", () => {
     const events: AgentStreamEvent[] = [];
     await Promise.race([
       (async () => {
-        for await (const event of agent.stream({
+        for await (const message of agent.stream({
           messages: [{ role: "user", content: "hi" }],
         })) {
+          for (const event of toRunStreamFrames(message)) {
           events.push(event);
+        
+          }
         }
       })(),
       new Promise((r) => setTimeout(r, 500)),

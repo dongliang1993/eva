@@ -1,3 +1,4 @@
+import { toRunStreamFrames } from "../../helpers/frames.js";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -74,13 +75,16 @@ describe("T51 durationMs 迁移", () => {
       observer: (event) => observerEvents.push(event)
     });
 
-    for await (const event of agent.stream({
+    for await (const message of agent.stream({
       messages: [{ role: "user", content: "hi" }],
       abortSignal: controller.signal
     })) {
+      for (const event of toRunStreamFrames(message)) {
       events.push(event);
       if (event.type === "tool-call") {
         controller.abort();
+      }
+    
       }
     }
 
@@ -92,11 +96,13 @@ describe("T51 durationMs 迁移", () => {
     if (result?.type !== "tool-result") throw new Error("unreachable");
     expect(result.status).toBe("error");
     expect(result.output).toContain("tool call aborted");
-    expect(typeof result.durationMs).toBe("number"); // 补发帧仍带 durationMs(形状不许改)
-    // 三段计时不伪造:补发帧不带新字段
-    expect(result.toolExecMs).toBeUndefined();
-    expect(result.approvalWaitMs).toBeUndefined();
-    expect(result.queueWaitMs).toBeUndefined();
+    // 补发帧的兼容形状:durationMs = 未分解墙钟(三段之和;此时工具没真跑,和为 0)。
+    // 三段字段随之带 0(「没等、没跑」的 0 语义,tool-timing.test 的 plan gate 同款) ——
+    // T3 起 tool_timing 是 user 消息的字段,补发不再有独立的「只带 durationMs」形态。
+    expect(result.durationMs).toBe(0);
+    expect(result.toolExecMs).toBe(0);
+    expect(result.approvalWaitMs).toBe(0);
+    expect(result.queueWaitMs).toBe(0);
 
     // observer 收到的是 tool_call_abandoned(未分解墙钟),不是 tool_call_completed。
     const abandoned = observerEvents.find((e) => e.type === "tool_call_abandoned");

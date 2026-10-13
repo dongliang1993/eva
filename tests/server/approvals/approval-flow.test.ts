@@ -1,3 +1,4 @@
+import { toRunStreamFrames } from "../../helpers/frames.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
@@ -141,10 +142,13 @@ describe("agent 级审批流", () => {
     });
 
     const events: AgentStreamEvent[] = [];
-    for await (const event of agent.stream({
+    for await (const message of agent.stream({
       messages: [{ role: "user", content: "hi" }]
     })) {
+      for (const event of toRunStreamFrames(message)) {
       events.push(event);
+    
+      }
     }
 
     expect(approvals).toHaveLength(1);
@@ -186,10 +190,13 @@ describe("agent 级审批流", () => {
     });
 
     const events: AgentStreamEvent[] = [];
-    for await (const event of agent.stream({
+    for await (const message of agent.stream({
       messages: [{ role: "user", content: "hi" }]
     })) {
+      for (const event of toRunStreamFrames(message)) {
       events.push(event);
+    
+      }
     }
 
     expect(approve).toHaveBeenCalledTimes(1);
@@ -220,10 +227,13 @@ describe("agent 级回归(只读工具全链路)", () => {
     });
 
     const events: AgentStreamEvent[] = [];
-    for await (const event of agent.stream({
+    for await (const message of agent.stream({
       messages: [{ role: "user", content: "hi" }]
     })) {
+      for (const event of toRunStreamFrames(message)) {
       events.push(event);
+    
+      }
     }
 
     const toolResults = events.filter((e) => e.type === "tool-result");
@@ -413,8 +423,11 @@ describe("bash 只读直放(server 权限链)", () => {
     });
 
     const events: AgentStreamEvent[] = [];
-    for await (const event of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
+    for await (const message of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
+      for (const event of toRunStreamFrames(message)) {
       events.push(event);
+    
+      }
     }
     const toolResults = events.filter((e) => e.type === "tool-result");
     return { asked: fx.asked, approvals: fx.approvals, toolResults };

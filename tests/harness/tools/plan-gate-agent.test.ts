@@ -1,3 +1,4 @@
+import { toRunStreamFrames } from "../../helpers/frames.js";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -98,8 +99,11 @@ describe("plan gate agent 集成（同 run 进出）", () => {
       }
     });
 
-    for await (const _ of agent.stream({ messages: [{ role: "user", content: "plan then code" }] })) {
+    for await (const message of agent.stream({ messages: [{ role: "user", content: "plan then code" }] })) {
+      for (const _ of toRunStreamFrames(message)) {
       void _;
+    
+      }
     }
 
     expect(writes).toEqual([handle.planRelPath, "src/a.ts"]);

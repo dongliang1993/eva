@@ -4,6 +4,7 @@
  * T43 语义:超限不再裁 toolSet,而是首步 active core tools + tool_search;
  * 模型用 tool_search 激活后,下一 step 的 provider tools 并入被激活工具。
  */
+import { toRunStreamFrames } from "../../helpers/frames.js";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -84,8 +85,11 @@ describe("agent 接线", () => {
       observer: (e) => telemetry.push(e),
     });
 
-    for await (const _ of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
+    for await (const message of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
+      for (const _ of toRunStreamFrames(message)) {
       void _;
+    
+      }
     }
 
     expect(captured.calls).toHaveLength(2);
@@ -117,8 +121,11 @@ describe("agent 接线", () => {
       observer: (e) => telemetry.push(e),
     });
 
-    for await (const _ of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
+    for await (const message of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
+      for (const _ of toRunStreamFrames(message)) {
       void _;
+    
+      }
     }
 
     expect(captured.calls[0]).toHaveLength(32);

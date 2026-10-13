@@ -1,3 +1,4 @@
+import { toRunStreamFrames } from "../../helpers/frames.js";
 import { describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
@@ -21,7 +22,9 @@ describe("runtime contracts", () => {
       prompts.push(o.prompt); return response(prompts.length === 1 ? "length" : "stop");
     } }), maxSteps: 5 });
     const events = [];
-    for await (const event of agent.stream({ messages: [{ role: "user", content: "TASK: preserve constraints" }] })) events.push(event);
+    for await (const message of agent.stream({ messages: [{ role: "user", content: "TASK: preserve constraints" }] })) {
+      for (const event of toRunStreamFrames(message)) events.push(event);
+    }
     expect(prompts).toHaveLength(2);
     expect(JSON.stringify(prompts[1])).toContain("TASK: preserve constraints");
     expect(JSON.stringify(prompts[1])).toContain("partial");
@@ -40,7 +43,10 @@ describe("runtime contracts", () => {
       ] }),
     } : response("stop") }) });
     const extra = tool({ name: "mutate", description: "mutate", inputSchema: z.object({}), execute: execute });
-    for await (const _ of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [extra] })) {}
+    for await (const message of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [extra] })) {
+      for (const _ of toRunStreamFrames(message)) {
+      }
+    }
     expect(execute).not.toHaveBeenCalled();
     expect(canUseTool).toHaveBeenCalledOnce();
   });
@@ -49,7 +55,9 @@ describe("runtime contracts", () => {
     const sameName = tool({ name: "same", description: "same", inputSchema: z.object({}), execute: async () => textResult("ok") });
     const agent = createAgent({ tools: [sameName], model: new MockLanguageModelV4({ doStream: async () => response("stop") }) });
     const events = [];
-    for await (const event of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [sameName] })) events.push(event);
+    for await (const message of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [sameName] })) {
+      for (const event of toRunStreamFrames(message)) events.push(event);
+    }
     expect(events).toEqual([{ type: "error", message: "Duplicate tool name: same" }]);
   });
 
@@ -75,7 +83,10 @@ describe("runtime contracts", () => {
       content: `history-${index}: ${"x".repeat(80)}`,
     }));
 
-    for await (const _ of agent.stream({ messages })) {}
+    for await (const message of agent.stream({ messages })) {
+      for (const _ of toRunStreamFrames(message)) {
+      }
+    }
 
     expect(telemetry).toContainEqual(expect.objectContaining({
       type: "context_compacted",

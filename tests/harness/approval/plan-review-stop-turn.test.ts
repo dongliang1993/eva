@@ -1,3 +1,4 @@
+import { toRunStreamFrames } from "../../helpers/frames.js";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -116,8 +117,11 @@ const runOnce = async (decision: PlanReviewDecision["outcome"]) => {
     canUseTool: async () => permissionForDecision(decision),
   });
 
-  for await (const _ of agent.stream({ messages: [{ role: "user", content: "exit" }] })) {
+  for await (const message of agent.stream({ messages: [{ role: "user", content: "exit" }] })) {
+    for (const _ of toRunStreamFrames(message)) {
     void _;
+  
+    }
   }
 
   return counter.calls;

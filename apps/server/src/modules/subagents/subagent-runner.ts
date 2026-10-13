@@ -9,6 +9,8 @@ import {
 } from "@eva/harness";
 import type { AppDatabase } from "../../db/index.js";
 import { DrizzleMessageRepository } from "../sessions/index.js";
+import { toRunStreamFrames } from "../runs/index.js";
+import type { RunAgentStreamEvent, RunStreamEvent } from "@eva/shared";
 import type { AgentFactory, ResolvedAgent, WorkspaceContext } from "../runs/index.js";
 import { SubagentTaskRepository } from "./subagent-task-repository.js";
 import { SubagentRecorder } from "./subagent-recorder.js";
@@ -59,20 +61,26 @@ export class SubagentRunner {
         ...(this.options.workspace ? { workspace: this.options.workspace } : {}),
         extraTools: [...(this.options.extraTools ?? [])],
       });
-      for await (const event of agent.stream({
+      for await (const message of agent.stream({
         messages: [{ role: "user", content: prompt }],
         abortSignal: signal,
         agentID: taskId,
         onToolExecution: this.options.toolExecutionForTask?.(taskId),
       })) {
-        recorder.push(event);
-        this.options.onSubagentEvent?.({ taskId, parentToolCallId, subagentType, description, event });
-        if (event.type === "finish") {
-          finished = true;
-          text = event.text;
-          if (event.finishReason !== "stop") error = `Subagent ended: ${event.finishReason}`;
+        // 一条消息流 → 帧:recorder 与 onSubagentEvent 吃帧(信封不变),
+        // 子代理的终态从 result 消息读。
+        for (const frame of toRunStreamFrames(message)) {
+          recorder.push(frame);
+          if (isAgentStreamEvent(frame)) {
+            this.options.onSubagentEvent?.({ taskId, parentToolCallId, subagentType, description, event: frame });
+          }
+          if (frame.type === "finish") {
+            finished = true;
+            text = frame.text;
+            if (frame.finishReason !== "stop") error = `Subagent ended: ${frame.finishReason}`;
+          }
+          if (frame.type === "error") error = frame.message;
         }
-        if (event.type === "error") error = event.message;
       }
       if (!finished && !error) error = "Subagent stream ended without a terminal outcome";
     } catch (cause) {
@@ -86,3 +94,16 @@ export class SubagentRunner {
     return { text };
   };
 }
+
+
+/** agent 域帧判别(subagent_update 信封只装 agent 域帧)。 */
+const isAgentStreamEvent = (event: RunStreamEvent): event is RunAgentStreamEvent =>
+  event.type === "text-delta" ||
+  event.type === "reasoning-delta" ||
+  event.type === "tool-input-start" ||
+  event.type === "tool-input-delta" ||
+  event.type === "tool-call" ||
+  event.type === "tool-result" ||
+  event.type === "step-start" ||
+  event.type === "finish" ||
+  event.type === "error";

@@ -380,7 +380,7 @@ describe("run observability(T49)harness 事件", () => {
       observer: (event) => events.push(event)
     });
 
-    const result = await agent.invoke({
+    const result = await agent.collectResult({
       messages: [{ role: "user", content: "hi" }],
 
     });
@@ -412,7 +412,7 @@ describe("run observability(T49)harness 事件", () => {
         throw new Error("observer exploded");
       }
     });
-    const result = await agent.invoke({ messages: [{ role: "user", content: "hi" }] });
+    const result = await agent.collectResult({ messages: [{ role: "user", content: "hi" }] });
     expect(result.text).toContain("still alive");
 
     const received: string[] = [];

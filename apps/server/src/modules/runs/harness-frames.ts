@@ -125,6 +125,13 @@ const toolResultFrames = (
               toolExecMs: timing.exec_ms,
               approvalWaitMs: timing.approval_wait_ms,
               queueWaitMs: timing.queue_wait_ms,
+              // abort 补发:durationMs 是未分解墙钟(等三段之和),历史徽章的兼容字段。
+              ...(timing.aborted
+                ? {
+                    durationMs:
+                      timing.approval_wait_ms + timing.queue_wait_ms + timing.exec_ms,
+                  }
+                : {}),
             }
           : {}),
       });
@@ -167,9 +174,11 @@ const resultFrames = (
   }
 
   if (message.subtype === "interrupted" || message.subtype === "error_max_turns") {
+    // 文案进 finish.text(与旧 finishRun 一致):max-steps 带步数与续跑路径,interrupted 带已产出文本。
+    const [firstError] = message.errors;
     return [{
       type: "finish",
-      text: "",
+      text: firstError ?? "",
       toolCalls: [],
       finishReason: message.subtype === "interrupted" ? "aborted" : "max-steps",
       ...(usage !== undefined ? { usage } : {}),
@@ -177,7 +186,8 @@ const resultFrames = (
     }];
   }
 
-  // error_during_execution:error 帧先给失败层,finish 收口(SSE 在 finish 后关)。
+  // error_during_execution:只发 error 帧(与旧行为一致 —— error 之后 SSE 直接 end,
+  // 不再补 finish;recorder 的 finishReason 由 error 帧置位)。
   const [firstError] = message.errors;
   return [
     {
@@ -186,14 +196,6 @@ const resultFrames = (
       ...(message.failure_layer !== undefined
         ? { failureLayer: message.failure_layer }
         : {}),
-    },
-    {
-      type: "finish",
-      text: "",
-      toolCalls: [],
-      finishReason: "error",
-      ...(usage !== undefined ? { usage } : {}),
-      durationMs: message.duration_ms,
     },
   ];
 };

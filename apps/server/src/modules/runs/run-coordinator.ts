@@ -25,6 +25,7 @@ import type { WorkspaceStore } from "../workspaces/index.js";
 import type { RunEventStream } from "../../transports/sse/event-stream.js";
 import { runRequestSchema, type RunRequest } from "../../types/runs.js";
 import { AssistantMessageRecorder, type RecordedAssistantRun } from "./assistant-message-recorder.js";
+import { toRunStreamFrames } from "./harness-frames.js";
 import { createRunPermissions, type RunPermissions } from "./run-permissions.js";
 import { runStatusFor } from "./run-repository.js";
 import {
@@ -173,17 +174,19 @@ export class Coordinator {
       this.deps.memoryAutomation?.commitRetrieval(run.id, assembled.memoryRetrieval);
       progress.failureLayer = undefined;
 
-      // ④ 开流 ⑤ 流式
+      // ④ 开流 ⑤ 流式 —— 一条消息流 → SSE 帧;recorder 吃同一批帧(投影不变)。
       this.openStream(run, stream, log, progress);
       const recorder = this.startRecording(run, assembled, progress);
-      for await (const event of assembled.resolved.agent.stream({
+      for await (const message of assembled.resolved.agent.stream({
         messages: context.modelMessages,
         onToolExecution: recordToolExecution(this.deps.db, run.id, "main"),
         abortSignal: run.controller.signal,
         additionalTools: [...assembled.additionalTools],
       })) {
-        recorder.record(event);
-        run.emit(event);
+        for (const frame of toRunStreamFrames(message)) {
+          recorder.record(frame);
+          run.emit(frame);
+        }
       }
 
       run.emit({ type: "end", finishReason: this.settle(run, progress) });

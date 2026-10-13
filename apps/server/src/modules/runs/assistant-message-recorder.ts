@@ -6,6 +6,7 @@ import type {
   EvaUIMessage,
   PlanReviewDecision,
   RunAgentStreamEvent,
+  RunStreamEvent,
   StreamFinishReason,
   StreamTokenUsage
 } from "@eva/shared";
@@ -62,8 +63,13 @@ export class AssistantMessageRecorder {
     this.position = options.initialPosition;
   }
 
-  /** 收一帧,并按边界/节流决定是否落一次检查点。 */
-  record(event: RunAgentStreamEvent): void {
+  /** 收一帧,并按边界/节流决定是否落一次检查点。参数是 RunStreamEvent:server 域帧(approval_*)静默忽略。 */
+  record(event: RunStreamEvent): void {
+    if (!isAgentStreamEvent(event)) return;
+    this.recordAgent(event);
+  }
+
+  private recordAgent(event: RunAgentStreamEvent): void {
     this.push(event);
     if (isCheckpointBoundary(event) || Date.now() - this.lastCheckpointAt >= CHECKPOINT_INTERVAL_MS) {
       this.checkpoint();
@@ -76,7 +82,10 @@ export class AssistantMessageRecorder {
     if (event.type === "finish") {
       this.finishReason = event.finishReason;
       this.usage = event.usage;
-      this.streamError = undefined;
+      // error 收口的 streamError 保留(前面的 error 帧写的);finish 只把别的终态清掉。
+      if (event.finishReason !== "error") {
+        this.streamError = undefined;
+      }
       this.failureLayer = event.finishReason === "max-steps" ? "orchestration" : undefined;
       return;
     }
@@ -166,3 +175,16 @@ export class AssistantMessageRecorder {
   }
 
 }
+
+
+/** agent 域帧判别(SSE 协议的 harness 侧子集)。 */
+const isAgentStreamEvent = (event: RunStreamEvent): event is RunAgentStreamEvent =>
+  event.type === "text-delta" ||
+  event.type === "reasoning-delta" ||
+  event.type === "tool-input-start" ||
+  event.type === "tool-input-delta" ||
+  event.type === "tool-call" ||
+  event.type === "tool-result" ||
+  event.type === "step-start" ||
+  event.type === "finish" ||
+  event.type === "error";

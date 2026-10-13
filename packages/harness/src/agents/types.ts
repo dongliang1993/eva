@@ -1,9 +1,10 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 import type {
-  RunAgentStreamEvent,
   StreamFinishReason,
   StreamTokenUsage,
 } from "@eva/shared";
+
+import type { HarnessMessage } from "../query/types.js";
 
 import type { ContextWindowPolicyOptions } from "../context/policy.js";
 import type { AgentModel } from "../models/agent-model.js";
@@ -66,17 +67,13 @@ export interface AgentRunResult {
   toolCalls: AgentToolCallResult[];
 }
 
-export type AgentStreamEvent = RunAgentStreamEvent;
-
 export interface Agent {
-  /**
-   * 跑完整一轮并返回终态结果(内部就是把 stream 消费干)。
-   * 目前只有测试在用;S7 的子代理会用它(子代理不需要流式,只要 final answer)。
-   * 若 S7 落地后仍无生产调用方,那时再删。
-   */
-  invoke(input: AgentRunInput): Promise<AgentRunResult>;
-  stream(input: AgentRunInput): AsyncIterable<AgentStreamEvent>;
+  /** 流式输出:一条 HarnessMessage 流(SSE 帧与轨迹页都从它翻)。 */
+  stream(input: AgentRunInput): AsyncGenerator<HarnessMessage>;
 }
+
+/** SSE 帧域的旧别名(shared 的 RunAgentStreamEvent);T3 收尾随 observer-bridge 删。 */
+export type AgentStreamEvent = import("@eva/shared").RunAgentStreamEvent;
 
 /** 每次模型调用的 call settings(AI SDK 语义:不属于 model 实例,属于调用)。 */
 export interface AgentCallSettings {

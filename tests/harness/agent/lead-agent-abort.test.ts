@@ -1,3 +1,4 @@
+import { toRunStreamFrames } from "../../helpers/frames.js";
 import { describe, expect, it } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
@@ -37,10 +38,13 @@ describe("Agent stream protocol + abort", () => {
     const agent = createAgent({ model: slowStreamModel(5) });
     const events: AgentStreamEvent[] = [];
 
-    for await (const event of agent.stream({
+    for await (const message of agent.stream({
       messages: [{ role: "user", content: "hi" }]
     })) {
+      for (const event of toRunStreamFrames(message)) {
       events.push(event);
+    
+      }
     }
 
     const finishes = events.filter(isFinish);
@@ -63,13 +67,16 @@ describe("Agent stream protocol + abort", () => {
     const agent = createAgent({ model: slowStreamModel(60) });
     const events: AgentStreamEvent[] = [];
 
-    for await (const event of agent.stream({
+    for await (const message of agent.stream({
       messages: [{ role: "user", content: "hi" }],
       abortSignal: controller.signal
     })) {
+      for (const event of toRunStreamFrames(message)) {
       events.push(event);
       if (event.type === "text-delta" && !controller.signal.aborted) {
         controller.abort();
+      }
+    
       }
     }
 

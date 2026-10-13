@@ -27,3 +27,4 @@ export {
   planGateDeniedMessage,
 } from "./tool-policy.js";
 export { createRunPermissions, type RunPermissions } from "./run-permissions.js";
+export { toRunStreamFrames } from "./harness-frames.js";

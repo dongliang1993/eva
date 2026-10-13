@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { RunAgentStreamEvent, EvaUIMessage } from "@eva/shared";
+import type { RunAgentStreamEvent, RunStreamEvent, EvaUIMessage } from "@eva/shared";
 import { UiMessageBuilder } from "@eva/shared";
 
 import type { IMessageRepository } from "../../db/repositories/types.js";
@@ -44,7 +44,13 @@ export class SubagentRecorder {
   }
 
   /** 收进一个子代理裸事件(信封已在调用方解开)。 */
-  push(raw: RunAgentStreamEvent): void {
+  /** 参数放宽到 RunStreamEvent:server 域帧静默忽略(与主链 recorder 同一纪律)。 */
+  push(raw: RunStreamEvent): void {
+    if (!isAgentStreamEvent(raw)) return;
+    this.pushAgent(raw);
+  }
+
+  private pushAgent(raw: RunAgentStreamEvent): void {
     if (this.finished) return;
     this.assistantBuilder.push(raw);
   }
@@ -77,3 +83,16 @@ export class SubagentRecorder {
     return { briefId: this.briefId, assistantId: this.assistantId };
   }
 }
+
+
+/** agent 域帧判别(SSE 协议的 harness 侧子集)。 */
+const isAgentStreamEvent = (event: RunStreamEvent): event is RunAgentStreamEvent =>
+  event.type === "text-delta" ||
+  event.type === "reasoning-delta" ||
+  event.type === "tool-input-start" ||
+  event.type === "tool-input-delta" ||
+  event.type === "tool-call" ||
+  event.type === "tool-result" ||
+  event.type === "step-start" ||
+  event.type === "finish" ||
+  event.type === "error";

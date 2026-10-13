@@ -9,7 +9,7 @@ import type {
   TurnCompleteMessage,
   UserMessage,
 } from "../../../packages/harness/src/query/types.js";
-import { toRunStreamFrames } from "../../../apps/server/src/modules/runs/harness-frames.js";
+import { toRunStreamFrames } from "../../../apps/server/src/modules/runs/index.js";
 
 /** plan §3.5 映射表逐行验收:给定 HarnessMessage,产出的帧序列逐帧钉死。 */
 
@@ -218,10 +218,9 @@ describe("toRunStreamFrames(plan §3.5 映射表)", () => {
     expect(maxTurns).toMatchObject({ type: "finish", finishReason: "max-steps" });
   });
 
-  it("result error_during_execution → error 帧(带 failureLayer)+ finish(error)", () => {
+  it("result error_during_execution → 只发 error 帧(带 failureLayer;之后 SSE 直接 end)", () => {
     expect(toRunStreamFrames(executionErrorResult)).toEqual([
       { type: "error", message: "context length exceeded", failureLayer: "context" },
-      expect.objectContaining({ type: "finish", finishReason: "error" }),
     ]);
   });
 });

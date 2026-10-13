@@ -1,11 +1,11 @@
 import {
   stepCountIs,
   streamText,
-  type ModelMessage,
   type SystemModelMessage,
+  type TextStreamPart,
   type ToolSet,
 } from "ai";
-import type { ToolTimingMutable } from "../query/tool-call.js";
+import type { ModelMessage, Tool } from "ai";
 import { buildToolPipeline } from "../tools/tool-pipeline.js";
 import { buildAgentSystemPrompt } from "../prompts/prompt-builder.js";
 import {
@@ -26,7 +26,6 @@ import {
   estimateMessagesTokens,
   type RuntimeCompactResult,
 } from "../context/runtime-compact.js";
-import { coalesceTextDeltas } from "./coalesce-stream.js";
 import {
   resolveToolExposure,
   TOOL_COUNT_SAFETY_LIMIT,
@@ -34,26 +33,29 @@ import {
 import {
   createPrepareStep,
 } from "./context-strategy.js";
-import { mapStreamPart, type ToolCallClock, type ToolTimingState } from "./stream-part-mapper.js";
-import {
-  abortInFlightToolCalls,
-  finishRun,
-  isAbortError,
-  type FinishReason,
-} from "./finish-run.js";
 import {
   buildMaxOutputRecovery,
   planReactiveRecovery,
   shouldRecoverMaxOutput,
 } from "./recovery-policy.js";
+import {
+  resultMessage,
+  toContractTokenUsage,
+  toToolTimingRecord,
+} from "../query/messages.js";
+import { finishTurn, runTurnStream, type ToolResultOnStream } from "../query/turn.js";
+import type { HarnessMessage } from "../query/types.js";
 import type {
-  CreateAgentOptions,
+  Agent as AgentInterface,
   AgentRunInput,
   AgentRunResult,
-  AgentStreamEvent,
-  AgentToolCallResult,
-  Agent as AgentInterface,
+  CreateAgentOptions,
 } from "./types.js";
+import { coalesceStreamEvents } from "./coalesce-stream.js";
+import { isAbortError } from "./finish-run.js";
+import type { ToolTimingMutable } from "../query/tool-call.js";
+import { resolveFinalText } from "./finish-run.js";
+import { abortInFlightMessages } from "./abort-in-flight.js";
 
 const TOOL_DISCOVERY_NOTICE: SystemModelMessage = {
   role: "system",
@@ -148,34 +150,38 @@ class RunLoopAgent implements AgentInterface {
     };
   }
 
-  async invoke(input: AgentRunInput): Promise<AgentRunResult> {
+  /** 消费流取 result(测试辅助;invoke 已删 —— 生产调用方只有 stream)。 */
+  async collectResult(input: AgentRunInput): Promise<AgentRunResult> {
     let result: AgentRunResult | undefined;
-    for await (const event of this.run(input)) {
-      if (event.type === "finish") {
-        result = {
-          text: event.text,
-          toolCalls: event.toolCalls as AgentToolCallResult[],
-        };
+    for await (const message of this.run(input)) {
+      if (message.type === "result" && message.subtype === "success") {
+        result = { text: message.result, toolCalls: [] };
       }
     }
     if (!result) throw new Error("Agent finished without a result.");
     return result;
   }
 
-  async *stream(input: AgentRunInput): AsyncIterable<AgentStreamEvent> {
+  async *stream(input: AgentRunInput): AsyncGenerator<HarnessMessage> {
     try {
-      yield* coalesceTextDeltas(this.run(input));
+      // text/reasoning 的 stream_event 合并窗口;其余消息原样透传。
+      yield* coalesceStreamEvents(this.run(input));
     } catch (error) {
       if (!isAbortError(error)) {
-        yield {
-          type: "error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        };
+        yield resultMessage.failure({
+          subtype: "error_during_execution",
+          errors: [error instanceof Error ? error.message : "Unknown error"],
+          numTurns: 0,
+          durationMs: 0,
+          usage: { input_tokens: 0, output_tokens: 0 },
+          stopReason: null,
+          parentToolUseID: null,
+        });
       }
     }
   }
 
-  private async *run(input: AgentRunInput): AsyncGenerator<AgentStreamEvent> {
+  private async *run(input: AgentRunInput): AsyncGenerator<HarnessMessage> {
     const runStart = Date.now();
     const pipeline = buildToolPipeline({
       ...this.options,
@@ -185,7 +191,6 @@ class RunLoopAgent implements AgentInterface {
     });
     try {
       const { toolDiscovery, catalog: resolvedTools } = pipeline;
-      const toolTiming = timingAdapter(pipeline.timings);
       const exposure = resolveToolExposure(
         resolvedTools,
         input.activeToolNames,
@@ -200,10 +205,8 @@ class RunLoopAgent implements AgentInterface {
           limit: TOOL_COUNT_SAFETY_LIMIT,
         });
       }
-      const toolSet: ToolSet = pipeline.toolSet as ToolSet;
+      const toolSet: Record<string, Tool> = pipeline.toolSet;
       const maxSteps = input.maxSteps ?? this.maxSteps;
-      const clock: ToolCallClock = new Map();
-      const toolCalls: AgentToolCallResult[] = [];
 
       const initial = this.buildMessages(input);
       let messages = initial.messages;
@@ -223,14 +226,7 @@ class RunLoopAgent implements AgentInterface {
       const turnStartTime = runStart;
       const attemptByStep = new Map<number, number>();
       let currentStepAttempt = 1;
-      let firstTokenEmitted = false;
       let streamingStepIndex = 0;
-
-
-      const finish = (finishReason: FinishReason, text: string) => finishRun({
-        text, toolCalls, finishReason, usage: totalTokens, runStart, stepsUsed, maxSteps,
-        turn: { index: 0, startTime: turnStartTime }, emit: event => this.emit(event),
-      });
 
       this.emit({ type: "agent_run_start" });
       this.emit({ type: "turn_started", turnIndex: 0 });
@@ -238,7 +234,15 @@ class RunLoopAgent implements AgentInterface {
       for (; ;) {
         if (maxSteps - stepsUsed <= 0) {
           this.emitTransition(stepsUsed, "max_steps");
-          yield finish("max-steps", continuedText);
+          yield resultMessage.failure({
+            subtype: "error_max_turns",
+            errors: [resolveFinalText(continuedText, "max-steps", maxSteps)],
+            numTurns: stepsUsed,
+            durationMs: Date.now() - runStart,
+            usage: toContractTokenUsage(totalTokens),
+            stopReason: null,
+            parentToolUseID: null,
+          });
           return;
         }
 
@@ -331,7 +335,6 @@ class RunLoopAgent implements AgentInterface {
             attemptByStep.set(stepsUsed, attempt);
             currentStepAttempt = attempt;
             streamingStepIndex = stepsUsed;
-            firstTokenEmitted = false;
             this.emit({ type: "step_started", step: stepsUsed, attempt });
             this.emit({ type: "llm_call_start", step: stepsUsed, attempt });
           },
@@ -342,95 +345,75 @@ class RunLoopAgent implements AgentInterface {
         let text = "";
         let aborted = false;
         let streamError: unknown;
+        let turnToolResults: readonly ToolResultOnStream[] = [];
+        let ttftMs: number | null = null;
+        // 在飞台账(流可见性):tool-call 块已见、result 未见的调用。
+        // 与 execute 是否开跑无关 —— AI SDK 可能在 abort 后跳过执行,
+        // 但帧的前端已经收到 tool-call,必须有收口。
+        const pendingToolCalls = new Map<string, string>();
 
+        // 边翻边发:runTurnStream 逐消息产出,run-loop 逐条 yield ——
+        // abort 发生在流的中间时,消费者在任一 yield 点都能叫停。
+        const abortableStream = abortAwareStream(
+          result.stream as AsyncIterable<TextStreamPart<ToolSet>>,
+          input.abortSignal,
+        );
+        const turnStream = runTurnStream({
+          turn: stepsUsed,
+          parentToolUseID: null,
+          includePartialMessages: true,
+          stream: abortableStream,
+          turnStartedAt: stepStartTime,
+        });
         try {
-          for await (const part of result.stream) {
+          let firstTokenEmitted = false;
+          for await (const message of turnStream) {
+            if (message.type === "stream_event" && message.event.type === "text_delta") {
+              text += message.event.text;
+              if (!firstTokenEmitted) {
+                firstTokenEmitted = true;
+                this.emit({
+                  type: "model_first_token",
+                  step: streamingStepIndex,
+                  attempt: currentStepAttempt,
+                  durationMs: Date.now() - stepStartTime,
+                });
+              }
+            }
+            if (message.type === "assistant") {
+              for (const part of message.message.content) {
+                if (typeof part === "object" && part !== null && part.type === "tool-call") {
+                  pendingToolCalls.set(part.toolCallId, part.toolName);
+                  if (!firstTokenEmitted) {
+                    firstTokenEmitted = true;
+                    // TTFT 的判定与旧循环一致:首条 text/reasoning/tool-call 增量都算。
+                    this.emit({
+                      type: "model_first_token",
+                      step: streamingStepIndex,
+                      attempt: currentStepAttempt,
+                      durationMs: Date.now() - stepStartTime,
+                    });
+                  }
+                  // observer 双轨:tool_call_started(轨迹页骨架;T3 步骤 4 换 run-trajectory)。
+                  this.emit({
+                    type: "tool_call_started",
+                    step: stepsUsed,
+                    toolName: part.toolName,
+                    toolCallId: part.toolCallId,
+                    input: (part.input as Record<string, unknown>) ?? {},
+                  });
+                }
+              }
+            }
+            yield message;
+            // yield 恢复后 signal 已置位:流消费停在中间,收口走 aborted 路径。
             if (input.abortSignal?.aborted) {
               aborted = true;
               break;
             }
-
-            if (part.type === "start-step") {
-              yield { type: "step-start", step: stepsUsed };
-              continue;
-            }
-
-            if (
-              !firstTokenEmitted &&
-              (part.type === "text-delta" ||
-                part.type === "reasoning-delta" ||
-                part.type === "tool-input-start" ||
-                part.type === "tool-call")
-            ) {
-              firstTokenEmitted = true;
-              this.emit({
-                type: "model_first_token",
-                step: streamingStepIndex,
-                attempt: currentStepAttempt,
-                durationMs: Date.now() - stepStartTime,
-              });
-            }
-
-            if (part.type === "finish-step") {
-              this.emit({
-                type: "model_call_completed",
-                step: streamingStepIndex,
-                attempt: currentStepAttempt,
-              });
-            }
-
-            if (part.type === "text-delta") {
-              text += part.text;
-            }
-
-            const mapped = mapStreamPart(part, clock, toolTiming);
-
-            if (mapped.error !== undefined) {
-              streamError = mapped.error;
-              break;
-            }
-            if (mapped.aborted === true) {
-              aborted = true;
-              break;
-            }
-
-            if (mapped.toolCall !== undefined) {
-              toolCalls.push(mapped.toolCall);
-              this.emit({
-                type: "tool_call_completed",
-                step: stepsUsed,
-                toolName: mapped.toolCall.toolName,
-                toolCallId: mapped.toolCall.toolCallId ?? "",
-                status: mapped.toolCall.status,
-                durationMs: mapped.toolCall.durationMs ?? 0,
-                output: mapped.toolCall.output,
-                ...(mapped.toolCall.toolExecMs !== undefined
-                  ? { toolExecMs: mapped.toolCall.toolExecMs }
-                  : {}),
-                ...(mapped.toolCall.approvalWaitMs !== undefined
-                  ? { approvalWaitMs: mapped.toolCall.approvalWaitMs }
-                  : {}),
-                ...(mapped.toolCall.queueWaitMs !== undefined
-                  ? { queueWaitMs: mapped.toolCall.queueWaitMs }
-                  : {}),
-                ...(mapped.toolCall.execAborted !== undefined
-                  ? { execAborted: mapped.toolCall.execAborted }
-                  : {}),
-              });
-            }
-
-            if (mapped.event !== undefined) {
-              if (mapped.event.type === "tool-call") {
-                this.emit({
-                  type: "tool_call_started",
-                  step: stepsUsed,
-                  toolName: mapped.event.toolName,
-                  toolCallId: mapped.event.toolCallId,
-                  input: mapped.event.input,
-                });
-              }
-              yield mapped.event;
-            }
+          }
+          if (input.abortSignal?.aborted) {
+            aborted = true;
           }
         } catch (error) {
           if (isAbortError(error)) {
@@ -438,6 +421,48 @@ class RunLoopAgent implements AgentInterface {
           } else {
             streamError = error;
           }
+        }
+        // runTurnStream 的终局(toolResults/ttft)在生成器收尾取。
+        const turnFinal = await turnStream.final();
+        turnToolResults = turnFinal.toolResults;
+        ttftMs = turnFinal.ttftMs;
+        for (const result of turnToolResults) {
+          pendingToolCalls.delete(result.toolCallId);
+          // observer 双轨:tool_call_completed(与旧 mapper 的汇总同源)。
+          this.emit({
+            type: "tool_call_completed",
+            step: stepsUsed,
+            toolName: result.toolName,
+            toolCallId: result.toolCallId,
+            status: result.isError ? "error" : "success",
+            output: result.outputText,
+          });
+        }
+        this.emit({
+          type: "model_call_completed",
+          step: streamingStepIndex,
+          attempt: currentStepAttempt,
+        });
+
+        if (aborted) {
+          // abort:已产出的消息在流里发过了;这里补在飞工具的取消结果,再 result。
+          yield* abortInFlightMessages({
+            timings: pipeline.timings,
+            pendingToolCalls,
+            step: stepsUsed,
+            emit: (event) => this.emit(event),
+          });
+          yield resultMessage.failure({
+            subtype: "interrupted",
+            // 契约 interrupted 只有 errors:本轮已产出的文本放第一条(frames 的 finish.text 读它)。
+            errors: [continuedText + text],
+            numTurns: stepsUsed,
+            durationMs: Date.now() - runStart,
+            usage: toContractTokenUsage(totalTokens),
+            stopReason: null,
+            parentToolUseID: null,
+          });
+          return;
         }
 
         if (streamError !== undefined) {
@@ -491,19 +516,16 @@ class RunLoopAgent implements AgentInterface {
             durationMs: Date.now() - turnStartTime,
             status: "error",
           });
-          yield { type: "error", message: errorMessage, failureLayer: compactCandidate ? "context" : "model" };
-          return;
-        }
-
-        if (aborted) {
-          yield* abortInFlightToolCalls({
-            clock,
-            toolCalls,
-            step: stepsUsed,
-            emit: (event) => this.emit(event),
+          yield resultMessage.failure({
+            subtype: "error_during_execution",
+            errors: [errorMessage],
+            ...(compactCandidate ? { failureLayer: "context" as const } : { failureLayer: "model" as const }),
+            numTurns: stepsUsed,
+            durationMs: Date.now() - runStart,
+            usage: toContractTokenUsage(totalTokens),
+            stopReason: null,
+            parentToolUseID: null,
           });
-
-          yield finish("aborted", continuedText + text);
           return;
         }
 
@@ -522,6 +544,22 @@ class RunLoopAgent implements AgentInterface {
         stepsUsed += 1;
         messages = [...messages, ...await result.responseMessages];
         const finishReason = await result.finishReason;
+
+        // 终局两条由 finishTurn 补(usage/stopReason 这时才有)。
+        const toolTimingRecord = toToolTimingRecord(pipeline.timings);
+        for (const message of finishTurn({
+          turn: stepsUsed - 1,
+          parentToolUseID: null,
+          ttftMs,
+          durationMs: Date.now() - stepStartTime,
+          stopReason: finishReason,
+          usage: toContractTokenUsage(stepUsage ?? ZERO_TOKEN_USAGE),
+          toolResults: turnToolResults,
+          toolTiming: toolTimingRecord,
+        })) {
+          yield message;
+        }
+        pipeline.timings.clear();
 
         if (pipeline.tookInterruptSignal() !== true &&
           step.toolCalls.length > 0 && step.toolResults.length === step.toolCalls.length) {
@@ -557,7 +595,69 @@ class RunLoopAgent implements AgentInterface {
         if (isMaxSteps) {
           this.emitTransition(stepsUsed, "max_steps");
         }
-        yield finish(isMaxSteps ? "max-steps" : "stop", continuedText + text);
+        const finalText = resolveFinalText(
+          continuedText + text,
+          isMaxSteps ? "max-steps" : "stop",
+          maxSteps,
+        );
+        if (isMaxSteps) {
+          // observer 双轨:assistant_message / agent_run_end / turn_completed(轨迹页)。
+          this.emit({
+            type: "assistant_message",
+            text: finalText,
+            toolCallCount: 0,
+          });
+          this.emit({
+            type: "turn_completed",
+            turnIndex: 0,
+            durationMs: Date.now() - turnStartTime,
+            status: "aborted",
+          });
+          this.emit({
+            type: "agent_run_end",
+            totalDurationMs: Date.now() - runStart,
+            stepCount: stepsUsed,
+            totalTokenUsage: totalTokens,
+            toolCallCount: 0,
+            failureLayer: "orchestration",
+          });
+          yield resultMessage.failure({
+            subtype: "error_max_turns",
+            errors: [finalText],
+            numTurns: stepsUsed,
+            durationMs: Date.now() - runStart,
+            usage: toContractTokenUsage(totalTokens),
+            stopReason: finishReason,
+            parentToolUseID: null,
+          });
+        } else {
+          this.emit({
+            type: "assistant_message",
+            text: finalText,
+            toolCallCount: 0,
+          });
+          this.emit({
+            type: "turn_completed",
+            turnIndex: 0,
+            durationMs: Date.now() - turnStartTime,
+            status: "completed",
+          });
+          this.emit({
+            type: "agent_run_end",
+            totalDurationMs: Date.now() - runStart,
+            stepCount: stepsUsed,
+            totalTokenUsage: totalTokens,
+            toolCallCount: 0,
+          });
+          yield resultMessage.success({
+            result: finalText,
+            numTurns: stepsUsed,
+            durationMs: Date.now() - runStart,
+            usage: toContractTokenUsage(totalTokens),
+            stopReason: finishReason,
+            parentToolUseID: null,
+          });
+        }
         return;
       }
     } finally {
@@ -568,26 +668,24 @@ class RunLoopAgent implements AgentInterface {
 }
 
 /**
- * runToolCall 的计时 Map → mapper 的 ToolTimingState 适配。
- * take 一次性:取走快照即删(没跑过的 toolCallId 返回全 0,plan gate 语义)。
+ * 包一层 abort 感知:signal 置位后底层流不再被拉取(下一次 next() 直接 done)。
+ * runTurn 不认识 abort part —— 它只翻译;「该停了」由这层表达。
  */
-const timingAdapter = (
-  timings: Map<string, ToolTimingMutable>,
-): ToolTimingState => ({
-  record: () => {
-    // runToolCall 已直接写 Map;record 不会再被调(适配只为 mapper 的 take)。
-  },
-  take: (toolCallId: string) => {
-    const fallback: ToolTimingMutable = {
-      approval_wait_ms: 0, queue_wait_ms: 0, exec_ms: 0, aborted: false,
-    };
-    const timing = timings.get(toolCallId) ?? fallback;
-    timings.delete(toolCallId);
+const abortAwareStream = <T>(
+  stream: AsyncIterable<T>,
+  signal: AbortSignal | undefined,
+): AsyncIterable<T> => ({
+  [Symbol.asyncIterator]() {
+    const iterator = stream[Symbol.asyncIterator]();
     return {
-      approvalWaitMs: timing.approval_wait_ms,
-      queueWaitMs: timing.queue_wait_ms,
-      execMs: timing.exec_ms,
-      execAborted: timing.aborted,
+      next: async () => {
+        if (signal?.aborted) {
+          return { done: true, value: undefined } as IteratorResult<T>;
+        }
+        return iterator.next();
+      },
+      return: (value) => (iterator.return ? iterator.return(value) : Promise.resolve({ done: true, value })),
+      throw: (reason) => (iterator.throw ? iterator.throw(reason) : Promise.reject(reason)),
     };
   },
 });
