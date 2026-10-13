@@ -22,7 +22,9 @@
 ## 代价
 
 编排文件会随能力增加而变长。缓解办法是**只让顺序留在里面** —— 一旦某段细节需要
-分支判断，它就该搬进被调用的能力里。见 [0010](./0010-run-scope-owns-lifecycle.md) 与
+分支判断，它就该搬进被调用的能力里（harness 侧的对应决定见
+[0013](./0013-harness-api-mirrors-agent-sdk.md)：query() 的主体只有顺序）。
+见 [0010](./0010-run-scope-owns-lifecycle.md) 与
 `docs/current/run-lifecycle.md`。
 
 ## 什么情况下推翻

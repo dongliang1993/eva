@@ -61,8 +61,9 @@ describe("isOverflowing(T36 真实 usage 驱动)", () => {
 
 describe("createPrepareStep 接线(T36 getter 取上一步真值)", () => {
   it("getter 返回超阈值真值 → 触发 compact(onCompacted 被调)", async () => {
+    // context-strategy 已从 agents/ 上提到 context/(T4 目录迁移)。
     const { createPrepareStep } = await import(
-      "../../../packages/harness/src/agents/context-strategy.js"
+      "../../../packages/harness/src/context/context-strategy.js"
     );
 
     // getter 模拟 agent.onStepEnd 存的上一步真实 inputTokens(120k > 阈值 108k)
@@ -88,8 +89,9 @@ describe("createPrepareStep 接线(T36 getter 取上一步真值)", () => {
   });
 
   it("getter 返回 undefined(首步)→ 退回估算兜底", async () => {
+    // context-strategy 已从 agents/ 上提到 context/(T4 目录迁移)。
     const { createPrepareStep } = await import(
-      "../../../packages/harness/src/agents/context-strategy.js"
+      "../../../packages/harness/src/context/context-strategy.js"
     );
 
     let compactedCount = 0;

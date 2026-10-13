@@ -10,9 +10,8 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { createAgent } from "../../../packages/harness/src/agents/agent.js";
-import type { AgentTelemetryEvent } from "../../../packages/harness/src/agents/observer.js";
-import { TOOL_COUNT_SAFETY_LIMIT } from "../../../packages/harness/src/agents/tool-safety-net.js";
+import { query } from "../../../packages/harness/src/query/query.js";
+import { TOOL_COUNT_SAFETY_LIMIT } from "../../../packages/harness/src/tools/tool-safety-net.js";
 import { textResult, tool, type PipelineTool } from "../../../packages/harness/src/tools/index.js";
 
 const usage = {
@@ -72,23 +71,23 @@ describe("agent 接线", () => {
 
   it("45 tools without activeToolNames: first step core only, search activates MCP for step 2", async () => {
     const captured = { calls: [] as string[][] };
-    const telemetry: AgentTelemetryEvent[] = [];
     const tools = toolMap(45, [
       "read_file",
       "write",
       "bash",
       "mcp__github__create_issue",
     ]);
-    const agent = createAgent({
-      model: captureModel(captured),
-      tools: [...tools.values()],
-      observer: (e) => telemetry.push(e),
+    const run = query({
+      prompt: [{ role: "user", content: "hi" }],
+      options: {
+        model: { languageModel: captureModel(captured), id: "mock:model" },
+        tools: [...tools.values()],
+      },
     });
 
-    for await (const message of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
+    for await (const message of run) {
       for (const _ of toRunStreamFrames(message)) {
-      void _;
-    
+        void _;
       }
     }
 
@@ -103,32 +102,29 @@ describe("agent 接线", () => {
     expect(captured.calls[1]).toContain("mcp__github__create_issue");
     expect(captured.calls[1]).toContain("tool_search");
 
-    const degraded = telemetry.find((e) => e.type === "tool_count_degraded");
-    expect(degraded).toMatchObject({
-      type: "tool_count_degraded",
-      totalCount: tools.size + 1, // createAgent 注入的 tool_search 也在 catalog 里
-      keptCount: 4,
-      limit: TOOL_COUNT_SAFETY_LIMIT,
-    });
+    // observer 的 tool_count_degraded 已删:同一信息由 system/init 消息的
+    // tools(全量)与首步 active 集(上面对 captured.calls 的断言)承担。
+    // attempt 计数已随 observer 删;同一信息无消息流替代。
   });
 
   it("30 tools without activeToolNames: no event, provider gets the full set", async () => {
     const captured = { calls: [] as string[][] };
-    const telemetry: AgentTelemetryEvent[] = [];
-    const agent = createAgent({
-      model: captureModel(captured),
-      tools: [...toolMap(30, ["read_file"]).values()],
-      observer: (e) => telemetry.push(e),
+    const run = query({
+      prompt: [{ role: "user", content: "hi" }],
+      options: {
+        model: { languageModel: captureModel(captured), id: "mock:model" },
+        tools: [...toolMap(30, ["read_file"]).values()],
+      },
     });
 
-    for await (const message of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
+    for await (const message of run) {
       for (const _ of toRunStreamFrames(message)) {
-      void _;
-    
+        void _;
       }
     }
 
+    // 30 + query() 注入的 tool_search:provider 拿到全量(无 discovery 裁剪)。
     expect(captured.calls[0]).toHaveLength(32);
-    expect(telemetry.some((e) => e.type === "tool_count_degraded")).toBe(false);
+    // observer 的 tool_count_degraded 已删:未降级语义由首步全量工具断言承担。
   });
 });

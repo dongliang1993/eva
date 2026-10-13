@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
-import { createAgent } from "../../../packages/harness/src/agents/agent.js";
-import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
+import { query } from "../../../packages/harness/src/index.js";
+import type { Options } from "../../../packages/harness/src/index.js";
+import type { HarnessMessage } from "../../../packages/harness/src/index.js";
 import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 
 const usage = {
@@ -60,18 +61,23 @@ const writeTool = (executed: string[]) =>
     }
   });
 
-const collect = async (agent: ReturnType<typeof createAgent>): Promise<AgentStreamEvent[]> => {
-  const events: AgentStreamEvent[] = [];
-  for await (const message of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
+const collect = async (options: Options): Promise<AgentStreamEventLike[]> => {
+  const events: AgentStreamEventLike[] = [];
+  for await (const message of query({
+    prompt: [{ role: "user", content: "hi" }],
+    options: { ...options, includePartialMessages: true },
+  }) as AsyncGenerator<HarnessMessage>) {
     for (const event of toRunStreamFrames(message)) {
-    events.push(event);
-  
+      events.push(event as AgentStreamEventLike);
     }
   }
   return events;
 };
 
-describe("子代理审批分支 (T17)", () => {
+/** agent 域帧(与旧 AgentStreamEvent 同形;SSE 帧判别)。 */
+type AgentStreamEventLike = ReturnType<typeof toRunStreamFrames>[number];
+
+describe("子代理审批分支", () => {
   let db: AppDatabase;
 
   beforeEach(() => {
@@ -141,12 +147,11 @@ describe("子代理审批分支 (T17)", () => {
         return { behavior: "allow" as const };
       };
 
-      const agent = createAgent({
-        model: dangerousCallModel(),
+      const agent = {
+        model: { languageModel: dangerousCallModel(), id: "openai:test" },
         tools: [writeTool(executed)],
-        canUseTool: subagentCanUseTool
-      });
-
+        canUseTool: subagentCanUseTool,
+      };
       const events = await collect(agent);
 
       expect(executed).toEqual(["a.txt"]);
@@ -181,11 +186,11 @@ describe("子代理审批分支 (T17)", () => {
           : { behavior: "deny" as const, message: "[Approval Denied]" };
       };
 
-      const agent = createAgent({
-        model: dangerousCallModel(),
+      const agent = {
+        model: { languageModel: dangerousCallModel(), id: "openai:test" },
         tools: [writeTool(executed)],
-        canUseTool: mainCanUseTool
-      });
+        canUseTool: mainCanUseTool,
+      };
 
       const eventsPromise = collect(agent);
       // 等 pending 出现后模拟用户批准

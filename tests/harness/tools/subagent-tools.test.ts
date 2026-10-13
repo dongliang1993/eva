@@ -1,86 +1,139 @@
 import { describe, expect, it } from "vitest";
+import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
-import { createSubagentTool } from "../../../packages/harness/src/subagents/subagent-tool.js";
+import { createSubagentToolDefinition } from "../../../packages/harness/src/query/subagent-tool.js";
 import { toToolSet } from "../../../packages/harness/src/tools/tool.js";
 import { runToolText } from "../../helpers/run-tool.js";
 
-/** 把一个 PipelineTool 的 execute 拉出来可单独调用(测试不用跑 Agent)。 */
-const exec =
-  (name: string, tools: readonly { name: string; execute: unknown }[]) =>
-  (input: Record<string, unknown>): Promise<string> => {
-    const t = tools.find((entry) => entry.name === name);
-    if (!t) throw new Error(`tool ${name} missing execute`);
-    return runToolText(
-      t as Parameters<typeof runToolText>[0],
-      input,
-    );
-  };
+const usage = {
+  inputTokens: { total: 5, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+  outputTokens: { total: 5, text: undefined, reasoning: undefined },
+  raw: undefined,
+};
+
+/** 文本收尾的最小子代理模型。 */
+const textModel = (text: string): MockLanguageModelV4 =>
+  new MockLanguageModelV4({
+    doStream: async () => ({
+      stream: simulateReadableStream({
+        chunks: [
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "1" },
+          { type: "text-delta", id: "1", delta: text },
+          { type: "text-end", id: "1" },
+          { type: "finish", finishReason: "stop", usage },
+        ],
+      }),
+    }),
+  });
+
+/** explorer 子代理的父 options(agents 非空 → subagent 工具注册)。 */
+const optionsWithExplorer = (
+  languageModel: MockLanguageModelV4 = textModel("ok"),
+) => ({
+  model: { languageModel, id: "mock:model" },
+  agents: {
+    explorer: {
+      description: "读文档并摘要",
+      prompt: "You are an explorer.",
+    },
+  } as const,
+});
 
 describe("subagent 原语 (S7 push 模型)", () => {
   it("只暴露一个工具 —— 没有 join/查询接口(轮询的结构性根源)", () => {
-    const tools = createSubagentTool({
-      runFork: async () => ({ text: "" })
+    // createSubagentTool(runFork) 已删:同一信息由 createSubagentToolDefinition
+    // (内置 subagent 工具,单工具名 "subagent")承担。
+    const tool = createSubagentToolDefinition({
+      options: optionsWithExplorer(),
+      parentPrompt: [],
     });
 
-    expect(tools.map((t) => t.name)).toEqual(["subagent"]);
+    expect(tool?.name).toBe("subagent");
+  });
+
+  it("agents 为空 → 不注册(undefined)", () => {
+    const tool = createSubagentToolDefinition({
+      options: { model: { languageModel: textModel("ok"), id: "mock:model" }, agents: {} },
+      parentPrompt: [],
+    });
+
+    expect(tool).toBeUndefined();
   });
 
   it("等待子代理完成后返回结论", async () => {
-    const tools = createSubagentTool({
-      runFork: async ({ prompt }) => ({ text: `FINAL: ${prompt}` })
+    // 子代理模型把 prompt 原样收进文本 → 父拿到子代理的最终 result 文本。
+    const childModel = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "1" },
+            { type: "text-delta", id: "1", delta: "FINAL: digest README" },
+            { type: "text-end", id: "1" },
+            { type: "finish", finishReason: "stop", usage },
+          ],
+        }),
+      }),
     });
-    expect(await exec("subagent", tools)({ description: "读 README", prompt: "digest README" }))
-      .toBe("FINAL: digest README");
+    const tool = createSubagentToolDefinition({
+      options: optionsWithExplorer(childModel),
+      parentPrompt: [],
+    });
+    expect(tool).toBeDefined();
+    if (tool === undefined) throw new Error("unreachable");
+
+    expect(
+      await runToolText(
+        tool,
+        { description: "读 README", prompt: "digest README", subagent: "explorer" },
+      ),
+    ).toBe("FINAL: digest README");
   });
 
   it("description 必填 —— 缺了就报错(否则卡片无法分辨)", async () => {
-    const tools = createSubagentTool({
-      runFork: async () => ({ taskId: "t_x", text: "" })
+    const tool = createSubagentToolDefinition({
+      options: optionsWithExplorer(),
+      parentPrompt: [],
     });
+    expect(tool).toBeDefined();
+    if (tool === undefined) throw new Error("unreachable");
 
-    const out = await exec("subagent", tools)({ prompt: "做点什么" });
+    // zod min(1) 校验失败 → execute 兜成 Error: 文本(不抛)。
+    const out = await runToolText(tool, {
+      prompt: "做点什么",
+      subagent: "explorer",
+    } as Record<string, unknown>);
 
     expect(out).toContain("Error:");
   });
 
-  it("缺省角色是 explorer", async () => {
-    let got = "";
-    const tools = createSubagentTool({
-      runFork: async ({ subagentType, taskId }) => {
-        got = subagentType;
-        return { taskId, text: "" };
-      }
+  it("未知 subagent 类型 → Error: 文本(isError)", async () => {
+    const tool = createSubagentToolDefinition({
+      options: optionsWithExplorer(),
+      parentPrompt: [],
+    });
+    expect(tool).toBeDefined();
+    if (tool === undefined) throw new Error("unreachable");
+
+    const out = await runToolText(tool, {
+      description: "查一下",
+      prompt: "p",
+      subagent: "nonexistent",
     });
 
-    await exec("subagent", tools)({ description: "查一下", prompt: "p" });
-
-    expect(got).toBe("explorer");
-  });
-
-  it("fork 的 parentToolCallId 用 SDK 的 toolUseID(卡片归位的键)", async () => {
-    let got = "";
-    const tools = createSubagentTool({
-      runFork: async ({ parentToolCallId, taskId }) => {
-        got = parentToolCallId;
-        return { taskId, text: "" };
-      }
-    });
-
-    const tool = tools[0]!;
-    await runToolText(
-      tool,
-      { description: "查一下", prompt: "p" },
-      { toolUseID: "call_00_REAL" },
-    );
-
-    expect(got).toBe("call_00_REAL");
+    expect(out).toContain("Error:");
+    expect(out).toContain("Unknown subagent type: nonexistent");
   });
 
   it("进 toolSet 后名字是 subagent(供 SDK 装配)", () => {
-    const tools = createSubagentTool({
-      runFork: async () => ({ text: "" })
+    const tool = createSubagentToolDefinition({
+      options: optionsWithExplorer(),
+      parentPrompt: [],
     });
+    expect(tool).toBeDefined();
+    if (tool === undefined) throw new Error("unreachable");
 
-    expect(Object.keys(toToolSet([...tools]))).toEqual(["subagent"]);
+    expect(Object.keys(toToolSet([tool]))).toEqual(["subagent"]);
   });
 });

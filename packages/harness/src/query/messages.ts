@@ -1,6 +1,5 @@
 import type { ModelMessage } from "ai";
 
-import type { TokenUsage as InternalTokenUsage } from "../agents/observer.js";
 import type {
   AssistantMessage,
   CompactBoundaryMessage,
@@ -144,23 +143,6 @@ export const resultMessage = {
     parent_tool_use_id: input.parentToolUseID,
   }),
 };
-
-/** agents/observer 的 TokenUsage → 契约 TokenUsage(snake_case,字段名照 SDK)。 */
-export const toContractTokenUsage = (
-  usage: InternalTokenUsage,
-): TokenUsage => ({
-  input_tokens: usage.promptTokens,
-  output_tokens: usage.completionTokens,
-  ...(usage.cachedInputTokens !== undefined
-    ? { cache_read_input_tokens: usage.cachedInputTokens }
-    : {}),
-  ...(usage.cacheWriteTokens !== undefined
-    ? { cache_creation_input_tokens: usage.cacheWriteTokens }
-    : {}),
-  ...(usage.reasoningTokens !== undefined
-    ? { reasoning_tokens: usage.reasoningTokens }
-    : {}),
-});
 
 /** tool-call 的 Map 计时 → UserMessage.tool_timing 的 record(键 = tool_use_id)。 */
 export const toToolTimingRecord = (

@@ -28,7 +28,7 @@ const toErrorMessage = (error: unknown): string =>
  * 进程级的 MCP 连接注册表。
  *
  * 三条硬规则（`docs/plans/r2/T9-mcp.md` §2.2）：
- * 1. 连接不发生在 createAgent 里 —— stdio 要 spawn 进程，而 agent 是 per-run 构造的；
+ * 1. 连接不发生在 Options 装配里 —— stdio 要 spawn 进程，而 agent 是 per-run 构造的；
  * 2. 一个 server 挂掉不影响其它人，也绝不让对话失败；
  * 3. 调用有超时（在 McpServerClient 里）。
  */

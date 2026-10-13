@@ -5,7 +5,7 @@ import {
   buildMaxOutputRecovery,
   planReactiveRecovery,
   shouldRecoverMaxOutput,
-} from "../../../packages/harness/src/agents/recovery-policy.js";
+} from "../../../packages/harness/src/context/recovery-policy.js";
 
 describe("Agent recovery policy", () => {
   it("reactive compact 只为上下文超限且尚未恢复过的工作集制定重试", () => {
@@ -34,7 +34,8 @@ describe("Agent recovery policy", () => {
   });
 
   it("max-output 恢复保留累计正文并追加固定续写消息", () => {
-    const policy = resolveContextWindowPolicy({ maxOutputRecoveries: 1 });
+    // 字段随 T4 上移改名:maxOutputRecoveries → maxOutputRecoveryLimit(policy 唯一命名)。
+    const policy = resolveContextWindowPolicy({ maxOutputRecoveryLimit: 1 });
     expect(
       shouldRecoverMaxOutput({
         finishReason: "length",

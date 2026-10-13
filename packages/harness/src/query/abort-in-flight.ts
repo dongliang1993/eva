@@ -1,21 +1,19 @@
-import { resultMessage, userMessage } from "../query/messages.js";
-import type { HarnessMessage, ToolTiming } from "../query/types.js";
-import type { ToolTimingMutable } from "../query/tool-call.js";
+import { userMessage } from "./messages.js";
+import type { HarnessMessage, ToolTiming } from "./types.js";
+import type { ToolTimingMutable } from "./tool-call.js";
 import { TOOL_CALL_ABORTED_OUTPUT } from "../tools/tool.js";
-import type { AgentObserver } from "./observer.js";
 
 /**
  * abort 时对在飞工具的补发:把已发起、未收口的调用确定性补成取消结果。
  *
- * 在飞台账 = timings 里还留着的条目(正常路径 tool-result 时被 finishTurn 消费后
- * clear;没清掉的就是「已派发、没收口」)。不伪造三段计时:只标 aborted。
+ * 在飞台账 = 流可见性(tool-call 块已见、result 未见)。不伪造三段计时:
+ * 只标 aborted —— server 的 tool_call_abandoned 从 user.tool_timing[id].aborted 推。
  */
 export interface AbortInFlightInput {
   readonly timings: ReadonlyMap<string, ToolTimingMutable>;
   /** 在飞台账(流可见性):tool-call 块已见、result 未见。key=id,value=toolName。 */
   readonly pendingToolCalls: ReadonlyMap<string, string>;
   readonly step: number;
-  readonly emit: AgentObserver;
 }
 
 export function* abortInFlightMessages(
@@ -31,15 +29,6 @@ export function* abortInFlightMessages(
 
   for (const [toolCallId, toolName] of input.pendingToolCalls) {
     const timing = input.timings.get(toolCallId);
-    input.emit({
-      type: "tool_call_abandoned",
-      step: input.step,
-      toolName,
-      toolCallId,
-      waitedMs: timing
-        ? timing.approval_wait_ms + timing.queue_wait_ms + timing.exec_ms
-        : 0,
-    });
     toolResults.push({
       toolCallId,
       toolName,
@@ -72,5 +61,3 @@ export function* abortInFlightMessages(
     parentToolUseID: null,
   });
 }
-
-export { resultMessage };

@@ -1,5 +1,6 @@
 import { createRunLoopAgent } from "../agents/run-loop.js";
 import type { RunLoopOptions } from "../agents/run-loop.js";
+// RunLoopOptions 的 callSettings/limits/model 字段映射在下方 agentOptions。
 import type { AgentModel } from "../models/agent-model.js";
 import { buildAgentSystemPrompt } from "../prompts/prompt-builder.js";
 import { createSubagentToolDefinition } from "./subagent-tool.js";
@@ -23,7 +24,9 @@ export function query(params: {
   // 工具名唯一:同步抛(契约)。重复名让 toolSet 静默覆盖彼此 —— 必须在入口拒绝。
   const names = new Set<string>();
   for (const tool of options.tools ?? []) {
-    if (names.has(tool.name)) throw new Error(`Duplicate tool name: ${tool.name}`);
+    if (names.has(tool.name)) {
+      throw new Error(`Duplicate tool name: ${tool.name}`);
+    }
     names.add(tool.name);
   }
 
@@ -43,40 +46,40 @@ export function query(params: {
     ],
     ...(options.systemPrompt !== undefined
       ? {
-          systemPrompt:
-            typeof options.systemPrompt === "string"
-              ? options.systemPrompt
-              : options.systemPrompt.join("\n\n"),
-        }
+        systemPrompt:
+          typeof options.systemPrompt === "string"
+            ? options.systemPrompt
+            : options.systemPrompt.join("\n\n"),
+      }
       : { systemPrompt: buildAgentSystemPrompt() }),
     maxSteps: options.maxTurns ?? DEFAULT_MAX_TURNS,
     ...(options.canUseTool !== undefined ? { canUseTool: options.canUseTool } : {}),
     ...(options.hooks !== undefined ? { hooks: options.hooks } : {}),
     ...(options.callSettings !== undefined
       ? {
-          callSettings: {
-            ...(options.callSettings.temperature !== undefined
-              ? { temperature: options.callSettings.temperature }
-              : {}),
-            ...(options.callSettings.maxOutputTokens !== undefined
-              ? { maxOutputTokens: options.callSettings.maxOutputTokens }
-              : {}),
-          },
-        }
+        callSettings: {
+          ...(options.callSettings.temperature !== undefined
+            ? { temperature: options.callSettings.temperature }
+            : {}),
+          ...(options.callSettings.maxOutputTokens !== undefined
+            ? { maxOutputTokens: options.callSettings.maxOutputTokens }
+            : {}),
+        },
+      }
       : {}),
     ...(options.limits?.toolTimeoutMs !== undefined
       ? {
-          toolTimeout: {
-            toolMs: options.limits.toolTimeoutMs.defaultMs,
-            ...(options.limits.toolTimeoutMs.byTool !== undefined
-              ? {
-                  tools: Object.fromEntries(
-                    Object.entries(options.limits.toolTimeoutMs.byTool),
-                  ),
-                }
-              : {}),
-          },
-        }
+        toolTimeout: {
+          toolMs: options.limits.toolTimeoutMs.defaultMs,
+          ...(options.limits.toolTimeoutMs.byTool !== undefined
+            ? {
+              tools: Object.fromEntries(
+                Object.entries(options.limits.toolTimeoutMs.byTool),
+              ),
+            }
+            : {}),
+        },
+      }
       : {}),
     ...(options.limits?.readOnlyConcurrency !== undefined
       ? { readOnlyConcurrency: options.limits.readOnlyConcurrency }
@@ -87,20 +90,16 @@ export function query(params: {
     ...(options.model.contextWindow !== undefined ||
       options.model.maxOutputTokens !== undefined
       ? {
-          contextPolicy: {
-            ...(options.model.contextWindow !== undefined
-              ? { contextWindow: options.model.contextWindow }
-              : {}),
-            ...(options.model.maxOutputTokens !== undefined
-              ? { reservedOutputTokens: options.model.maxOutputTokens }
-              : {}),
-          },
-        }
+        contextPolicy: {
+          ...(options.model.contextWindow !== undefined
+            ? { contextWindow: options.model.contextWindow }
+            : {}),
+          ...(options.model.maxOutputTokens !== undefined
+            ? { reservedOutputTokens: options.model.maxOutputTokens }
+            : {}),
+        },
+      }
       : {}),
-    modelIdentity: {
-      providerId: options.model.id,
-      modelId: options.model.id,
-    },
   };
   const agent = createRunLoopAgent(agentOptions);
 
@@ -113,7 +112,7 @@ export function query(params: {
         typeof options.systemPrompt === "string"
           ? options.systemPrompt
           : (options.systemPrompt ?? []).join("\n\n") ||
-            buildAgentSystemPrompt(),
+          buildAgentSystemPrompt(),
       parentToolUseID: null,
     });
 

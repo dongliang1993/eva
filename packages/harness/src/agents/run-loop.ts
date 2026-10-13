@@ -9,53 +9,40 @@ import type { ModelMessage, Tool } from "ai";
 import { buildToolPipeline } from "../tools/tool-pipeline.js";
 import { buildAgentSystemPrompt } from "../prompts/prompt-builder.js";
 import {
-  ZERO_TOKEN_USAGE,
   addTokenUsage,
   readTokenUsage,
-  type AgentObserver,
-  type AgentTelemetryEvent,
-  type ContextCompactionReason,
-  type LoopTransitionReason,
+  toContractTokenUsage,
+  ZERO_TOKEN_USAGE,
   type TokenUsage,
-} from "./observer.js";
+} from "../query/usage.js";
 import {
   resolveContextWindowPolicy,
   type ContextWindowPolicy,
 } from "../context/policy.js";
-import {
-  estimateMessagesTokens,
-  type RuntimeCompactResult,
-} from "../context/runtime-compact.js";
+import { estimateMessagesTokens } from "../context/runtime-compact.js";
 import {
   resolveToolExposure,
   TOOL_COUNT_SAFETY_LIMIT,
-} from "./tool-safety-net.js";
-import {
-  createPrepareStep,
-} from "./context-strategy.js";
+} from "../tools/tool-safety-net.js";
+import { createPrepareStep } from "../context/context-strategy.js";
 import {
   buildMaxOutputRecovery,
   planReactiveRecovery,
   shouldRecoverMaxOutput,
-} from "./recovery-policy.js";
+} from "../context/recovery-policy.js";
 import {
+  compactBoundaryMessage,
   resultMessage,
-  toContractTokenUsage,
   toToolTimingRecord,
 } from "../query/messages.js";
 import { finishTurn, runTurnStream, type ToolResultOnStream } from "../query/turn.js";
 import type { HarnessMessage } from "../query/types.js";
-import type {
-  Agent as AgentInterface,
-  AgentRunInput,
-  AgentRunResult,
-  CreateAgentOptions,
-} from "./types.js";
-import { coalesceStreamEvents } from "./coalesce-stream.js";
-import { isAbortError } from "./finish-run.js";
+import type { AgentRunInput, CreateAgentOptions } from "./types.js";
+import { coalesceStreamEvents } from "../query/coalesce-stream.js";
+import { isAbortError } from "../query/finish-run.js";
 import type { ToolTimingMutable } from "../query/tool-call.js";
-import { resolveFinalText } from "./finish-run.js";
-import { abortInFlightMessages } from "./abort-in-flight.js";
+import { resolveFinalText } from "../query/finish-run.js";
+import { abortInFlightMessages } from "../query/abort-in-flight.js";
 
 const TOOL_DISCOVERY_NOTICE: SystemModelMessage = {
   role: "system",
@@ -63,13 +50,6 @@ const TOOL_DISCOVERY_NOTICE: SystemModelMessage = {
     "Tool discovery mode is active: only core tools are enabled initially. " +
     "Use `tool_search` to find and activate additional tools; activated tools become callable from the next model step.",
 };
-
-const formatContext = (
-  context: Record<string, unknown> | undefined,
-): string | undefined =>
-  !context || Object.keys(context).length === 0
-    ? undefined
-    : `Additional context:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``;
 
 const resolveSystemMessage = (
   prompt: string | SystemModelMessage | undefined,
@@ -85,83 +65,34 @@ const resolveSystemMessage = (
 
 export type RunLoopOptions = CreateAgentOptions;
 
-class RunLoopAgent implements AgentInterface {
+/**
+ * turn 循环本体(query() 的引擎)。输出只有 HarnessMessage 一条流:
+ * 轨迹页的 run_events 由 server 的 run-trajectory 从消息推(fire-and-forget
+ * observer 已删);compact_boundary 在 compact 发生点产出。
+ */
+class RunLoopAgent {
   private readonly systemMessage: SystemModelMessage;
   private readonly maxSteps: number;
-  private readonly observer: AgentObserver | undefined;
   private readonly contextPolicy: ContextWindowPolicy;
 
   constructor(private readonly options: RunLoopOptions) {
     this.systemMessage = resolveSystemMessage(options.systemPrompt);
     this.maxSteps = options.maxSteps ?? 5;
-    this.observer = options.observer;
     this.contextPolicy = resolveContextWindowPolicy(options.contextPolicy);
-  }
-
-  private emit(event: AgentTelemetryEvent): void {
-    try {
-      this.observer?.(event);
-    } catch {
-    }
-  }
-
-  private emitCompaction(
-    step: number,
-    reason: ContextCompactionReason,
-    result: RuntimeCompactResult,
-  ): void {
-    this.emit({
-      type: "context_compacted",
-      step,
-      reason,
-      messageCountBefore: result.messageCountBefore,
-      messageCountAfter: result.messageCountAfter,
-      estimatedTokensBefore: result.estimatedTokensBefore,
-      estimatedTokensAfter: result.estimatedTokensAfter,
-    });
-  }
-
-  private emitTransition(
-    step: number,
-    reason: LoopTransitionReason,
-    attempt?: number,
-  ): void {
-    this.emit({
-      type: "loop_transition",
-      step,
-      reason,
-      ...(attempt !== undefined ? { attempt } : {}),
-    });
   }
 
   private buildMessages(input: AgentRunInput): {
     readonly messages: ModelMessage[];
     readonly prefixMessageCount: number;
   } {
-    const context = formatContext(input.context);
     return {
-      messages: [
-        ...(context ? [{ role: "user", content: context } as ModelMessage] : []),
-        ...input.messages,
-      ],
-      // Only the synthetic per-run context is immutable. Session history must
-      // remain eligible for compaction, including on the first model step.
-      prefixMessageCount: context ? 1 : 0,
+      messages: [...input.messages],
+      // 会话历史从第一条起就参与 compact;没有合成前缀。
+      prefixMessageCount: 0,
     };
   }
 
   /** 消费流取 result(测试辅助;invoke 已删 —— 生产调用方只有 stream)。 */
-  async collectResult(input: AgentRunInput): Promise<AgentRunResult> {
-    let result: AgentRunResult | undefined;
-    for await (const message of this.run(input)) {
-      if (message.type === "result" && message.subtype === "success") {
-        result = { text: message.result, toolCalls: [] };
-      }
-    }
-    if (!result) throw new Error("Agent finished without a result.");
-    return result;
-  }
-
   async *stream(input: AgentRunInput): AsyncGenerator<HarnessMessage> {
     try {
       // text/reasoning 的 stream_event 合并窗口;其余消息原样透传。
@@ -185,28 +116,14 @@ class RunLoopAgent implements AgentInterface {
     const runStart = Date.now();
     const pipeline = buildToolPipeline({
       ...this.options,
-      onToolExecution: input.onToolExecution,
-      // server 注册的 hooks 优先于 onToolExecution 的翻译(同时给时二选一)。
+      // server 注册的 hooks(权限/台账)在这条链上。
       ...(input.hooks !== undefined ? { hooks: input.hooks } : {}),
       tools: [...(this.options.tools ?? []), ...(input.additionalTools ?? [])],
       ...(input.agentID !== undefined ? { agentID: input.agentID } : {}),
     });
     try {
       const { toolDiscovery, catalog: resolvedTools } = pipeline;
-      const exposure = resolveToolExposure(
-        resolvedTools,
-        input.activeToolNames,
-        toolDiscovery,
-        input.preferredToolNames,
-      );
-      if (exposure.degraded) {
-        this.emit({
-          type: "tool_count_degraded",
-          totalCount: exposure.totalCount,
-          keptCount: exposure.keptCount,
-          limit: TOOL_COUNT_SAFETY_LIMIT,
-        });
-      }
+      const exposure = resolveToolExposure(resolvedTools, toolDiscovery);
       const toolSet: Record<string, Tool> = pipeline.toolSet;
       const maxSteps = input.maxSteps ?? this.maxSteps;
 
@@ -225,17 +142,13 @@ class RunLoopAgent implements AgentInterface {
       let stepStartTime = runStart;
       let lastStepInputTokens: number | undefined;
 
-      const turnStartTime = runStart;
-      const attemptByStep = new Map<number, number>();
-      let currentStepAttempt = 1;
-      let streamingStepIndex = 0;
-
-      this.emit({ type: "agent_run_start" });
-      this.emit({ type: "turn_started", turnIndex: 0 });
+      // compact 发生点收集器:每次循环开头先冲掉上一圈内发生的 compact_boundary。
+      const compacted: HarnessMessage[] = [];
 
       for (; ;) {
+        // 上一圈的 compact 在本圈消息前发出(压缩发生在 prepareStep,即调模型之前)。
+        for (const message of compacted.splice(0)) yield message;
         if (maxSteps - stepsUsed <= 0) {
-          this.emitTransition(stepsUsed, "max_steps");
           yield resultMessage.failure({
             subtype: "error_max_turns",
             errors: [resolveFinalText(continuedText, "max-steps", maxSteps)],
@@ -261,9 +174,16 @@ class RunLoopAgent implements AgentInterface {
           systemPrompt: this.systemMessage,
           prefixMessageCount,
           onPreparedMessages: (prepared) => { messages = prepared; },
+          // compact 发生点:消息流的 compact_boundary 在这里产出(server 从它翻 context_compacted)。
           onCompacted: (result) => {
-            this.emitCompaction(stepsUsed, "proactive_loop_compact", result);
-            this.emitTransition(stepsUsed, "proactive_loop_compact");
+            compacted.push(compactBoundaryMessage({
+              trigger: "auto",
+              preTokens: result.estimatedTokensBefore,
+              postTokens: result.estimatedTokensAfter,
+              preMessages: result.messageCountBefore,
+              postMessages: result.messageCountAfter,
+              parentToolUseID: null,
+            }));
           },
           getLastStepInputTokens: () => lastStepInputTokens,
           getActiveTools: () =>
@@ -281,28 +201,8 @@ class RunLoopAgent implements AgentInterface {
           ],
         });
 
-        const modelSpec = this.options.model as {
-          readonly provider?: string;
-          readonly modelId?: string;
-        };
-        this.emit({
-          type: "request_snapshot",
-          provider: modelSpec.provider ?? "unknown",
-          modelId: modelSpec.modelId ?? "unknown",
-          callSettings: {
-            ...(this.options.callSettings?.temperature !== undefined
-              ? { temperature: this.options.callSettings.temperature }
-              : {}),
-            ...(this.options.callSettings?.maxOutputTokens !== undefined
-              ? { maxOutputTokens: this.options.callSettings.maxOutputTokens }
-              : {}),
-          },
-          systemPrompt: this.systemMessage.content,
-          tools: [...resolvedTools.values()].map((tool) => ({
-            name: tool.name,
-            description: tool.description ?? "",
-          })),
-        });
+        // request_snapshot 事件已删:轨迹页的 request_snapshot 由 server 从
+        // system/init(system_prompt/tools/model)推,不再需要模型侧自报。
 
         const result = streamText({
           model: this.options.model,
@@ -333,13 +233,8 @@ class RunLoopAgent implements AgentInterface {
             : {}),
           onStepStart: () => {
             stepStartTime = Date.now();
-            const attempt = (attemptByStep.get(stepsUsed) ?? 0) + 1;
-            attemptByStep.set(stepsUsed, attempt);
-            currentStepAttempt = attempt;
-            streamingStepIndex = stepsUsed;
-            this.emit({ type: "step_started", step: stepsUsed, attempt });
-            this.emit({ type: "llm_call_start", step: stepsUsed, attempt });
           },
+          // 错误已经由 stream 的 error part 处理(runTurnStream 抛给 catch)。
           onError: () => {
           },
         });
@@ -368,42 +263,14 @@ class RunLoopAgent implements AgentInterface {
           turnStartedAt: stepStartTime,
         });
         try {
-          let firstTokenEmitted = false;
           for await (const message of turnStream) {
             if (message.type === "stream_event" && message.event.type === "text_delta") {
               text += message.event.text;
-              if (!firstTokenEmitted) {
-                firstTokenEmitted = true;
-                this.emit({
-                  type: "model_first_token",
-                  step: streamingStepIndex,
-                  attempt: currentStepAttempt,
-                  durationMs: Date.now() - stepStartTime,
-                });
-              }
             }
             if (message.type === "assistant") {
               for (const part of message.message.content) {
                 if (typeof part === "object" && part !== null && part.type === "tool-call") {
                   pendingToolCalls.set(part.toolCallId, part.toolName);
-                  if (!firstTokenEmitted) {
-                    firstTokenEmitted = true;
-                    // TTFT 的判定与旧循环一致:首条 text/reasoning/tool-call 增量都算。
-                    this.emit({
-                      type: "model_first_token",
-                      step: streamingStepIndex,
-                      attempt: currentStepAttempt,
-                      durationMs: Date.now() - stepStartTime,
-                    });
-                  }
-                  // observer 双轨:tool_call_started(轨迹页骨架;T3 步骤 4 换 run-trajectory)。
-                  this.emit({
-                    type: "tool_call_started",
-                    step: stepsUsed,
-                    toolName: part.toolName,
-                    toolCallId: part.toolCallId,
-                    input: (part.input as Record<string, unknown>) ?? {},
-                  });
                 }
               }
             }
@@ -430,21 +297,7 @@ class RunLoopAgent implements AgentInterface {
         ttftMs = turnFinal.ttftMs;
         for (const result of turnToolResults) {
           pendingToolCalls.delete(result.toolCallId);
-          // observer 双轨:tool_call_completed(与旧 mapper 的汇总同源)。
-          this.emit({
-            type: "tool_call_completed",
-            step: stepsUsed,
-            toolName: result.toolName,
-            toolCallId: result.toolCallId,
-            status: result.isError ? "error" : "success",
-            output: result.outputText,
-          });
         }
-        this.emit({
-          type: "model_call_completed",
-          step: streamingStepIndex,
-          attempt: currentStepAttempt,
-        });
 
         if (aborted) {
           // abort:已产出的消息在流里发过了;这里补在飞工具的取消结果,再 result。
@@ -452,7 +305,6 @@ class RunLoopAgent implements AgentInterface {
             timings: pipeline.timings,
             pendingToolCalls,
             step: stepsUsed,
-            emit: (event) => this.emit(event),
           });
           yield resultMessage.failure({
             subtype: "interrupted",
@@ -475,49 +327,21 @@ class RunLoopAgent implements AgentInterface {
             hasCompactedReactively,
           });
           const { errorMessage, compactCandidate } = recovery;
-          if (compactCandidate && this.options.modelIdentity) {
-            this.emit({
-              type: "context_overflow",
-              providerId: this.options.modelIdentity.providerId,
-              modelId: this.options.modelIdentity.modelId,
-              contextWindow: this.contextPolicy.contextWindow,
-              observedTokens:
-                lastStepInputTokens ?? estimateMessagesTokens(messages),
-            });
-          }
           const appliedCompaction = recovery.compaction;
-          const retried = appliedCompaction !== undefined;
           if (appliedCompaction) {
             messages = appliedCompaction.messages;
             hasCompactedReactively = true;
-          }
-          this.emit({
-            type: "model_call_failed",
-            step: stepsUsed,
-            attempt: currentStepAttempt,
-            error: errorMessage,
-            willRetry: retried,
-          });
-          if (retried && appliedCompaction) {
-            this.emitCompaction(
-              stepsUsed,
-              "reactive_compact_retry",
-              appliedCompaction,
-            );
-            this.emitTransition(stepsUsed, "reactive_compact_retry");
+            // reactive compact 也产 compact_boundary(trigger 区分,轨迹页 kind 相同)。
+            compacted.push(compactBoundaryMessage({
+              trigger: "overflow_retry",
+              preTokens: appliedCompaction.estimatedTokensBefore,
+              postTokens: appliedCompaction.estimatedTokensAfter,
+              preMessages: appliedCompaction.messageCountBefore,
+              postMessages: appliedCompaction.messageCountAfter,
+              parentToolUseID: null,
+            }));
             continue;
           }
-          this.emit({
-            type: "agent_run_failed",
-            error: errorMessage,
-            failureLayer: compactCandidate ? "context" : "model",
-          });
-          this.emit({
-            type: "turn_completed",
-            turnIndex: 0,
-            durationMs: Date.now() - turnStartTime,
-            status: "error",
-          });
           yield resultMessage.failure({
             subtype: "error_during_execution",
             errors: [errorMessage],
@@ -537,12 +361,6 @@ class RunLoopAgent implements AgentInterface {
         if (stepUsage) totalTokens = addTokenUsage(totalTokens, stepUsage);
         lastStepInputTokens = stepUsage && stepUsage.promptTokens > 0
           ? stepUsage.promptTokens : undefined;
-        this.emit({
-          type: "llm_call_end", step: stepsUsed,
-          durationMs: Date.now() - stepStartTime,
-          ...(stepUsage ? { tokenUsage: stepUsage } : {}),
-          hasToolCalls: step.toolCalls.length > 0,
-        });
         stepsUsed += 1;
         messages = [...messages, ...await result.responseMessages];
         const finishReason = await result.finishReason;
@@ -585,45 +403,17 @@ class RunLoopAgent implements AgentInterface {
           continuedText = recovery.continuedText;
           messages = recovery.messages;
           recoveries = recovery.recoveries;
-          this.emitTransition(
-            stepsUsed,
-            "max_output_tokens_recovery",
-            recoveries,
-          );
           continue;
         }
 
         const isMaxSteps = stepsUsed >= maxSteps;
-        if (isMaxSteps) {
-          this.emitTransition(stepsUsed, "max_steps");
-        }
         const finalText = resolveFinalText(
           continuedText + text,
           isMaxSteps ? "max-steps" : "stop",
           maxSteps,
         );
-        if (isMaxSteps) {
-          // observer 双轨:assistant_message / agent_run_end / turn_completed(轨迹页)。
-          this.emit({
-            type: "assistant_message",
-            text: finalText,
-            toolCallCount: 0,
-          });
-          this.emit({
-            type: "turn_completed",
-            turnIndex: 0,
-            durationMs: Date.now() - turnStartTime,
-            status: "aborted",
-          });
-          this.emit({
-            type: "agent_run_end",
-            totalDurationMs: Date.now() - runStart,
-            stepCount: stepsUsed,
-            totalTokenUsage: totalTokens,
-            toolCallCount: 0,
-            failureLayer: "orchestration",
-          });
-          yield resultMessage.failure({
+        yield isMaxSteps
+          ? resultMessage.failure({
             subtype: "error_max_turns",
             errors: [finalText],
             numTurns: stepsUsed,
@@ -631,27 +421,8 @@ class RunLoopAgent implements AgentInterface {
             usage: toContractTokenUsage(totalTokens),
             stopReason: finishReason,
             parentToolUseID: null,
-          });
-        } else {
-          this.emit({
-            type: "assistant_message",
-            text: finalText,
-            toolCallCount: 0,
-          });
-          this.emit({
-            type: "turn_completed",
-            turnIndex: 0,
-            durationMs: Date.now() - turnStartTime,
-            status: "completed",
-          });
-          this.emit({
-            type: "agent_run_end",
-            totalDurationMs: Date.now() - runStart,
-            stepCount: stepsUsed,
-            totalTokenUsage: totalTokens,
-            toolCallCount: 0,
-          });
-          yield resultMessage.success({
+          })
+          : resultMessage.success({
             result: finalText,
             numTurns: stepsUsed,
             durationMs: Date.now() - runStart,
@@ -659,7 +430,6 @@ class RunLoopAgent implements AgentInterface {
             stopReason: finishReason,
             parentToolUseID: null,
           });
-        }
         return;
       }
     } finally {
@@ -692,6 +462,6 @@ const abortAwareStream = <T>(
   },
 });
 
-export const createRunLoopAgent = (options: RunLoopOptions): AgentInterface => {
+export const createRunLoopAgent = (options: RunLoopOptions): RunLoopAgent => {
   return new RunLoopAgent(options);
 };

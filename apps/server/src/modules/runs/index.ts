@@ -2,7 +2,7 @@ export { createRunsApi, type RunsApi } from "./api.js";
 export {
   AgentFactory,
   AgentUnavailableError,
-  type ResolvedAgent,
+  type ResolvedOptions,
   type WorkspaceContext,
 } from "./agent-factory.js";
 export { AssistantMessageRecorder } from "./assistant-message-recorder.js";
@@ -16,7 +16,6 @@ export { DrizzleRunRepository, runStatusFor } from "./run-repository.js";
 export {
   interruptToolExecutions,
   listToolExecutions,
-  recordToolExecution,
   toolOperationHooks,
 } from "./tool-operations.js";
 

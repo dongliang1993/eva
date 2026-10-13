@@ -13,7 +13,7 @@
 |---|---|
 | `LanguageModel`（AI SDK 提供） | 已有 5+ provider 实现；测试用 `MockLanguageModelV4` |
 | MCP Client | 真有两种形态（stdio / http），且已有 `tests/helpers/fake-mcp-server.ts` |
-| `RequestApproval` / `RequestPlanReview` / `PlanWeaveGateway` | 跨 package —— harness 绝不能知道 DB 与 SSE |
+| `CanUseTool`（server 实现 `createRunPermissions`） | 跨 package —— harness 绝不能知道 DB 与 SSE（0013 起取代 `RequestApproval` / `RequestPlanReview` / `PlanWeaveGateway`，见 [0013](./0013-harness-api-mirrors-agent-sdk.md)） |
 | `Encryptor` | 今天就有两个实现：`AesGcmEncryptor` 与降级用的 `IdentityEncryptor` |
 
 明确**不要** Port 的：每张表的 Repository、时钟、UUID、文件系统，以及任何只有一个实现的

@@ -3,8 +3,6 @@
 **新一轮的方案与任务拆分放这里。** 一轮做完就整体移进
 [`docs/archive/plans/`](../archive/plans/)，别留在这里当"半个事实源"。
 
-当前：harness 入参对齐 Claude Agent SDK —— 背景见 [`r14-harness-sdk-shape.md`](./r14-harness-sdk-shape.md)，可施工的 spec / plan / tasks 见 [`specs/001-harness-sdk-shape/`](../../specs/001-harness-sdk-shape/)。
-
 ## 这个目录与别处的分工
 
 | 想知道 | 去哪 |

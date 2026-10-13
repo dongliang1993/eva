@@ -3,14 +3,13 @@ import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
 
-import { createAgent } from "../../../packages/harness/src/agents/agent.js";
-import type { AgentTelemetryEvent } from "../../../packages/harness/src/agents/observer.js";
-import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
+import { query } from "../../../packages/harness/src/query/query.js";
+import type { RunAgentStreamEvent } from "../../../packages/shared/src/index.js";
 import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 
-type FinishEvent = Extract<AgentStreamEvent, { type: "finish" }>;
+type FinishEvent = Extract<RunAgentStreamEvent, { type: "finish" }>;
 
-const isFinish = (event: AgentStreamEvent): event is FinishEvent =>
+const isFinish = (event: RunAgentStreamEvent): event is FinishEvent =>
   event.type === "finish";
 
 const usage = {
@@ -81,16 +80,24 @@ const failingTool = () =>
     },
   });
 
-const collect = async (
-  agent: ReturnType<typeof createAgent>,
-): Promise<AgentStreamEvent[]> => {
-  const events: AgentStreamEvent[] = [];
-  for await (const message of agent.stream({
-    messages: [{ role: "user", content: "hi" }],
-  })) {
+/** 收集一次 run 的全部帧(收集 shape 不变:createAgent → query)。 */
+const collectFrames = async (
+  options: Parameters<typeof query>[0]["options"],
+  abortController?: AbortController,
+): Promise<RunAgentStreamEvent[]> => {
+  const events: RunAgentStreamEvent[] = [];
+  const run = query({
+    prompt: [{ role: "user", content: "hi" }],
+    options: {
+      ...options,
+      ...(abortController !== undefined
+        ? { abortController }
+        : {}),
+    },
+  });
+  for await (const message of run) {
     for (const event of toRunStreamFrames(message)) {
-    events.push(event);
-  
+      events.push(event);
     }
   }
   return events;
@@ -98,13 +105,12 @@ const collect = async (
 
 describe("工具循环", () => {
   it("【回归】工具输出原样透出,没有 JSON 二次转义", async () => {
-    const agent = createAgent({
-      model: toolThenTextModel(),
+    const events = await collectFrames({
+      model: { languageModel: toolThenTextModel(), id: "mock:model" },
       tools: [echoTool()],
       ...allowAll,
     });
 
-    const events = await collect(agent);
     const toolResults = events.filter((e) => e.type === "tool-result");
     expect(toolResults.length).toBeGreaterThan(0);
     // 重构前会是 "\"line1\\nline2\"" —— 二次 JSON 转义
@@ -129,9 +135,13 @@ describe("工具循环", () => {
         }),
       }),
     });
-    const agent = createAgent({ model, tools: [failingTool()], ...allowAll });
 
-    const events = await collect(agent);
+    const events = await collectFrames({
+      model: { languageModel: model, id: "mock:model" },
+      tools: [failingTool()],
+      ...allowAll,
+    });
+
     const toolResults = events.filter((e) => e.type === "tool-result");
     expect(toolResults.length).toBeGreaterThan(0);
     const tr = toolResults[0] as { output: string; status: string };
@@ -141,13 +151,11 @@ describe("工具循环", () => {
   });
 
   it("两个 step:调工具 → 拿结果 → 输出文本(SDK 驱动 loop,无需手写 for-step)", async () => {
-    const agent = createAgent({
-      model: toolThenTextModel(),
+    const events = await collectFrames({
+      model: { languageModel: toolThenTextModel(), id: "mock:model" },
       tools: [echoTool()],
       ...allowAll,
     });
-
-    const events = await collect(agent);
 
     // 两个 step:step-start 出现 2 次,step 分别是 0 和 1
     const stepStarts = events.filter((e) => e.type === "step-start") as Array<{
@@ -163,7 +171,7 @@ describe("工具循环", () => {
     expect(finishes[0]!.text).toBe("done");
   });
 
-  it("达到 maxSteps → finish(max-steps) + 文案带实际步数与继续路径 + observer 留痕", async () => {
+  it("达到 maxSteps → finish(max-steps) + 文案带实际步数与继续路径", async () => {
     const calls = { count: 0 };
     // 每一步都产 tool-call,永不输出文本 → 触顶
     const model = new MockLanguageModelV4({
@@ -190,24 +198,19 @@ describe("工具循环", () => {
         };
       },
     });
-    const telemetry: AgentTelemetryEvent[] = [];
-    const agent = createAgent({
-      model,
+    const events = await collectFrames({
+      model: { languageModel: model, id: "mock:model" },
       tools: [echoTool()],
-      maxSteps: 2,
-      observer: (event) => telemetry.push(event),
+      maxTurns: 2,
     });
-
-    const events = await collect(agent);
     const finishes = events.filter(isFinish);
     expect(finishes).toHaveLength(1);
     expect(finishes[0]!.finishReason).toBe("max-steps");
     // 文案必须带实际步数(2,不是硬编码 100)与"怎么续"的路径
     expect(finishes[0]!.text).toContain("(2)");
     expect(finishes[0]!.text).toContain("continue");
-    // 撞顶是异常,异常必须在事件流留痕(将来排查"agent 为什么停了"不靠问用户)
-    const transitions = telemetry.filter((e) => e.type === "loop_transition");
-    expect(transitions.some((e) => e.reason === "max_steps")).toBe(true);
+    // observer 的 loop_transition(max_steps)已删:撞顶语义由
+    // result 消息 error_max_turns(帧 finishReason=max-steps)承担,同一信息无 observer 替代需求。
   });
 
   it("模型只产 tool-call 从不说话 → finish 文本是空响应兜底", async () => {
@@ -242,9 +245,13 @@ describe("工具循环", () => {
         };
       },
     });
-    const agent = createAgent({ model, tools: [echoTool()], ...allowAll });
 
-    const events = await collect(agent);
+    const events = await collectFrames({
+      model: { languageModel: model, id: "mock:model" },
+      tools: [echoTool()],
+      ...allowAll,
+    });
+
     const finishes = events.filter(isFinish);
     expect(finishes).toHaveLength(1);
     expect(finishes[0]!.finishReason).toBe("stop");
@@ -258,7 +265,7 @@ describe("max-output 续写", () => {
   // 与续写消息常量;真实 provider 的端到端续写由手工验收覆盖(T2 §5)。
   it("shouldContinueForMaxOutput: length + 未超限 → 续写;超限或非 length → 不续写", async () => {
     const { shouldContinueForMaxOutput, MAX_OUTPUT_CONTINUATION_MESSAGE } =
-      await import("../../../packages/harness/src/agents/context-strategy.js");
+      await import("../../../packages/harness/src/context/context-strategy.js");
     const policy = {
       contextWindow: 128_000,
       reservedOutputTokens: 8_000,
@@ -297,19 +304,18 @@ describe("abort", () => {
         }),
       }),
     });
-    const agent = createAgent({ model });
-    const events: AgentStreamEvent[] = [];
+    const events: RunAgentStreamEvent[] = [];
+    const run = query({
+      prompt: [{ role: "user", content: "hi" }],
+      options: { model: { languageModel: model, id: "mock:model" }, abortController: controller },
+    });
 
-    for await (const message of agent.stream({
-      messages: [{ role: "user", content: "hi" }],
-      abortSignal: controller.signal,
-    })) {
+    for await (const message of run) {
       for (const event of toRunStreamFrames(message)) {
-      events.push(event);
-      if (event.type === "text-delta" && !controller.signal.aborted) {
-        controller.abort();
-      }
-    
+        events.push(event);
+        if (event.type === "text-delta" && !controller.signal.aborted) {
+          controller.abort();
+        }
       }
     }
 
@@ -359,22 +365,22 @@ describe("abort 在飞工具收口(T26)", () => {
     });
 
   const collectUntilFinish = (
-    agent: ReturnType<typeof createAgent>,
+    options: Parameters<typeof query>[0]["options"],
     controller: AbortController,
-    abortWhen: (event: AgentStreamEvent) => boolean,
-  ): Promise<AgentStreamEvent[]> =>
+    abortWhen: (event: RunAgentStreamEvent) => boolean,
+  ): Promise<RunAgentStreamEvent[]> =>
     (async () => {
-      const events: AgentStreamEvent[] = [];
-      for await (const message of agent.stream({
-        messages: [{ role: "user", content: "hi" }],
-        abortSignal: controller.signal,
-      })) {
+      const events: RunAgentStreamEvent[] = [];
+      const run = query({
+        prompt: [{ role: "user", content: "hi" }],
+        options: { ...options, abortController: controller },
+      });
+      for await (const message of run) {
         for (const event of toRunStreamFrames(message)) {
-        events.push(event);
-        if (abortWhen(event) && !controller.signal.aborted) {
-          controller.abort();
-        }
-      
+          events.push(event);
+          if (abortWhen(event) && !controller.signal.aborted) {
+            controller.abort();
+          }
         }
       }
       return events;
@@ -382,16 +388,22 @@ describe("abort 在飞工具收口(T26)", () => {
 
   it("工具在飞时 abort → finish 前补发取消 tool-result,finish 汇总带它", async () => {
     const controller = new AbortController();
-    const agent = createAgent({ model: twoCallModel(), tools: [neverTool()], ...allowAll });
-
-    const events = await collectUntilFinish(agent, controller, (e) => {
-      // 两个 tool-call 都发起后 abort;工具永不 resolve,SDK 丢弃在飞结果。
-      if (e.type === "tool-call" && e.toolCallId === "tc-2") {
-        // 让 SDK 把 tool-call 消费完、进入工具执行阶段后再断。
-        return true;
-      }
-      return false;
-    });
+    const events = await collectUntilFinish(
+      {
+        model: { languageModel: twoCallModel(), id: "mock:model" },
+        tools: [neverTool()],
+        ...allowAll,
+      },
+      controller,
+      (e) => {
+        // 两个 tool-call 都发起后 abort;工具永不 resolve,SDK 丢弃在飞结果。
+        if (e.type === "tool-call" && e.toolCallId === "tc-2") {
+          // 让 SDK 把 tool-call 消费完、进入工具执行阶段后再断。
+          return true;
+        }
+        return false;
+      },
+    );
 
     const finishes = events.filter(isFinish);
     expect(finishes).toHaveLength(1);
@@ -433,10 +445,9 @@ describe("abort 在飞工具收口(T26)", () => {
         }),
       }),
     });
-    const agent = createAgent({ model });
 
     const events = await collectUntilFinish(
-      agent,
+      { model: { languageModel: model, id: "mock:model" } },
       controller,
       (e) => e.type === "text-delta",
     );
@@ -467,10 +478,13 @@ describe("abort 在飞工具收口(T26)", () => {
         }),
       }),
     });
-    const agent = createAgent({ model, tools: [neverTool()], ...allowAll });
 
     const events = await collectUntilFinish(
-      agent,
+      {
+        model: { languageModel: model, id: "mock:model" },
+        tools: [neverTool()],
+        ...allowAll,
+      },
       controller,
       (e) => e.type === "tool-call",
     );
@@ -538,14 +552,12 @@ describe("工具超时(T25 toolTimeout 配置)", () => {
 
   it("toolMs 到点 → 挂死工具以 Error: 收口,循环继续到 finish", async () => {
     const startedAt = Date.now();
-    const agent = createAgent({
-      model: hungThenTextModel(),
+    const events = await collectFrames({
+      model: { languageModel: hungThenTextModel(), id: "mock:model" },
       tools: [hungTool()],
-      toolTimeout: { toolMs: 100 },
+      limits: { toolTimeoutMs: { defaultMs: 100 } },
       ...allowAll,
     });
-
-    const events = await collect(agent);
     const elapsed = Date.now() - startedAt;
 
     const toolResults = events.filter(
@@ -563,23 +575,22 @@ describe("工具超时(T25 toolTimeout 配置)", () => {
   });
 
   it("不配 toolTimeout → 现状语义:挂死工具挂死 run(回归边界)", async () => {
-    const agent = createAgent({
-      model: hungThenTextModel(),
-      tools: [hungTool()],
-      ...allowAll,
-    });
-
     // 断言"不配超时就没有隐形兜底"(T25 坑 6:harness 不默认开启):
     // 消费 500ms,一个 finish/tool-result 都不该出现。
-    const events: AgentStreamEvent[] = [];
+    const events: RunAgentStreamEvent[] = [];
+    const run = query({
+      prompt: [{ role: "user", content: "hi" }],
+      options: {
+        model: { languageModel: hungThenTextModel(), id: "mock:model" },
+        tools: [hungTool()],
+        ...allowAll,
+      },
+    });
     await Promise.race([
       (async () => {
-        for await (const message of agent.stream({
-          messages: [{ role: "user", content: "hi" }],
-        })) {
+        for await (const message of run) {
           for (const event of toRunStreamFrames(message)) {
-          events.push(event);
-        
+            events.push(event);
           }
         }
       })(),

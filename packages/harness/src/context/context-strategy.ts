@@ -5,13 +5,13 @@ import type {
   ToolSet
 } from "ai";
 
-import { applyToolResultBudget } from "../context/tool-result-budget.js";
+import { applyToolResultBudget } from "./tool-result-budget.js";
 import {
   applyProactiveLoopCompactWithStats,
   applyReactiveLoopCompactWithStats,
   type RuntimeCompactResult
-} from "../context/runtime-compact.js";
-import type { ContextWindowPolicy } from "../context/policy.js";
+} from "./runtime-compact.js";
+import type { ContextWindowPolicy } from "./policy.js";
 
 export interface ContextStrategyOptions<TOOLS extends ToolSet = ToolSet> {
   readonly policy: ContextWindowPolicy;

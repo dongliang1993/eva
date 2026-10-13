@@ -6,13 +6,7 @@ import { describe, expect, it } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 
-import {
-  createAgent,
-  textResult,
-  tool,
-  type AgentStreamEvent,
-  type AgentTelemetryEvent
-} from "../../../packages/harness/src/index.js";
+import { query, textResult, tool } from "../../../packages/harness/src/index.js";
 import { replayEventsFor } from "../../../packages/shared/src/replay-events.js";
 import { toolPartToInfo } from "../../../apps/web/src/shared/api/run-stream-client.js";
 import type { EvaDynamicToolPart } from "../../../packages/shared/src/ui-message.js";
@@ -34,7 +28,7 @@ const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("T51 durationMs 迁移", () => {
-  it("abort 补发:帧形状不变(拉出 running 态),observer 记 tool_call_abandoned 不伪造三段", async () => {
+  it("abort 补发:帧形状不变(拉出 running 态),tool_timing 标 abandoned 不伪造三段", async () => {
     const slowTool = tool({
       name: "slow",
       description: "t",
@@ -66,25 +60,29 @@ describe("T51 durationMs 迁移", () => {
     });
 
     const controller = new AbortController();
-    const events: AgentStreamEvent[] = [];
-    const observerEvents: AgentTelemetryEvent[] = [];
-    const agent = createAgent({
-      model,
-      tools: [slowTool],
-      maxSteps: 5,
-      observer: (event) => observerEvents.push(event)
+    const events: ReturnType<typeof toRunStreamFrames> extends readonly (infer T)[] ? T[] : never[] = [];
+    const timingMessages: {
+      toolTiming: Record<string, { approval_wait_ms: number; queue_wait_ms: number; exec_ms: number; aborted: boolean }>;
+    }[] = [];
+    const run = query({
+      prompt: [{ role: "user", content: "hi" }],
+      options: {
+        model: { languageModel: model, id: "mock:model" },
+        tools: [slowTool],
+        maxTurns: 5,
+        abortController: controller
+      }
     });
 
-    for await (const message of agent.stream({
-      messages: [{ role: "user", content: "hi" }],
-      abortSignal: controller.signal
-    })) {
-      for (const event of toRunStreamFrames(message)) {
-      events.push(event);
-      if (event.type === "tool-call") {
-        controller.abort();
+    for await (const message of run) {
+      if (message.type === "user") {
+        timingMessages.push({ toolTiming: message.tool_timing });
       }
-    
+      for (const event of toRunStreamFrames(message)) {
+        events.push(event);
+        if (event.type === "tool-call") {
+          controller.abort();
+        }
       }
     }
 
@@ -104,18 +102,16 @@ describe("T51 durationMs 迁移", () => {
     expect(result.approvalWaitMs).toBe(0);
     expect(result.queueWaitMs).toBe(0);
 
-    // observer 收到的是 tool_call_abandoned(未分解墙钟),不是 tool_call_completed。
-    const abandoned = observerEvents.find((e) => e.type === "tool_call_abandoned");
-    expect(abandoned).toBeDefined();
-    if (abandoned?.type !== "tool_call_abandoned") throw new Error("unreachable");
-    expect(abandoned.toolCallId).toBe("tc-1");
-    expect(abandoned.waitedMs).toBeGreaterThanOrEqual(0);
-    expect("toolExecMs" in abandoned).toBe(false);
-    expect(
-      observerEvents.some(
-        (e) => e.type === "tool_call_completed" && e.toolCallId === "tc-1"
-      )
-    ).toBe(false);
+    // observer 的 tool_call_abandoned 已删:同一信息由 user 消息的
+    // tool_timing[tc-1].aborted 表达;attempt 计数已随 observer 删;同一信息无消息流替代。
+    const timing = timingMessages
+      .map((m) => m.toolTiming["tc-1"])
+      .find((t) => t !== undefined);
+    expect(timing).toBeDefined();
+    expect(timing?.aborted).toBe(true);
+    expect(timing?.toolExecMs).toBeUndefined();
+    expect(timing?.approvalWaitMs).toBeUndefined();
+    expect(timing?.queueWaitMs).toBeUndefined();
   });
 
   it("toolPartToInfo:新三段字段映射;旧 toolMetadata.durationMs 不回灌", () => {

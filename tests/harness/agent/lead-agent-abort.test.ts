@@ -2,12 +2,12 @@ import { toRunStreamFrames } from "../../helpers/frames.js";
 import { describe, expect, it } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
-import { createAgent } from "../../../packages/harness/src/agents/agent.js";
-import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
+import { query } from "../../../packages/harness/src/query/query.js";
+import type { RunAgentStreamEvent } from "../../../packages/shared/src/index.js";
 
-type FinishEvent = Extract<AgentStreamEvent, { type: "finish" }>;
+type FinishEvent = Extract<RunAgentStreamEvent, { type: "finish" }>;
 
-const isFinish = (event: AgentStreamEvent): event is FinishEvent =>
+const isFinish = (event: RunAgentStreamEvent): event is FinishEvent =>
   event.type === "finish";
 
 const usage = {
@@ -35,15 +35,15 @@ const slowStreamModel = (chunkDelayInMs: number): MockLanguageModelV4 =>
 
 describe("Agent stream protocol + abort", () => {
   it("completes normally: emits step-start, text deltas, and finish(stop) with full text", async () => {
-    const agent = createAgent({ model: slowStreamModel(5) });
-    const events: AgentStreamEvent[] = [];
+    const events: RunAgentStreamEvent[] = [];
+    const run = query({
+      prompt: [{ role: "user", content: "hi" }],
+      options: { model: { languageModel: slowStreamModel(5), id: "mock:model" } },
+    });
 
-    for await (const message of agent.stream({
-      messages: [{ role: "user", content: "hi" }]
-    })) {
+    for await (const message of run) {
       for (const event of toRunStreamFrames(message)) {
-      events.push(event);
-    
+        events.push(event);
       }
     }
 
@@ -64,19 +64,21 @@ describe("Agent stream protocol + abort", () => {
 
   it("abort mid-run: yields finish(aborted) with partial text and no error event", async () => {
     const controller = new AbortController();
-    const agent = createAgent({ model: slowStreamModel(60) });
-    const events: AgentStreamEvent[] = [];
+    const events: RunAgentStreamEvent[] = [];
+    const run = query({
+      prompt: [{ role: "user", content: "hi" }],
+      options: {
+        model: { languageModel: slowStreamModel(60), id: "mock:model" },
+        abortController: controller,
+      },
+    });
 
-    for await (const message of agent.stream({
-      messages: [{ role: "user", content: "hi" }],
-      abortSignal: controller.signal
-    })) {
+    for await (const message of run) {
       for (const event of toRunStreamFrames(message)) {
-      events.push(event);
-      if (event.type === "text-delta" && !controller.signal.aborted) {
-        controller.abort();
-      }
-    
+        events.push(event);
+        if (event.type === "text-delta" && !controller.signal.aborted) {
+          controller.abort();
+        }
       }
     }
 

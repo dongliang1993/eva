@@ -1,5 +1,12 @@
-// Agent runtime
-export { createAgent } from "./agents/agent.js";
+/**
+ * harness 公开面(SC-001):query 入口、工具构造、契约类型、内置工具工厂、
+ * prompt 段工厂、模型工厂、skill 工具。server 侧的运行时装配
+ * (canUseTool 实现等)不在这里 —— 那是 apps/server 的地盘。
+ */
+
+// 运行入口
+export { query } from "./query/query.js";
+export type { Query } from "./query/types.js";
 export { evaluatePermission } from "./query/permission.js";
 export { runPreToolUse, runPostToolUse, runPostToolUseFailure } from "./query/hooks.js";
 export { runToolCall } from "./query/tool-call.js";
@@ -9,6 +16,7 @@ export type {
   ToolTimingMutable,
 } from "./query/tool-call.js";
 export type {
+  AgentDefinition,
   CanUseTool,
   HarnessMessage,
   HookCallback,
@@ -19,6 +27,8 @@ export type {
   PermissionResult,
   AssistantMessage,
   CompactBoundaryMessage,
+  ModelBinding,
+  Options,
   ResultMessage,
   StreamDelta,
   StreamEventMessage,
@@ -28,18 +38,8 @@ export type {
   TurnCompleteMessage,
   UserMessage,
 } from "./query/types.js";
-export type {
-  Agent,
-  AgentCallSettings,
-  AgentRunInput,
-  AgentRunResult,
-  AgentStreamEvent,
-  AgentToolCallResult,
-  CreateAgentOptions,
-} from "./agents/types.js";
-export type { AgentObserver, AgentTelemetryEvent } from "./agents/observer.js";
 
-// Models and prompts
+// 模型与 prompt
 export { createAnthropicModel } from "./models/anthropic.js";
 export { createOpenAiCompatibleModel } from "./models/openai-compatible.js";
 export type { AgentModel, AgentModelFactory } from "./models/agent-model.js";
@@ -60,7 +60,7 @@ export {
 } from "./skills/index.js";
 export type { Skill } from "./skills/index.js";
 
-// Tool construction and built-in tools
+// 工具构造与内置工具
 export {
   aborted,
   createAppendMemoryTool,
@@ -97,11 +97,3 @@ export type {
   PlanGateStore,
   ToolResult,
 } from "./tools/index.js";
-
-// Subagent host contract(角色已搬 server:modules/subagents/roles.ts)
-export { createSubagentTool } from "./subagents/index.js";
-export type {
-  ForkRunner,
-  SubagentEventSink,
-  TaskRecord,
-} from "./subagents/index.js";

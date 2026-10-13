@@ -98,28 +98,27 @@ new 的是**别的模块**的 Repository，例如 `modules/compact/` 建 session
 
 ## 3. Harness：agent 执行内核
 
-`packages/harness` 不知道 HTTP、不知道 SQLite。它的输入是「模型 + 工具 + prompt sections +
-几个回调」，输出是一串 `AgentStreamEvent`。
+`packages/harness` 不知道 HTTP、不知道 SQLite。它的公开面是
+`query({ prompt, options })` → `AsyncGenerator<HarnessMessage>`（接口形状照
+Claude Agent SDK，见 [ADR 0013](../adr/0013-harness-api-mirrors-agent-sdk.md)）。
 
 ```text
 packages/harness/src/
-  agents/       createAgent(工具管道) + LeadAgent(streamText 主循环) + stream-part-mapper
+  query/        query() 入口 + turn/tool-call/permission/hooks + 内置 subagent 工具
+  agents/       run-loop(turn 循环本体,query() 的引擎)
   models/       LanguageModel 适配(AI SDK)
   tools/<名>/   一个工具一个文件夹:tool.ts 工厂 + 可选 client/types
-  approval/     审批与 plan review 的接口(实现在 server 侧)
   context/      prepareStep:工具结果预算、主动压缩、system 提升
   skills/       SKILL.md 加载与校验
   prompts/      prompt sections
-  subagents/    子代理运行时
-  search/       检索工具支撑
 ```
 
-工具管道（`tools/tool-pipeline.ts`）是横切能力的唯一装配点，执行顺序固定
-`plan gate → approval → concurrency cap → exec timing → tool` —— 这个顺序是运行语义：
-被 plan gate 拦下的写不该先弹审批框，人工审批等待不该占只读并发额度，审批与排队耗时
-不该混进真实执行时长。
+一次工具调用的生命周期在 `query/tool-call.ts` 一个函数里（hooks → canUseTool 权限 →
+只读并发位 → execute → hooks），三段计时（审批等待 / 排队 / 执行）挂在 `user` 消息的
+`tool_timing` 上。server 用纯函数 `toRunStreamFrames` 把 `HarnessMessage` 翻成现有 SSE 帧
+（协议不变、前端零改动），`run-trajectory.ts` 把它翻成 run_events 的 26 种 kind。
 
-跨包的三个回调（`RequestApproval` / `RequestPlanReview` / `PlanWeaveGateway`）是真正的 Port ——
+跨包的 `options.canUseTool`（server 侧 `createRunPermissions` 实现）是真正的 Port ——
 harness 绝不能知道 DB 与 SSE。除此之外 harness 里只有一个 Port：`LanguageModel`
 （AI SDK 提供，测试用 `MockLanguageModelV4`）。见 [ADR C6](../adr/0006-ports-only-at-change-boundaries.md)。
 

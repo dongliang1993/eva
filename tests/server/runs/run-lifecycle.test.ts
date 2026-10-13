@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "../../../apps/server/node_modules/fastify/fastify.js";
 import type { FastifyInstance } from "../../../apps/server/node_modules/fastify";
 
-import { createAgent, type Agent } from "../../../packages/harness/src/index.js";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { loadConfig } from "../../../apps/server/src/config.js";
 import {
@@ -11,6 +10,8 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
+import type { ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
+import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { DrizzleRunRepository, runStatusFor } from "../../../apps/server/src/modules/runs/index.js";
 import { runs } from "../../../apps/server/src/db/schema.js";
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
@@ -48,24 +49,34 @@ const textModel = (text: string): MockLanguageModelV4 =>
 const rawClient = (db: AppDatabase): import("better-sqlite3").Database =>
   (db as unknown as { $client: import("better-sqlite3").Database }).$client;
 
-const buildAgent = (model: MockLanguageModelV4): Agent =>
-  createAgent({
-    model,
-    tools: [],
-    maxSteps: 3
-  });
+/** build 桩的模型 binding(ResolvedOptions 需要的字段集)。 */
+const testBinding = (qualifiedModelId: string): ModelBinding => ({
+  slot: "tool",
+  providerId: "openai",
+  providerType: "openai",
+  kind: "openai-compatible",
+  qualifiedModelId,
+  modelId: qualifiedModelId.split(":")[1] ?? qualifiedModelId,
+  apiKey: "test-key",
+});
 
-interface Harness {
-  readonly agent: Agent;
-  readonly mainModel: { qualifiedModelId: string };
-  readonly toolModel: { qualifiedModelId: string };
-}
+/** build 桩:Options(model + maxTurns)+ 双模型 binding,Coordinator 拿它跑 query()。 */
+const buildResolved = (model: MockLanguageModelV4): ResolvedOptions => ({
+  options: {
+    model: { languageModel: model, id: "openai:test" },
+    tools: [],
+    maxTurns: 3,
+  },
+  mainModel: testBinding("openai:test"),
+  toolModel: testBinding("openai:test-tool"),
+  callSettings: {},
+});
 
 let app: FastifyInstance;
 let db: AppDatabase;
-let harness: Harness;
+let harness: ResolvedOptions;
 
-const startApp = async (agent: Agent, memoryAutomation?: object): Promise<void> => {
+const startApp = async (resolved: ResolvedOptions, memoryAutomation?: object): Promise<void> => {
   app = Fastify();
   app.decorate("infra", {
     config: loadConfig({ env: {}, cwd: "/tmp" }),
@@ -74,11 +85,7 @@ const startApp = async (agent: Agent, memoryAutomation?: object): Promise<void> 
   });
   app.decorate("services", {
     agents: {
-      build: () => ({
-        agent,
-        mainModel: { qualifiedModelId: "openai:test" },
-        toolModel: { qualifiedModelId: "openai:test-tool" }
-      })
+      build: () => resolved,
     },
     session: new SessionService(
       new DrizzleSessionRepository(db),
@@ -108,12 +115,8 @@ beforeEach(async () => {
     security: { ...settings.security, autoApproveToolRequests: true }
   });
 
-  harness = {
-    agent: buildAgent(textModel("hello world")),
-    mainModel: { qualifiedModelId: "openai:test" },
-    toolModel: { qualifiedModelId: "openai:test-tool" }
-  };
-  await startApp(harness.agent);
+  harness = buildResolved(textModel("hello world"));
+  await startApp(harness);
 });
 
 afterEach(async () => {
@@ -183,7 +186,7 @@ describe("run 台账", () => {
     await app.close();
     const enqueued: unknown[] = [];
     let wakes = 0;
-    await startApp(harness.agent, {
+    await startApp(harness, {
       settingsSnapshot: () => ({
         enabled: true,
         autoRetrieve: true,
@@ -232,14 +235,14 @@ describe("run 台账", () => {
     expect(run.status).toBe("completed");
     expect(run.finish_reason).toBe("stop");
     expect(run.model).toBe("openai:test");
-    // T48:Run 提前创建 + patchRouting —— requested 与 resolved 都有值。
+    // Run 提前创建 + patchRouting —— requested 与 resolved 都有值。
     expect(run.requested_model).toBe("openai:test");
     expect(run.capture_level).toBe("redacted");
     expect(run.assistant_message_id).toBeTruthy();
     expect(run.usage).toBeTruthy();
   });
 
-  it("T48:模型解析失败 → run 行 status=error、failure_layer=routing、requested_model 有值 model 为空", async () => {
+  it("模型解析失败 → run 行 status=error、failure_layer=routing、requested_model 有值 model 为空", async () => {
     await startAppWithUnavailableAgent();
 
     // 已有会话:503 回滚只删本次请求新建的会话(产品决策),老会话的台账要留下。
@@ -279,20 +282,16 @@ describe("run 台账", () => {
   it("模型报错 → status error,error 字段非空", async () => {
     // 重新起一个会在流中途抛错的 agent(error 事件帧 → run 收成 error)
     await app.close();
-    const errorAgent = createAgent({
-      model: new MockLanguageModelV4({
-        doStream: async () => ({
-          stream: simulateReadableStream({
-            chunks: [
-              { type: "stream-start", warnings: [] },
-              { type: "error", error: new Error("model blew up") }
-            ]
-          })
+    const errorAgent = buildResolved(new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start", warnings: [] },
+            { type: "error", error: new Error("model blew up") }
+          ]
         })
       }),
-      tools: [],
-      maxSteps: 3
-    });
+    }));
     await startApp(errorAgent);
 
     const { status } = await streamRun({ text: "hi", modelId: "openai:test" });

@@ -10,7 +10,6 @@ import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessi
 import {
   DrizzleRunRepository,
   listToolExecutions,
-  recordToolExecution,
   toolOperationHooks,
 } from "../../../apps/server/src/modules/runs/index.js";
 
@@ -26,18 +25,48 @@ describe("tool operation receipts", () => {
 
   afterEach(() => closeDb(db));
 
-  it("isolates identical provider call ids from main and child agents", () => {
-    const main = recordToolExecution(db, "run", "main");
-    const child = recordToolExecution(db, "run", "task-1");
+  it("isolates identical provider call ids from main and child agents", async () => {
+    // recordToolExecution 已删:同一 run 下按 agent 建两组 hooks,
+    // 直接驱动 Pre/Post 回调,隔离断言(main/task-1 各一行)保持原样。
+    const main = toolOperationHooks(db, "run", "main");
+    const child = toolOperationHooks(db, "run", "task-1");
+    const signal = new AbortController().signal;
 
-    main({ type: "started", toolCallId: "call-1", toolName: "read_file", input: { path: "a" } });
-    child({ type: "started", toolCallId: "call-1", toolName: "grep", input: { query: "a" } });
-    main({ type: "completed", toolCallId: "call-1", output: "main output" });
-    child({ type: "completed", toolCallId: "call-1", output: "child output" });
+    const started = (hooks: NonNullable<typeof main>, toolName: string, input: Record<string, unknown>) =>
+      hooks.PreToolUse![0]!.hooks[0]!(
+        { hook_event_name: "PreToolUse", tool_name: toolName, tool_input: input, tool_use_id: "call-1" },
+        "call-1",
+        { signal },
+      );
+    const completed = (hooks: NonNullable<typeof main>, toolResponse: unknown) =>
+      hooks.PostToolUse![0]!.hooks[0]!(
+        {
+          hook_event_name: "PostToolUse",
+          tool_name: "unused",
+          tool_input: {},
+          tool_response: toolResponse,
+          tool_use_id: "call-1",
+          duration_ms: 3,
+        },
+        "call-1",
+        { signal },
+      );
 
+    await started(main, "read_file", { path: "a" });
+    await started(child, "grep", { query: "a" });
+    await completed(main, { content: [{ type: "text", text: "main output" }] });
+    await completed(child, { content: [{ type: "text", text: "child output" }] });
+
+    // tool_response 从字符串变成 ToolResult 对象:output 断言跟着换成解析后的对象形状。
     expect(listToolExecutions(db, "run")).toEqual([
-      expect.objectContaining({ agent: "main", toolName: "read_file", output: "main output" }),
-      expect.objectContaining({ agent: "task-1", toolName: "grep", output: "child output" }),
+      expect.objectContaining({
+        agent: "main", toolName: "read_file",
+        output: { content: [{ type: "text", text: "main output" }] },
+      }),
+      expect.objectContaining({
+        agent: "task-1", toolName: "grep",
+        output: { content: [{ type: "text", text: "child output" }] },
+      }),
     ]);
   });
 });

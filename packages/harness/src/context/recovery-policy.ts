@@ -1,10 +1,10 @@
 import type { FinishReason as ModelFinishReason, ModelMessage } from "ai";
 
-import type { ContextWindowPolicy } from "../context/policy.js";
+import type { ContextWindowPolicy } from "./policy.js";
 import {
   applyReactiveLoopCompactWithStats,
   type RuntimeCompactResult,
-} from "../context/runtime-compact.js";
+} from "./runtime-compact.js";
 import { isReactiveCompactCandidateError } from "../models/errors.js";
 import {
   MAX_OUTPUT_CONTINUATION_MESSAGE,

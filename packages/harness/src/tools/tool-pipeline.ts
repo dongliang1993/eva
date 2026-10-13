@@ -1,6 +1,4 @@
-import { ToolDiscoveryController } from "../agents/tool-discovery.js";
-import type { AgentObserver } from "../agents/observer.js";
-import type { AgentRunInput } from "../agents/types.js";
+import { ToolDiscoveryController } from "./tool-discovery.js";
 import { DEFAULT_READ_ONLY_CONCURRENCY, Semaphore } from "./concurrency-cap.js";
 import { createToolSearchTool } from "./tool-search/index.js";
 import type { PipelineTool } from "./tool.js";
@@ -10,18 +8,15 @@ import { runToolCall } from "../query/tool-call.js";
 import type { ToolCallContext, ToolTimingMutable } from "../query/tool-call.js";
 import type {
   CanUseTool,
-  HookCallback,
-  HookCallbackMatcher,
   HookEvent,
+  HookCallbackMatcher,
 } from "../query/types.js";
 
 export interface ToolPipelineOptions {
-  readonly onToolExecution?: AgentRunInput["onToolExecution"];
   readonly tools?: readonly PipelineTool[];
-  /** T2 起唯一权限入口;undefined = 走到 canUseTool 的调用全 deny。 */
+  /** 唯一权限入口;undefined = 走到 canUseTool 的调用全 deny。 */
   readonly canUseTool?: CanUseTool;
   readonly hooks?: Partial<Record<HookEvent, readonly HookCallbackMatcher[]>>;
-  readonly observer?: AgentObserver;
   readonly readOnlyConcurrency?: number;
   /** 子代理调用带它(= taskId);主 agent 不带。 */
   readonly agentID?: string;
@@ -63,13 +58,7 @@ export const buildToolPipeline = (options: ToolPipelineOptions): ToolPipeline =>
   const agentID = options.agentID;
   const ctx: ToolCallContext = {
     canUseTool: options.canUseTool,
-    hooks: {
-      ...(options.hooks ?? {}),
-      // intent 台账(onToolExecution)是 PreToolUse hook;result 台账是 Post 两个。
-      ...(options.onToolExecution !== undefined
-        ? toolOperationHooks(options.onToolExecution)
-        : {}),
-    },
+    hooks: options.hooks ?? {},
     readOnlyLimiter: new Semaphore(
       options.readOnlyConcurrency ?? DEFAULT_READ_ONLY_CONCURRENCY,
     ),
@@ -113,47 +102,5 @@ export const buildToolPipeline = (options: ToolPipelineOptions): ToolPipeline =>
     drain: async () => {
       while (pending.size) await Promise.allSettled([...pending]);
     },
-  };
-};
-
-/** onToolExecution → 三种 hooks 的翻译(intent 在 execute 前,result 在后)。 */
-const toolOperationHooks = (
-  onToolExecution: NonNullable<AgentRunInput["onToolExecution"]>,
-): Partial<Record<HookEvent, readonly HookCallbackMatcher[]>> => {
-  const pre: HookCallback = async (input) => {
-    if (input.hook_event_name === "PreToolUse") {
-      onToolExecution({
-        type: "started",
-        toolCallId: input.tool_use_id,
-        toolName: input.tool_name,
-        input: input.tool_input,
-      });
-    }
-    return {};
-  };
-  const post: HookCallback = async (input) => {
-    if (input.hook_event_name === "PostToolUse") {
-      onToolExecution({
-        type: "completed",
-        toolCallId: input.tool_use_id,
-        output: input.tool_response,
-      });
-    }
-    return {};
-  };
-  const postFailure: HookCallback = async (input) => {
-    if (input.hook_event_name === "PostToolUseFailure") {
-      onToolExecution({
-        type: "failed",
-        toolCallId: input.tool_use_id,
-        error: input.error,
-      });
-    }
-    return {};
-  };
-  return {
-    PreToolUse: [{ hooks: [pre] }],
-    PostToolUse: [{ hooks: [post] }],
-    PostToolUseFailure: [{ hooks: [postFailure] }],
   };
 };

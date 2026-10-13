@@ -3,10 +3,11 @@ import Fastify from "../../../apps/server/node_modules/fastify/fastify.js";
 import type { FastifyInstance } from "../../../apps/server/node_modules/fastify";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
-import { createAgent, type Agent } from "../../../packages/harness/src/index.js";
 import type { RunStreamFrame } from "../../../packages/shared/src/index.js";
 import { loadConfig } from "../../../apps/server/src/config.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
+import type { ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
+import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
 import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
@@ -22,29 +23,47 @@ const usage = {
   outputTokens: { total: 5, text: 5, reasoning: 0 }
 };
 
+/** build 桩的模型 binding(ResolvedOptions 需要的字段集)。 */
+const testBinding = (qualifiedModelId: string): ModelBinding => ({
+  slot: "tool",
+  providerId: "openai",
+  providerType: "openai",
+  kind: "openai-compatible",
+  qualifiedModelId,
+  modelId: qualifiedModelId.split(":")[1] ?? qualifiedModelId,
+  apiKey: "test-key",
+});
+
 /** 一次跑得够久的 run —— 断连、重连、abort 都要在它还在飞的时候发生。 */
-const slowAgent = (): Agent =>
-  createAgent({
-    model: new MockLanguageModelV4({
-      doStream: async () => ({
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "stream-start", warnings: [] },
-            { type: "text-start", id: "1" },
-            { type: "text-delta", id: "1", delta: "一" },
-            { type: "text-delta", id: "1", delta: "二" },
-            { type: "text-delta", id: "1", delta: "三" },
-            { type: "text-delta", id: "1", delta: "四" },
-            { type: "text-end", id: "1" },
-            { type: "finish", finishReason: "stop", usage }
-          ],
-          chunkDelayInMs: 120
+const slowAgent = (): ResolvedOptions => ({
+  options: {
+    model: {
+      languageModel: new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start", warnings: [] },
+              { type: "text-start", id: "1" },
+              { type: "text-delta", id: "1", delta: "一" },
+              { type: "text-delta", id: "1", delta: "二" },
+              { type: "text-delta", id: "1", delta: "三" },
+              { type: "text-delta", id: "1", delta: "四" },
+              { type: "text-end", id: "1" },
+              { type: "finish", finishReason: "stop", usage }
+            ],
+            chunkDelayInMs: 120
+          })
         })
-      })
-    }),
+      }),
+      id: "openai:test",
+    },
     tools: [],
-    maxSteps: 3
-  });
+    maxTurns: 3,
+  },
+  mainModel: testBinding("openai:test"),
+  toolModel: testBinding("openai:test-tool"),
+  callSettings: {},
+});
 
 let app: FastifyInstance;
 let db: AppDatabase;
@@ -63,11 +82,7 @@ beforeEach(async () => {
   app = Fastify();
   app.decorate("infra", { config: loadConfig({ env: {}, cwd: "/tmp" }), db, skills: [] });
   app.decorate("services", {
-    agents: { build: () => ({
-      agent,
-      mainModel: { qualifiedModelId: "openai:test" },
-      toolModel: { qualifiedModelId: "openai:test-tool" }
-    }) },
+    agents: { build: () => agent },
     session: new SessionService(
       new DrizzleSessionRepository(db),
       new DrizzleMessageRepository(db)

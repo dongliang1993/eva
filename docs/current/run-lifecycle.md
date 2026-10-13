@@ -9,10 +9,10 @@
 ```text
 Thread  持久的对话：消息树 + 选定的模型 + 绑定的工作区
 Run     一条用户消息触发的一次执行，由 Coordinator 编排
-Agent   每轮按 (Thread, 模型) 装出来的执行配置，用完即弃
+Options 每轮按 (Thread, 模型) 装出来的 query() 输入，用完即弃
 ```
 
-**Agent 不跨 Run 存活。** 它知道的一切都在这一轮开始时从数据库读出来，所以切换模型、
+**Options 不跨 Run 存活。** 它知道的一切都在这一轮开始时从数据库读出来，所以切换模型、
 改设置、换工作区不需要任何失效逻辑 —— 下一轮自然拿到新值。`LanguageModel` 实例按
 provider 配置缓存（`agent-factory.ts`），这是唯一跨 Run 的东西。
 
@@ -23,11 +23,12 @@ provider 配置缓存（`agent-factory.ts`），这是唯一跨 Run 的东西。
 | 1 | `modules/runs/route.ts` | 三条端点、`RunOutcome` → 409/503/400、404 语义。**没有业务顺序** |
 | 2 | `modules/runs/run-coordinator.ts` | `Coordinator.run`：五个阶段的顺序 + 收尾。**只有顺序** |
 | 3 | `modules/runs/run-runtime-builder.ts` | 「这一轮 agent 有什么」：MCP / 记忆 / plan gate / 子代理 / 模型 → `assemble()` |
-| 4 | `packages/harness/src/agents/run-loop.ts` | 工具管道 + `streamText` 主循环 |
+| 4 | `packages/harness/src/query/query.ts` + `agents/run-loop.ts` | `query()` 入口 + turn 循环本体（`HarnessMessage` 流） |
 
 被调用的能力（不必按顺序读）：`run-preparation`（输入、工作区、历史）、`agent-factory`
-（模型解析与 prompt）、`assistant-message-recorder`（消息投影与检查点）、`run-hub`（订阅者扇出）、
-`run-approval-channel`（审批放行链）。
+（模型解析与 prompt → Options）、`assistant-message-recorder`（消息投影与检查点）、
+`run-hub`（订阅者扇出）、`run-permissions`（canUseTool 放行链）、
+`run-trajectory`（HarnessMessage → run_events）、`harness-frames`（HarnessMessage → SSE 帧）。
 
 ## 2. 三条端点
 
@@ -47,10 +48,11 @@ POST /api/v1/runs/:runId/abort    真正停下来的唯一方式
 ```text
    解析请求 → requestId 去重 → 注册 runId(abort 与重连靠它)
 ① 接收    同一事务：会话互斥 → 落用户消息 → 开台账行            (同步，第一次 await 之前)
-② 装配    工作区 → MCP / 记忆 / plan gate / 子代理 / 模型 → Agent   失败层 routing
+② 装配    工作区 → MCP / 记忆 / plan gate / 子代理 / 模型 → Options 失败层 routing
 ③ 上下文  本轮分支可见的历史 → 模型消息                          失败层 context
 ④ 开流    SSE 头 → run_start 帧
-⑤ 流式    for await：recorder.record(event) + emit 给订阅者
+⑤ 流式    for await (message of query())：trajectory/pino 吃消息，
+          toRunStreamFrames(message) → recorder + emit 给订阅者
    收尾    同一事务：最终 assistant 消息 + 终态 + 记忆提取入队
 ```
 

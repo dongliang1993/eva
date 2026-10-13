@@ -7,29 +7,26 @@ import type { FastifyInstance } from "../../../apps/server/node_modules/fastify"
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 import { z } from "zod";
+import type { PipelineTool } from "../../../packages/harness/src/index.js";
 
-import {
-  buildTool,
-  createAgent,
-  type AgentObserver,
-  type AgentTelemetryEvent,
-  type AgentTool
-} from "../../../packages/harness/src/index.js";
 import { loadConfig } from "../../../apps/server/src/config.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
 import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
-import { RunEventRepository } from "../../../apps/server/src/modules/observability/index.js";
+import {
+  RunEventRepository,
+  createRunRecorder,
+  createRunTrajectory,
+} from "../../../apps/server/src/modules/observability/index.js";
 import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
 import { runs, sessions } from "../../../apps/server/src/db/schema.js";
 import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
-import { createObserverBridge, fanout } from "../../../apps/server/src/modules/observability/index.js";
-import { createRunRecorder } from "../../../apps/server/src/modules/observability/index.js";
 import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
 import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
 import { SubagentRunner } from "../../../apps/server/src/modules/subagents/index.js";
-import type { AgentFactory } from "../../../apps/server/src/modules/runs/index.js";
+import type { AgentFactory, ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
+import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { registerRunRoutes } from "../../../apps/server/src/modules/runs/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
 
@@ -97,13 +94,24 @@ const waitFor = async (cond: () => boolean): Promise<void> => {
   }
 };
 
-describe("run observability(T49)route 级", () => {
+/** build 桩的模型 binding(ResolvedOptions 需要的字段集)。 */
+const testBinding = (qualifiedModelId: string): ModelBinding => ({
+  slot: "tool",
+  providerId: "openai",
+  providerType: "openai",
+  kind: "openai-compatible",
+  qualifiedModelId,
+  modelId: qualifiedModelId.split(":")[1] ?? qualifiedModelId,
+  apiKey: "test-key",
+});
+
+describe("run observability(route 级)", () => {
   let app: FastifyInstance;
   let db: AppDatabase;
 
   const startApp = async (
     model: MockLanguageModelV4,
-    tools: readonly AgentTool[] = []
+    tools: readonly PipelineTool[] = []
   ): Promise<void> => {
     app = Fastify();
     app.decorate("infra", {
@@ -112,18 +120,18 @@ describe("run observability(T49)route 级", () => {
       skills: []
     });
     app.decorate("services", {
+      // 关键:ledger 由 createRunTrajectory 从 query() 的消息流推 —— 这是要测的链路。
       agents: {
-        // 关键:把路由给的 run-scoped observer 真接进 agent —— 这是 T49 要测的链路。
-        build: (options: { observer?: AgentObserver }) => ({
-          agent: createAgent({
-            model,
+        build: (): ResolvedOptions => ({
+          options: {
+            model: { languageModel: model, id: "openai:test" },
             tools: [...tools],
-            maxSteps: 5,
-            ...(options.observer !== undefined ? { observer: options.observer } : {})
-          }),
-          mainModel: { qualifiedModelId: "openai:test" },
-          toolModel: { qualifiedModelId: "openai:test-tool" }
-        })
+            maxTurns: 5,
+          },
+          mainModel: testBinding("openai:test"),
+          toolModel: testBinding("openai:test-tool"),
+          callSettings: {},
+        }),
       },
       session: new SessionService(
         new DrizzleSessionRepository(db),
@@ -221,10 +229,11 @@ describe("run observability(T49)route 级", () => {
       "request_snapshot",
       "step_started",
       "model_call_started",
-      "model_first_token",
+      // model_first_token 改从 turn_complete.ttft_ms 推:时点后移到工具事件之后(消息流里 ttft 只能在调用结束时给)
       "tool_call_started",
-      "tool_call_completed",
+      "model_first_token",
       "step_completed",
+      "tool_call_completed",
       "assistant_message",
       "turn_completed",
       "run_completed"
@@ -249,7 +258,7 @@ describe("run observability(T49)route 级", () => {
   });
 });
 
-describe("run observability(T49)子代理", () => {
+describe("run observability(子代理)", () => {
   let db: AppDatabase;
 
   beforeEach(() => {
@@ -273,16 +282,16 @@ describe("run observability(T49)子代理", () => {
     db.insert(runs).values({ id: "parent-run", sessionId: "s-1" }).run();
   };
 
+  /** buildSubagentOptions 桩:真实装配口返回 Options,SubagentRunner 拿它跑 query()。 */
   const stubFactory = (model: MockLanguageModelV4): AgentFactory =>
     ({
-      buildSubagent: (options: { observer?: AgentObserver }) =>
-        createAgent({
-          model,
-          tools: [],
-          maxSteps: 3,
-          ...(options.observer !== undefined ? { observer: options.observer } : {})
-        })
-    }) as unknown as AgentFactory;
+      buildSubagentOptions: (): import("@eva/harness").Options => ({
+        model: { languageModel: model, id: "openai:test" },
+        tools: [],
+        systemPrompt: "explorer",
+        maxTurns: 3,
+      }),
+    }) as AgentFactory;
 
   it("前台子代理:事件进父 Run、agent=taskId、与主 Agent 共用连续 seq", async () => {
     seedParent();
@@ -290,17 +299,29 @@ describe("run observability(T49)子代理", () => {
       runId: "parent-run",
       sessionId: "s-1"
     });
-    const bridge = createObserverBridge(recorder);
     recorder.record({ agent: "main", kind: "run_started" });
+    // 主 agent 的轨迹不再需要显式保留:子代理行落 agent=taskId 由 trajectoryForTask 改写
+    // (与旧 observer-bridge 的 bridge.forAgent(taskId) 同语义,轨迹页按 agent 区分主/子)。
 
     const runner = new SubagentRunner(stubFactory(textModel("sub answer")), {
       sessionId: "s-1",
       db,
       runId: "parent-run",
-      model: "openai:test",
+      model: testBinding("openai:test"),
       abortSignal: new AbortController().signal,
-      requestApproval: async () => false,
-      observerForTask: (taskId) => bridge.forAgent(taskId)
+      canUseTool: async () => ({ behavior: "allow" }),
+      // hooksForTask/trajectoryForTask/onSubagentEvent:SubagentRunner 的新装配口。
+      hooksForTask: () => ({ PreToolUse: [], PostToolUse: [], PostToolUseFailure: [] }),
+      // createRunTrajectory 固定 agent="main";子代理行落 agent=taskId 由这里包一层改写
+      // (与旧 observer-bridge 的 bridge.forAgent(taskId) 同语义,轨迹页按 agent 区分主/子)。
+      trajectoryForTask: (taskId) => createRunTrajectory(
+        {
+          runId: recorder.runId,
+          record: (event) => recorder.record({ ...event, agent: taskId }),
+        },
+        { provider: "openai", modelId: "test", callSettings: {} },
+      ),
+      onSubagentEvent: () => {},
     });
 
     const result = await runner.runFork({
@@ -327,107 +348,7 @@ describe("run observability(T49)子代理", () => {
 
 });
 
-describe("run observability(T49)harness 事件", () => {
-  it("reactive compact retry:同一 Step 两次尝试是两组事件,attempt 1 → 2", async () => {
-    const events: AgentTelemetryEvent[] = [];
-    let callIndex = 0;
-    const model = new MockLanguageModelV4({
-      doStream: async () => {
-        const call = callIndex;
-        callIndex += 1;
-        if (call === 0) {
-          // step 0:tool-call(echo)
-          return {
-            stream: simulateReadableStream({
-              chunks: [
-                { type: "stream-start", warnings: [] },
-                { type: "tool-input-start", id: "tc-1", toolName: "echo" },
-                {
-                  type: "tool-call",
-                  toolCallId: "tc-1",
-                  toolName: "echo",
-                  input: JSON.stringify({ msg: "x" })
-                },
-                { type: "finish", finishReason: "tool-calls", usage }
-              ]
-            })
-          };
-        }
-        if (call === 1) {
-          // step 1:纯文本 stop → notice 续跑(messages 长出运行时段,供 reactive compact 压缩)
-          return { stream: simulateReadableStream({ chunks: [...textChunks("first answer").slice(0, -1), { type: "finish", finishReason: { unified: "length", raw: "length" }, usage }] }) };
-        }
-        if (call === 2) {
-          // 续跑圈 step 2 attempt 1:上下文溢出 → reactive compact 后重跑
-          return {
-            stream: simulateReadableStream({
-              chunks: [
-                { type: "stream-start", warnings: [] },
-                { type: "error", error: new Error("context length exceeded") }
-              ]
-            })
-          };
-        }
-        // attempt 2:成功
-        return { stream: simulateReadableStream({ chunks: textChunks("ok") }) };
-      }
-    });
-
-    const agent = createAgent({
-      model,
-      tools: [echoTool],
-      maxSteps: 10,
-      observer: (event) => events.push(event)
-    });
-
-    const result = await agent.collectResult({
-      messages: [{ role: "user", content: "hi" }],
-
-    });
-    expect(result.text).toContain("ok");
-
-    const failed = events.filter((e) => e.type === "model_call_failed");
-    expect(failed).toHaveLength(1);
-    expect(failed[0]).toMatchObject({ step: 2, attempt: 1, willRetry: true });
-
-    const stepTwoStarts = events.filter(
-      (e) => e.type === "step_started" && e.step === 2
-    );
-    expect(stepTwoStarts.map((e) => (e.type === "step_started" ? e.attempt : 0))).toEqual([1, 2]);
-
-    expect(events.some((e) => e.type === "context_compacted")).toBe(true);
-    expect(
-      events.some(
-        (e) => e.type === "loop_transition" && e.reason === "reactive_compact_retry"
-      )
-    ).toBe(true);
-  });
-
-  it("observer 抛错不拖垮 agent loop;fanout 一个订阅者炸了另一个照常", async () => {
-    const agent = createAgent({
-      model: textModel("still alive"),
-      tools: [],
-      maxSteps: 3,
-      observer: () => {
-        throw new Error("observer exploded");
-      }
-    });
-    const result = await agent.collectResult({ messages: [{ role: "user", content: "hi" }] });
-    expect(result.text).toContain("still alive");
-
-    const received: string[] = [];
-    const combined = fanout(
-      () => {
-        throw new Error("bad subscriber");
-      },
-      (event) => {
-        received.push(event.type);
-      }
-    );
-    combined({ type: "agent_run_start" });
-    expect(received).toEqual(["agent_run_start"]);
-  });
-
+describe("run observability(harness 事件)", () => {
   it("同一 Run 内相同 snapshot 只写一次正文,后续记 request_snapshot_ref", () => {
     const db = initDb({ dbPath: ":memory:" });
     migrateDb(db);
@@ -438,29 +359,36 @@ describe("run observability(T49)harness 事件", () => {
         { db, logger: { warn: () => {} }, enabled: true, captureLevel: "redacted" },
         { runId: "r-1", sessionId: "s-1" }
       );
-      const bridge = createObserverBridge(recorder);
-      const observer = bridge.forAgent("main");
-
-      const snapshot = {
-        type: "request_snapshot" as const,
+      // observer-bridge 已删:同 Run 的 snapshot 去重由 createRunTrajectory 做(§4.3 照搬)。
+      const trajectory = createRunTrajectory(recorder, {
         provider: "openai",
         modelId: "gpt-4o",
         callSettings: { temperature: 0.1 },
-        systemPrompt: "you are helpful",
-        tools: [{ name: "echo", description: "回显" }]
-      };
-      observer(snapshot);
-      observer(snapshot); // 全同 → ref
-      observer({ ...snapshot, systemPrompt: "you are terse" }); // 变了 → 新正文
+      });
+
+      // system/init 只带 messages 域;provider/model/callSettings 从装配期上下文给。
+      const initMessage = (systemPrompt: string) => ({
+        type: "system" as const,
+        subtype: "init" as const,
+        model: "openai:gpt-4o",
+        tools: ["echo"],
+        system_prompt: systemPrompt,
+        parent_tool_use_id: null,
+      });
+      trajectory.record(initMessage("you are helpful"));
+      trajectory.record(initMessage("you are helpful")); // 全同 → ref
+      trajectory.record(initMessage("you are terse")); // 变了 → 新正文
 
       const rows = new RunEventRepository(db).listByRun("r-1", { limit: 10 }).reverse();
-      expect(rows.map((row) => row.kind)).toEqual([
+      // system/init 每条先落 turn_started 再落 snapshot:断言收敛到 snapshot 三连(去重语义不变)。
+      expect(rows.filter((row) => row.kind !== "turn_started").map((row) => row.kind)).toEqual([
         "request_snapshot",
         "request_snapshot_ref",
         "request_snapshot"
       ]);
-      const ref = JSON.parse(rows[1]!.payload) as { refSeq: number };
-      expect(ref.refSeq).toBe(rows[0]!.seq);
+      const snapshots = rows.filter((row) => row.kind !== "turn_started");
+      const ref = JSON.parse(snapshots[1]!.payload) as { refSeq: number };
+      expect(ref.refSeq).toBe(snapshots[0]!.seq);
     } finally {
       closeDb(db);
     }

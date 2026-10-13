@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 
-import { createAgent } from "../../../packages/harness/src/agents/agent.js";
-import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
+import { query } from "../../../packages/harness/src/index.js";
+import type { Options } from "../../../packages/harness/src/index.js";
 import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 import { loadConfig } from "../../../apps/server/src/config.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
@@ -18,10 +18,26 @@ import {
   isSafeReadOnlyCommand,
 } from "../../../apps/server/src/modules/runs/index.js";
 
+type AgentStreamEvent = import("@eva/shared").RunAgentStreamEvent;
+
 type FinishEvent = Extract<AgentStreamEvent, { type: "finish" }>;
 
 const isFinish = (event: AgentStreamEvent): event is FinishEvent =>
   event.type === "finish";
+
+/** createAgent 已删:query() 的 options 即 agent 装配(模型 + 工具 + 权限)。 */
+const runAgent = async (options: Options): Promise<AgentStreamEvent[]> => {
+  const events: AgentStreamEvent[] = [];
+  for await (const message of query({
+    prompt: [{ role: "user", content: "hi" }],
+    options: { ...options, includePartialMessages: true },
+  })) {
+    for (const event of toRunStreamFrames(message)) {
+      events.push(event as AgentStreamEvent);
+    }
+  }
+  return events;
+};
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -126,8 +142,8 @@ describe("agent 级审批流", () => {
       return true;
     });
 
-    const agent = createAgent({
-      model: toolCallThenTextModel("dangerous_a", { value: "x" }),
+    const events = await runAgent({
+      model: { languageModel: toolCallThenTextModel("dangerous_a", { value: "x" }), id: "openai:test" },
       tools: [dangerous],
       canUseTool: async (toolName, input, options) => {
         const granted = await approve({
@@ -140,16 +156,6 @@ describe("agent 级审批流", () => {
         };
       }
     });
-
-    const events: AgentStreamEvent[] = [];
-    for await (const message of agent.stream({
-      messages: [{ role: "user", content: "hi" }]
-    })) {
-      for (const event of toRunStreamFrames(message)) {
-      events.push(event);
-    
-      }
-    }
 
     expect(approvals).toHaveLength(1);
     expect(approvals[0]).toMatchObject({
@@ -174,8 +180,8 @@ describe("agent 级审批流", () => {
     const dangerous = dangerousTool();
     const approve = vi.fn().mockResolvedValue(false);
 
-    const agent = createAgent({
-      model: toolCallThenTextModel("dangerous_a", { value: "x" }),
+    const events = await runAgent({
+      model: { languageModel: toolCallThenTextModel("dangerous_a", { value: "x" }), id: "openai:test" },
       tools: [dangerous],
       canUseTool: async (toolName, input, options) => {
         const granted = await approve({
@@ -188,16 +194,6 @@ describe("agent 级审批流", () => {
         };
       }
     });
-
-    const events: AgentStreamEvent[] = [];
-    for await (const message of agent.stream({
-      messages: [{ role: "user", content: "hi" }]
-    })) {
-      for (const event of toRunStreamFrames(message)) {
-      events.push(event);
-    
-      }
-    }
 
     expect(approve).toHaveBeenCalledTimes(1);
 
@@ -217,24 +213,14 @@ describe("agent 级回归(只读工具全链路)", () => {
     const model = toolCallThenTextModel("read_file", { path: "a.ts" });
     let canUseToolCalls = 0;
 
-    const agent = createAgent({
-      model,
+    const events = await runAgent({
+      model: { languageModel: model, id: "openai:test" },
       tools: [readFileTool()],
       canUseTool: async () => {
         canUseToolCalls += 1;
         return { behavior: "allow" as const };
       }
     });
-
-    const events: AgentStreamEvent[] = [];
-    for await (const message of agent.stream({
-      messages: [{ role: "user", content: "hi" }]
-    })) {
-      for (const event of toRunStreamFrames(message)) {
-      events.push(event);
-    
-      }
-    }
 
     const toolResults = events.filter((e) => e.type === "tool-result");
     expect(toolResults.length).toBeGreaterThan(0);
@@ -416,19 +402,11 @@ describe("bash 只读直放(server 权限链)", () => {
       inputSchema: z.object({ command: z.string(), description: z.string() }),
       execute: async () => textResult("ran")
     });
-    const agent = createAgent({
-      model: toolCallThenTextModel("bash", { command, description: "d" }, toolCallId),
+    const events = await runAgent({
+      model: { languageModel: toolCallThenTextModel("bash", { command, description: "d" }, toolCallId), id: "openai:test" },
       tools: [bashTool],
       canUseTool: fx.permissions.canUseTool,
     });
-
-    const events: AgentStreamEvent[] = [];
-    for await (const message of agent.stream({ messages: [{ role: "user", content: "hi" }] })) {
-      for (const event of toRunStreamFrames(message)) {
-      events.push(event);
-    
-      }
-    }
     const toolResults = events.filter((e) => e.type === "tool-result");
     return { asked: fx.asked, approvals: fx.approvals, toolResults };
   };

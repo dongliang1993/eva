@@ -78,21 +78,28 @@ Server 拥有 HTTP、SQLite、run 生命周期与能力装配；harness 拥有�
 
 ## Harness
 
-- `createAgent` 创建 run-loop agent：一个 application loop 拥有 working messages，
-  每次 `streamText` 执行一个 SDK step，续跑复用同一份 working history。
-- `context-strategy.ts` 应用工具输出预算与自动上下文压缩。server 侧没有独立的
+- 唯一运行入口 `query({ prompt, options })`，返回 `AsyncGenerator<HarnessMessage>`（带
+  `interrupt()`）。接口形状照 Claude Agent SDK，差异与理由见
+  [ADR 0013](./docs/adr/0013-harness-api-mirrors-agent-sdk.md)。
+- 授权唯一入口 `options.canUseTool`（返回 allow/deny 的 `PermissionResult`）；输出唯一
+  一条 `HarnessMessage` 流（type + subtype 判别）。`tool_operations` 台账由 server 注册的
+  PreToolUse / PostToolUse / PostToolUseFailure hooks 写。
+- `context/context-strategy.ts` 应用工具输出预算与自动上下文压缩。server 侧没有独立的
   「按消息数/token 自动 compact」策略；用户显式发起的会话压缩保持显式、分支感知。
-- **所有工具（含 per-run 注入）走同一条管道**：plan policy → approval → concurrency →
-  execution。重名在装配期即失败；缺 approval 回调时危险工具默认拒绝。取消不 detach 执行：
+  compact 发生时流里发 `system/compact_boundary`。
+- **一次工具调用一个函数**（`query/tool-call.ts`）：hooks → 权限 → 只读并发位 → execute →
+  hooks；三段计时（审批等待 / 排队 / 执行）挂在 `user` 消息的 `tool_timing`。重名在
+  `query()` 入口即失败；缺 `canUseTool` 时走到评估的调用默认 deny。取消不 detach 执行：
   loop 返回前先 drain 已派发的工具。
-- **工具发现**：工具集大到挤占 prompt 时暴露核心工具 + `tool_search`。显式
-  `activeToolNames` 永远优先。
+- **工具发现**：工具集大到挤占 prompt 时暴露核心工具 + `tool_search`。
 - **Skill**：只暴露 `name` 与 `description`；`read_skill` 加载完整指令。没有 LLM skill
   选择、选择表或角色自动分配。
-- **子代理是 awaited 工具**：隔离的 transcript、继承取消与审批处理；角色是静态列表。
-  最终文本经 tool result 返回；没有后台启动、report 工具或 notice 注入。
-- **Plan 模式**用 workspace plan 文件 + 用户 review。plan gate 只拦普通 write/edit 路径；
-  它是护栏，不是沙箱。**Plan Weave 已移除。**
+- **子代理是 awaited 工具**：角色经 `options.agents` 传入（harness 内置 `subagent` 工具
+  递归调 `query()`，消息带 `parent_tool_use_id`）；server 侧 `SubagentRunner` 同样调
+  `query()` 并加消息落库与 SSE 帧。隔离的 transcript、继承取消与审批处理；最终文本经
+  tool result 返回；没有后台启动、report 工具或 notice 注入。
+- **Plan 模式**用 workspace plan 文件 + 用户 review。plan gate 是 server `canUseTool`
+  放行链的第一级，只拦普通 write/edit 路径；它是护栏，不是沙箱。**Plan Weave 已移除。**
 - `web_fetch` 返回分页 Markdown，不再二次调模型做摘要；SDK 工具校验错误不再由隐藏模型修复。
 
 ### 工具约定（`packages/harness/src/tools/<kebab-case>/`）

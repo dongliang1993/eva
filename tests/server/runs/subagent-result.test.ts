@@ -3,7 +3,7 @@ import Fastify from "../../../apps/server/node_modules/fastify/fastify.js";
 import type { FastifyInstance } from "../../../apps/server/node_modules/fastify";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
-import { createAgent, type Agent } from "../../../packages/harness/src/index.js";
+import type { Options, PipelineTool } from "../../../packages/harness/src/index.js";
 import { loadConfig } from "../../../apps/server/src/config.js";
 import {
   closeDb,
@@ -14,6 +14,8 @@ import {
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
 import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
+import type { AgentFactory, ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
+import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
 import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
@@ -82,15 +84,47 @@ const reportingSubagentModel = (): MockLanguageModelV4 => new MockLanguageModelV
 let app: FastifyInstance;
 let db: AppDatabase;
 
-const startApp = async (agentOverride?: Agent): Promise<void> => {
-  const mainAgent = agentOverride ?? createAgent({
-    model: forkingModel(),
-    tools: [],
-    maxSteps: 6,
-    // 测试环境无审批 UI:全放行(生产由权限链注入)。
-    canUseTool: async () => ({ behavior: "allow" as const })
-  });
+/** build 桩的模型 binding(ResolvedOptions 需要的字段集)。 */
+const testBinding = (qualifiedModelId: string): ModelBinding => ({
+  slot: "tool",
+  providerId: "openai",
+  providerType: "openai",
+  kind: "openai-compatible",
+  qualifiedModelId,
+  modelId: qualifiedModelId.split(":")[1] ?? qualifiedModelId,
+  apiKey: "test-key",
+});
 
+/** build/buildSubagentOptions 桩:真实 AgentFactory 的两个装配口(类型对齐签名)。 */
+const stubAgentFactory = (): AgentFactory =>
+  ({
+    build: (): ResolvedOptions => ({
+      options: {
+        model: { languageModel: forkingModel(), id: "openai:test" },
+        tools: [],
+        maxTurns: 6,
+        // 测试环境无审批 UI:全放行(生产由权限链注入)。
+        canUseTool: async () => ({ behavior: "allow" as const })
+      },
+      mainModel: testBinding("openai:test"),
+      toolModel: testBinding("openai:test-tool"),
+      callSettings: {}
+    }),
+    // 子代理装配:返回 Options(真实 buildSubagentOptions 的形状),
+    // SubagentRunner 拿它跑 query(),并接收本轮冻结的附加能力。
+    buildSubagentOptions: (input: {
+      readonly extraTools?: readonly PipelineTool[];
+    }): Options => ({
+      model: { languageModel: reportingSubagentModel(), id: "openai:test-tool" },
+      tools: [...(input.extraTools ?? [])],
+      systemPrompt: "子代理",
+      maxTurns: 4,
+      // 测试环境无审批 UI:子代理的权限链全放行(生产由 SubagentRunner 注入)。
+      canUseTool: async () => ({ behavior: "allow" as const })
+    }),
+  }) as AgentFactory;
+
+const startApp = async (): Promise<void> => {
   app = Fastify();
   app.decorate("infra", {
     config: loadConfig({ env: {}, cwd: "/tmp" }),
@@ -98,22 +132,13 @@ const startApp = async (agentOverride?: Agent): Promise<void> => {
     skills: []
   });
   app.decorate("services", {
-    agents: {
-      build: () => ({
-        agent: mainAgent,
-        mainModel: { qualifiedModelId: "openai:test" },
-        toolModel: { qualifiedModelId: "openai:test-tool" }
-      }),
-      // 子代理装配：真实 createAgent，并接收本轮冻结的附加能力。
-      buildSubagent: ({ extraTools }: { extraTools?: readonly unknown[] }) =>
-        createAgent({
-          model: reportingSubagentModel(),
-          tools: [...((extraTools ?? []) as never[])],
-          maxSteps: 4,
-          // 测试环境无审批 UI:子代理的权限链全放行(生产由 SubagentRunner 注入)。
-          canUseTool: async () => ({ behavior: "allow" as const })
-        })
-    },
+    // build/buildSubagentOptions 桩:真实 AgentFactory 的两个装配口,
+    // 主/子 mock 模型在这里区分(生产由 provider 解析出 ModelBinding)。
+    agents: stubAgentFactory(),
+    session: new SessionService(
+      new DrizzleSessionRepository(db),
+      new DrizzleMessageRepository(db)
+    ),
     session: new SessionService(
       new DrizzleSessionRepository(db),
       new DrizzleMessageRepository(db)

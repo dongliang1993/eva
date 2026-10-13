@@ -1,5 +1,4 @@
 import type {
-  AgentObserver,
   PromptSection,
   Skill
 } from "@eva/harness";
@@ -29,7 +28,6 @@ export interface AppInfrastructure {
   skills: readonly Skill[];
   /** apiKey 落库加解密(provider repository 的唯一进出边界)。 */
   encryptor: Encryptor;
-  observer?: AgentObserver | undefined;
   soulSection?: PromptSection | undefined;
 }
 

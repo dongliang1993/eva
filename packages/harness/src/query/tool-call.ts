@@ -30,7 +30,7 @@ import type { ToolExtra } from "./types.js";
  *
  * 三段计时存在调用方传入的 Map 里:UserMessage.tool_timing 从这里取。
  * hooks 失败 = 本次工具调用失败(execute 之前)或收口失败(execute 之后),
- * 与今天 onToolExecution 写库失败会让工具失败的语义一致 —— intent 没写进去就不能执行。
+ * 与今天台账写库失败会让工具失败的语义一致 —— intent 没写进去就不能执行。
  */
 
 /**

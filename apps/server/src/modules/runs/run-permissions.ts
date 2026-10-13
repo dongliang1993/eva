@@ -29,6 +29,14 @@ export interface RunPermissionsDependencies {
   readonly runId: string;
   readonly sessionId: string;
   readonly toolUseIdPrefix?: string;
+  /** run_events 的写入(approval_asked/decided);观测关着时 undefined。 */
+  readonly events?: {
+    readonly record: (event: {
+      readonly kind: "approval_asked" | "approval_decided";
+      readonly toolCallId: string;
+      readonly payload?: unknown;
+    }) => void;
+  } | undefined;
   /** 帧出口 —— 传 hub.publish,不是直写某条连接(重连上来的订阅者也要收到审批卡片)。 */
   readonly emit: (event: RunStreamEvent) => void;
   /** plan gate 状态与 store;无 workspace 的 run 不带。 */
@@ -311,10 +319,22 @@ export const createRunPermissions = (
     // ⑥ 弹窗。ask 永远等人,不超时。
     const risk = classifyToolRisk(toolName, input);
     deps.emit({ type: "approval_request", callId: toolUseID, toolName, args: input, risk });
+    // approval_asked/decided 两种 run_events 由这里直接写(它本来就知道 ——
+    // 这是唯一能同时看到问与答的地方;轨迹页的等待阶段靠它们)。
+    deps.events?.record({
+      kind: "approval_asked",
+      toolCallId: toolUseID,
+      payload: { toolName },
+    });
     const approved = await deps.approvals.ask(
       toolUseID,
       origin(deps, toolName, input),
     );
+    deps.events?.record({
+      kind: "approval_decided",
+      toolCallId: toolUseID,
+      payload: { toolName, approved },
+    });
     // ask 返回时行已 decided —— 从台账查回 decision 附进帧,前端定格态用。
     deps.emit({
       type: "approval_resolved",

@@ -1,7 +1,7 @@
 import { toolOperationHooks } from "./tool-operations.js";
 import { randomUUID } from "node:crypto";
 
-import type { AgentObserver, Skill } from "@eva/harness";
+import { query, type Skill } from "@eva/harness";
 import { toErrorMessage, type AppSettings, type RunStreamEvent } from "@eva/shared";
 
 import type { AppConfig } from "../../config.js";
@@ -26,6 +26,7 @@ import type { RunEventStream } from "../../transports/sse/event-stream.js";
 import { runRequestSchema, type RunRequest } from "../../types/runs.js";
 import { AssistantMessageRecorder, type RecordedAssistantRun } from "./assistant-message-recorder.js";
 import { toRunStreamFrames } from "./harness-frames.js";
+import { createRunTrajectory } from "../observability/index.js";
 import { createRunPermissions, type RunPermissions } from "./run-permissions.js";
 import { runStatusFor } from "./run-repository.js";
 import {
@@ -43,7 +44,6 @@ export interface CoordinatorDependencies {
   readonly db: AppDatabase;
   readonly logger: { warn(object: unknown, message?: string): void };
   readonly skills: readonly Skill[];
-  readonly baseObserver: AgentObserver | undefined;
   readonly agents: AgentFactory;
   readonly session: SessionService;
   readonly approvals: ApprovalGateway;
@@ -145,7 +145,6 @@ export class Coordinator {
       skills: deps.skills,
       agents: deps.agents,
       mcp: deps.mcp,
-      baseObserver: deps.baseObserver,
       plans: deps.plans,
       approvals: deps.approvals,
       approvalPolicies: deps.approvalPolicies,
@@ -174,15 +173,30 @@ export class Coordinator {
       this.deps.memoryAutomation?.commitRetrieval(run.id, assembled.memoryRetrieval);
       progress.failureLayer = undefined;
 
-      // ④ 开流 ⑤ 流式 —— 一条消息流 → SSE 帧;recorder 吃同一批帧(投影不变)。
+      // ④ 开流 ⑤ 流式 —— 一条消息流三个消费方:recorder 帧、轨迹页、SSE。
       this.openStream(run, stream, log, progress);
       const recorder = this.startRecording(run, assembled, progress);
-      for await (const message of assembled.resolved.agent.stream({
-        messages: context.modelMessages,
-        hooks: toolOperationHooks(this.deps.db, run.id, "main"),
-        abortSignal: run.controller.signal,
-        additionalTools: [...assembled.additionalTools],
-      })) {
+      const trajectory = createRunTrajectory(assembled.consumers.recorder, {
+        provider: assembled.resolved.mainModel.providerId,
+        modelId: assembled.resolved.mainModel.modelId,
+        callSettings: assembled.resolved.callSettings as Record<string, unknown>,
+      });
+      const q = query({
+        prompt: context.modelMessages,
+        options: {
+          ...assembled.resolved.options,
+          hooks: toolOperationHooks(this.deps.db, run.id, "main"),
+          abortController: run.controller,
+          includePartialMessages: true,
+          tools: [
+            ...(assembled.resolved.options.tools ?? []),
+            ...assembled.additionalTools,
+          ],
+        },
+      });
+      for await (const message of q) {
+        trajectory.record(message);
+        assembled.consumers.pino?.(message);
         for (const frame of toRunStreamFrames(message)) {
           recorder.record(frame);
           run.emit(frame);
@@ -226,14 +240,23 @@ export class Coordinator {
   /** ② 绑工作区、装 agent,并把「实际用了哪个模型」记进台账。 */
   private async assemble(run: ActiveRun, accepted: AcceptedRun): Promise<AssembledRun> {
     const input = await prepareRunWorkspace(this.preparation, accepted.input);
-    // 权限链在 agent 之前建:它的 planGate.state 与 enter/exit 工具共用同一引用。
-    // state/store 从 builder 借出(同一 workspace/plan 事实源),permissions 造好后回传。
-    const permissions = this.builder.createPermissions(run, input);
+    // 观测最先建:run_started 台账必须早于模型解析(provider 配错时也要留下
+    // routing 失败记录);权限链的 approval_asked/decided 也写进同一个 recorder。
     const observability = this.builder.createObservability({
       runId: run.id,
       sessionId: input.sessionId,
       enabled: accepted.observability.enabled,
-      captureLevel: accepted.observability.captureContent
+      captureLevel: accepted.observability.captureContent,
+    });
+    // 权限链在 agent 之前建:它的 planGate.state 与 enter/exit 工具共用同一引用。
+    // state/store 从 builder 借出(同一 workspace/plan 事实源),permissions 造好后回传。
+    const permissions = this.builder.createPermissions(run, input, {
+      record: (event) => observability.recorder.record({
+        agent: "main",
+        kind: event.kind,
+        toolCallId: event.toolCallId,
+        ...(event.payload !== undefined ? { payload: event.payload } : {}),
+      }),
     });
     observability.recorder.record({
       agent: "main",

@@ -1,7 +1,11 @@
 export { createObservabilityApi, type ObservabilityApi } from "./api.js";
 export { canonicalStringify, sha256Hex } from "./canonical.js";
-export { createObserverBridge, fanout, type ObserverBridge } from "./observer-bridge.js";
 export { createPinoObserver } from "./pino-observer.js";
+export {
+  createRunTrajectory,
+  type RunTrajectory,
+  type TrajectoryRequestContext,
+} from "./run-trajectory.js";
 export {
   MAX_FIELD_BYTES,
   REDACTED,

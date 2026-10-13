@@ -111,8 +111,9 @@ describe("T37 压缩产出格式", () => {
 
 describe("T37 context-strategy 上提适配", () => {
   it("<context_summary>(user)留 messages,reminder(system)上提 instructions", async () => {
+    // context-strategy 已从 agents/ 上提到 context/(T4 目录迁移)。
     const { createPrepareStep } = await import(
-      "../../../packages/harness/src/agents/context-strategy.js"
+      "../../../packages/harness/src/context/context-strategy.js"
     );
 
     let compacted = false;

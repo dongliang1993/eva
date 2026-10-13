@@ -4,7 +4,7 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { createAgent } from "../../../packages/harness/src/agents/agent.js";
+import { query } from "../../../packages/harness/src/query/query.js";
 import {
   createEnterPlanModeTool,
   createExitPlanModeTool,
@@ -85,24 +85,27 @@ describe("plan gate agent 集成（同 run 进出）", () => {
     });
 
     // T2:放行链在 canUseTool(测试里直接给);harness 不再认识 withPlanGate/withApproval。
-    const agent = createAgent({
-      model,
-      tools: [
-        writeTool,
-        createEnterPlanModeTool(store, state),
-        createExitPlanModeTool(store, state)
-      ],
-      maxSteps: 10,
-      canUseTool: async (toolName) => {
-        approvals.push(toolName);
-        return { behavior: "allow" } as const;
+    const run = query({
+      prompt: [{ role: "user", content: "plan then code" }],
+      options: {
+        model: { languageModel: model, id: "mock:model" },
+        tools: [
+          writeTool,
+          createEnterPlanModeTool(store, state),
+          createExitPlanModeTool(store, state)
+        ],
+        maxTurns: 10,
+        canUseTool: async (toolName) => {
+          approvals.push(toolName);
+          return { behavior: "allow" } as const;
+        }
       }
     });
 
-    for await (const message of agent.stream({ messages: [{ role: "user", content: "plan then code" }] })) {
+    for await (const message of run) {
       for (const _ of toRunStreamFrames(message)) {
       void _;
-    
+
       }
     }
 

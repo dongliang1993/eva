@@ -1,10 +1,13 @@
 import { toolOperationHooks } from "./tool-operations.js";
+import { z } from "zod";
 import {
-  createSubagentTool,
+  createPlanGateState,
+  textResult,
+  tool,
   type PipelineTool,
-  type Skill
+  type Skill,
 } from "@eva/harness";
-import type { AgentObserver } from "@eva/harness";
+import type { HarnessMessage } from "@eva/harness";
 import type { RunStreamEvent } from "@eva/shared";
 
 import type { AppDatabase } from "../../db/index.js";
@@ -14,20 +17,17 @@ import type {
   ApprovalGateway,
   ApprovalPolicyStore,
 } from "../approvals/index.js";
-import type { AgentFactory, ResolvedAgent } from "./agent-factory.js";
+import type { AgentFactory, ResolvedOptions } from "./agent-factory.js";
 import { defined } from "./agent-factory.js";
 import type { McpRegistry } from "../mcp/index.js";
 import { createMemoryTools, loadMemoryFilesSection, todayString } from "../memory/index.js";
 import {
-  createObserverBridge,
-  fanout,
   createRunRecorder,
+  createRunTrajectory,
   type CaptureLevel,
-  type ObserverBridge,
   type RunRecorder,
 } from "../observability/index.js";
 import { createPlanGateStore, planGateRelPath } from "../plan-gate/index.js";
-import { createPlanGateState } from "@eva/harness";
 import { createRunPermissions, type RunPermissions } from "./run-permissions.js";
 import { SubagentRunner } from "../subagents/index.js";
 import { evaDataDir } from "../../paths.js";
@@ -47,7 +47,6 @@ export interface RunRuntimeBuilderDependencies {
   readonly plans: DrizzlePlanRepository;
   readonly approvals: ApprovalGateway;
   readonly approvalPolicies: ApprovalPolicyStore;
-  readonly baseObserver: AgentObserver | undefined;
   readonly memoryAutomation?: MemoryAutomationService | undefined;
 }
 
@@ -61,10 +60,23 @@ export interface RunRuntimeScope {
   readonly emit: (event: RunStreamEvent) => void;
 }
 
+/** 装配期定形的消息消费者(recorder 的输入域)。 */
+export interface RunConsumers {
+  /** run_events 的 recorder(轨迹页);观测关着时短路,不写。 */
+  readonly recorder: RunRecorder;
+  /** HarnessMessage 的第二订阅者(pino 日志);可以为 undefined。 */
+  readonly pino: ((message: HarnessMessage) => void) | undefined;
+}
+
+/** 每个子代理任务一个 trajectory(agent = taskId)。 */
+export interface SubagentTrajectory {
+  record(message: HarnessMessage): void;
+}
+
 export interface RunObservability {
   readonly recorder: RunRecorder;
-  readonly bridge: ObserverBridge;
-  readonly observer: AgentObserver;
+  /** 每次调用一个新 trajectory?不 —— 同一 recorder,per-agent 由 createRunTrajectory 内部不区分。 */
+  readonly trajectory: () => SubagentTrajectory;
 }
 
 /**
@@ -79,9 +91,10 @@ export interface MemoryExtractionPlan {
 
 /** 这一轮 agent 有什么 —— 装配阶段的全部产出。 */
 export interface AgentRuntime {
-  readonly resolved: ResolvedAgent;
+  readonly resolved: ResolvedOptions;
   /** 主 agent 之外、本轮追加的工具(子代理)。 */
   readonly additionalTools: readonly PipelineTool[];
+  readonly consumers: RunConsumers;
   readonly extraction?: MemoryExtractionPlan | undefined;
   readonly memoryRetrieval?: MemoryRetrievalResult | undefined;
 }
@@ -96,7 +109,14 @@ export class RunRuntimeBuilder {
    */
   createPermissions(
     run: { readonly id: string; readonly emit: (event: RunStreamEvent) => void },
-    input: RunInput
+    input: RunInput,
+    events: {
+      readonly record: (event: {
+        readonly kind: "approval_asked" | "approval_decided";
+        readonly toolCallId: string;
+        readonly payload?: unknown;
+      }) => void;
+    }
   ): RunPermissions {
     const planGate = input.workspace
       ? (() => {
@@ -127,6 +147,7 @@ export class RunRuntimeBuilder {
       runId: run.id,
       sessionId: input.sessionId,
       emit: run.emit,
+      events,
       ...(planGate !== undefined ? { planGate } : {})
     });
   }
@@ -147,14 +168,9 @@ export class RunRuntimeBuilder {
       },
       { runId: scope.runId, sessionId: scope.sessionId }
     );
-    const bridge = createObserverBridge(recorder);
-
-    return {
-      recorder,
-      bridge,
-      // Pino 是第二订阅者:ledger 写挂了 Pino 照常,反之亦然。
-      observer: fanout(bridge.forAgent("main"), this.deps.baseObserver)
-    };
+    // trajectory 的 request 上下文(provider/model)在模型解析后才有 ——
+    // 由 coordinator 在流式阶段用 resolved 构造(recorder 共享同一实例)。
+    return { recorder, trajectory: () => { throw new Error("use coordinator trajectory"); } };
   }
 
   /**
@@ -196,7 +212,6 @@ export class RunRuntimeBuilder {
     const planGate = scope.permissions.planGate;
     const resolved = this.deps.agents.build({
       modelId: input.modelId,
-      observer: observability.observer,
       extraTools: sharedTools,
       canUseTool: scope.permissions.canUseTool,
       ...defined("workspace", input.workspace),
@@ -216,7 +231,12 @@ export class RunRuntimeBuilder {
 
     return {
       resolved,
-      additionalTools: this.buildSubagentTools(scope, resolved, sharedTools, observability.bridge),
+      additionalTools: this.buildSubagentTools(scope, resolved, sharedTools, observability.recorder),
+      consumers: {
+        recorder: observability.recorder,
+        // pino 是第二订阅者:coordinator 在流式阶段构造(它有完整 logger)。
+        pino: undefined,
+      },
       ...defined("extraction", extraction),
       ...defined("memoryRetrieval", memoryRetrieval)
     };
@@ -228,27 +248,78 @@ export class RunRuntimeBuilder {
    */
   private buildSubagentTools(
     scope: RunRuntimeScope,
-    resolved: ResolvedAgent,
+    resolved: ResolvedOptions,
     sharedTools: readonly PipelineTool[],
-    bridge: ObserverBridge
+    recorder: RunRecorder,
   ): readonly PipelineTool[] {
     const runner = new SubagentRunner(this.deps.agents, {
       sessionId: scope.sessionId,
       db: this.deps.db,
       runId: scope.runId,
       model: resolved.toolModel,
-      observerForTask: (taskId) => fanout(bridge.forAgent(taskId), this.deps.baseObserver),
       ...(scope.input.workspace !== undefined ? { workspace: scope.input.workspace } : {}),
       extraTools: sharedTools,
       abortSignal: scope.abortSignal,
       canUseTool: scope.permissions.canUseTool,
-      toolExecutionForTask: (taskId) =>
+      hooksForTask: (taskId) =>
         toolOperationHooks(this.deps.db, scope.runId, taskId),
+      trajectoryForTask: (taskId) =>
+        createRunTrajectory(recorder, {
+          provider: resolved.toolModel.providerId,
+          modelId: resolved.toolModel.modelId,
+          callSettings: {},
+        }),
       onSubagentEvent: (event) => {
         scope.emit({ type: "subagent_update", ...event });
       },
     });
 
-    return createSubagentTool({ runFork: runner.runFork });
+    return [createSubagentBridgeTool(runner)];
   }
 }
+
+/** 子代理桥:SubagentRunner(消息流 + 台账)包成 subagent 工具。 */
+const createSubagentBridgeTool = (runner: SubagentRunner): PipelineTool => {
+  const subagentSchema = z.object({
+    description: z.string().min(1).describe(
+      "A short (3-5 word) description of the delegated task, for display."
+    ),
+    prompt: z.string().min(1).describe(
+      "The complete, self-contained task for the subagent. It does not share this " +
+      "conversation's context, so include everything it needs."
+    ),
+    subagent: z.string().optional().describe(
+      "Subagent type to fork. Defaults to explorer."
+    ),
+  });
+
+  return tool({
+    name: "subagent",
+    description: [
+      "Delegate a self-contained task to a subagent (a separate agent that works in its own " +
+      "context) to offload focused, independent work — research, a scoped analysis — so it does " +
+      "not consume this conversation's context.",
+      "The subagent returns its result, not its intermediate steps. Give it a complete, " +
+      "standalone prompt: it does not see this conversation.",
+      "The tool waits for the child and returns its final result. Independent calls may run in parallel."
+    ].join("\n"),
+    inputSchema: subagentSchema,
+    async execute({ description, prompt, subagent: type }, extra) {
+      const id = crypto.randomUUID();
+      // parentToolCallId 用 SDK 派给这次调用的 toolUseID —— 子代理进程消息、SSE 帧、
+      // 主对话里的卡片三者靠它一对一归位。SDK 总会有,兜底只是防御。
+      const parentToolCallId = extra.toolUseID ?? `task-${id}`;
+
+      const result = await runner.runFork({
+        taskId: id,
+        parentToolCallId,
+        subagentType: type ?? "explorer",
+        description,
+        prompt,
+        abortSignal: extra.signal,
+      });
+
+      return textResult(result.text);
+    }
+  });
+};

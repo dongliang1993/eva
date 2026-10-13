@@ -1,5 +1,8 @@
 # 0010 生命周期资源必须由 Scope 管理
 
+> harness 侧的运行入口形状（query() 与其 Options 的生命期）见
+> [0013](./0013-harness-api-mirrors-agent-sdk.md)。
+
 - **Status**: Accepted（原则仍成立；`RunScope` 与 `RunFinalizer` 两个承载对象都已移除，见下）
 - **对应宪法条款**: C10
 

@@ -38,7 +38,6 @@ export const createRunsApi = (infra: AppInfrastructure, services: AppServices): 
     db: infra.db,
     logger: infra.logger,
     skills: infra.skills,
-    baseObserver: infra.observer,
     agents: services.agents,
     session: services.session,
     approvals: services.approvals,

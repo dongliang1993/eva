@@ -1,14 +1,13 @@
 import type { LanguageModel } from "ai";
 import {
   buildAgentSystemPrompt,
-  createAgent,
   createBashTool,
   createDuckDuckGoWebSearchTool,
   createEditTool,
-  createGrepTool,
-  createListDirTool,
   createEnterPlanModeTool,
   createExitPlanModeTool,
+  createGrepTool,
+  createListDirTool,
   createReadFileTool,
   createReadSkillTool,
   createWebFetchPromptSection,
@@ -16,9 +15,7 @@ import {
   createWebSearchPromptSection,
   createWriteTool,
   skillsToPromptSection,
-  type Agent,
-  type AgentObserver,
-  type CanUseTool,
+  type Options,
   type PipelineTool,
   type PlanGateState,
   type PlanGateStore,
@@ -28,9 +25,9 @@ import {
 
 import { toolOverflowDir } from "../../paths.js";
 import {
-  SUBAGENT_MAX_STEPS,
   filterToolsForRole,
   missingRoleTools,
+  type SubagentRole,
 } from "../subagents/index.js";
 import type { AppInfrastructure } from "../../types/common.js";
 import {
@@ -42,7 +39,7 @@ import { loadAppSettings } from "../settings/index.js";
 
 /**
  * 主 agent 单轮步数上限。对齐 Alma(docs 04 §8.4.2 的 100 步 + 134 步真实会话实证)。
- * 上下文两道防线(R1 compact 三件套 + T20 tool-overflow 治理)已经在,
+ * 上下文两道防线(R1 compact 三件套 + tool-overflow 治理)已经在,
  * 步数闸不该比上下文闸先响 —— 25 对"读一个模块再改三个文件"的日常任务都不够。
  */
 export const MAIN_AGENT_MAX_STEPS = 100;
@@ -50,7 +47,7 @@ export const MAIN_AGENT_MAX_STEPS = 100;
 /**
  * plan mode 的每步提醒(文案逐字搬自 harness 的 plan-gate/reminder.ts)。
  * 走 dynamicInstructions:它不能活在 enter_plan_mode 的工具结果里 ——
- * 那条消息会被 tool-result budget / compact 折走,plan 路径就丢 了。
+ * 那条消息会被 tool-result budget / compact 折走,plan 路径就丢了。
  */
 const planGateReminder = (
   snap: { readonly active: boolean; readonly planPath?: string },
@@ -64,14 +61,14 @@ const planGateReminder = (
 };
 
 /**
- * T25:工具超时默认值 —— harness 不设默认(最小使用者不该被强加隐形行为),
+ * 工具超时默认值 —— harness 不设默认(最小使用者不该被强加隐形行为),
  * 由 server 注入。bash 自带 120s 兜底,给到 150s;其余工具 60s 足够把
  * 挂死的 fs/NFS 调用收口(SDK 把超时折成 AbortSignal 传给 execute,
- * build-tool 的 race 兜底负责真正中断等待)。
+ * 工具实现负责观察 signal 并协作退出)。
  */
 const TOOL_TIMEOUT = {
-  toolMs: 60_000,
-  tools: { bashMs: 150_000 },
+  defaultMs: 60_000,
+  byTool: { bash: 150_000 },
 } as const;
 
 export class AgentUnavailableError extends Error {
@@ -92,16 +89,11 @@ export interface WorkspaceContext {
 export interface AgentBuildOptions {
   /** 本轮选定的模型("providerId:modelId")。必填 —— 没有全局默认,没模型就不该装 agent。 */
   readonly modelId: string;
-  /**
-   * T49:run-scoped observer,必填。主/子代理的事件归属由绑定关系承担
-   * (agent="main" | taskId),不再有 infra 进程级单例兜底 —— 没有隐式 current run。
-   */
-  readonly observer: AgentObserver;
-  readonly canUseTool?: CanUseTool | undefined;
+  readonly canUseTool?: Options["canUseTool"];
   readonly workspace?: WorkspaceContext | undefined;
-  /** 本轮已固定的附加能力（MCP、memory 等）。 */
+  /** 本轮已固定的附加能力(MCP、memory 等)。 */
   readonly extraTools?: readonly PipelineTool[] | undefined;
-  /** per-run 读好的人类可读记忆 section（L1 MEMORY.md + 近几天日记）。 */
+  /** per-run 读好的人类可读记忆 section(L1 MEMORY.md + 近几天日记)。 */
   readonly memoryFilesSection?: PromptSection | undefined;
   /** Deterministically retrieved cross-session facts for this request. */
   readonly retrievedMemorySection?: PromptSection | undefined;
@@ -112,22 +104,14 @@ export interface AgentBuildOptions {
     readonly store: PlanGateStore;
   }
   | undefined;
-}
-
-export interface ResolvedModels {
-  readonly chat: ModelBinding;
-  readonly tool: ModelBinding;
-  readonly temperature: number;
-}
-
-export interface ResolvedAgent {
-  readonly agent: Agent;
-  readonly mainModel: ModelBinding;
-  readonly toolModel: ModelBinding;
+  /** tool 槽位模型已解析时直接给(子代理工厂用它);缺省走 settings。 */
+  readonly toolModel?: ModelBinding | undefined;
+  /** 上一轮 build 已解析的 call settings(temperature)。 */
+  readonly temperature?: number | undefined;
 }
 
 // Agent system prompt 的 Memory 板块,由 build 注入。
-// T16 §2.4:五工具的分工是"规模与访问模式"切(L1 全量注入 vs L4 按需检索),不是按内容切。
+// 五工具的分工是"规模与访问模式"切(L1 全量注入 vs L4 按需检索),不是按内容切。
 // 判据必须给模型一句能直接照着判的话;别在 5 个工具 description 里各写一遍(会互相矛盾)。
 const createMemoryPromptSection = (databaseEnabled: boolean): PromptSection => ({
   heading: "Memory",
@@ -135,8 +119,8 @@ const createMemoryPromptSection = (databaseEnabled: boolean): PromptSection => (
     "- `MEMORY.md` and your recent daily notes are injected into your context this turn (see ## Memory Files). These are human-readable files the user can edit directly.",
     "",
     "Choose the store by scale and access pattern:",
-    `- Ask yourself: *is this fact worth spending tokens on every single turn?* Yes -> \`update_long_term_memory\` (MEMORY.md). ${databaseEnabled ? "No -> `save_memory` (searchable database)." : "The searchable database is disabled for this run."}`,
-    '- `update_long_term_memory`: stable identity, preferences, durable constraints. Read the WHOLE file first with `read_memory_file("MEMORY.md")`, then write back the full content — it REPLACES the file.',
+    `- Ask yourself: *is this fact worth spending tokens on every single turn?* Yes -> \`update_long_term_memory\` (MEMORY.md). ${databaseEnabled ? "No -> \`save_memory\` (searchable database)." : "The searchable database is disabled for this run."}`,
+    '- `update_long_term_memory`: stable identity, preferences, durable constraints. Read the WHOLE file first with \`read_memory_file("MEMORY.md")\`, then write back the full content — it REPLACES the file.',
     "- `append_memory`: day-stamped decisions and ephemeral events, into today's daily note.",
     "- `save_memory` / `search_memory`: searchable facts and project knowledge in the database. ALWAYS `search_memory` before saving to avoid duplicates; pass updateId to update.",
     "- `read_memory_file` with no argument lists your memory files — use it to discover days beyond the injected window.",
@@ -144,40 +128,31 @@ const createMemoryPromptSection = (databaseEnabled: boolean): PromptSection => (
   ].join("\n"),
 });
 
-/**
- * LanguageModel 实例缓存键 —— 只包含决定"实例本身"的字段。
- * temperature/maxOutputTokens 是 call settings,不进键。
- */
-const modelCacheKey = (b: ModelBinding): string =>
-  [b.kind, b.providerId, b.baseURL ?? "", b.modelId, b.apiKey].join("|");
+export interface ResolvedModels {
+  readonly chat: ModelBinding;
+  readonly tool: ModelBinding;
+  readonly temperature: number;
+}
 
-/**
- * exactOptionalPropertyTypes 下 `key?: T | undefined` 不许显式传 undefined,
- * 只能条件展开 —— 连续多个字段时 `...(x !== undefined ? {x} : {})` 太吵。
- * 这个 helper 就是那个展开的具名版:{...defined("workspace", w)}。
- */
-export const defined = <K extends string, T>(
-  key: K,
-  value: T | undefined,
-): { [P in K]: T } | Record<never, never> =>
-  value !== undefined ? ({ [key]: value } as { [P in K]: T }) : {};
+export interface ResolvedOptions {
+  /** query() 的 Options(主 agent 全量)。 */
+  readonly options: Options;
+  readonly mainModel: ModelBinding;
+  readonly toolModel: ModelBinding;
+  readonly callSettings: { readonly temperature?: number; readonly maxOutputTokens?: number };
+}
 
-/**
- * 主 agent 与子代理共用的基础工具集(不含记忆/审批那层)。
- * 子代理按角色白名单 filter 这个结果,而不是重建一套 —— 角色能拿什么工具,
- * 只能从这批"进程里真实存在的工具"里选(阀4)。
- */
+/** 主 agent 与子代理共用的基础工具集(不含记忆/审批那层)。 */
 export const buildBaseTools = (
   options: {
     readonly skills: readonly Skill[];
     readonly workspace?: WorkspaceContext | undefined;
     readonly extraTools?: readonly PipelineTool[] | undefined;
-    /** T45a:主 agent 专用;子代理不传(子代理仍按角色白名单收窄)。 */
     readonly planGate?:
     | {
       readonly state: PlanGateState;
       readonly store: PlanGateStore;
-      }
+    }
     | undefined;
   },
 ): PipelineTool[] => {
@@ -207,7 +182,7 @@ export const buildBaseTools = (
       createBashTool({ workRoot: workspace.root, overflowDir }),
     );
 
-    // T45a:plan 工具与 fs 工具同一个注入条件 —— 无 workspace 就没有 plan gate。
+    // plan 工具与 fs 工具同一个注入条件 —— 无 workspace 就没有 plan gate。
     if (planGate) {
       tools.push(
         createEnterPlanModeTool(planGate.store, planGate.state),
@@ -220,7 +195,7 @@ export const buildBaseTools = (
 };
 
 /**
- * per-run 装配 agent。
+ * per-run 装配 Options(query() 的输入)。
  *
  * 为什么不在装配期建单例:模型/温度/工作区都是 per-run 决策(用户在 UI 换模型、
  * per-workspace 工具集),单例把这些全钉死了。昂贵的只有 provider 实例构造,
@@ -270,15 +245,12 @@ export class AgentFactory {
   }
 
   /**
-   * 按本轮配置装一台主 agent。
+   * 按本轮配置装一份主 agent 的 Options。
    *
    * 为什么叫 build 不叫 resolve:resolve 只描述了"定模型"这一半,这个方法的
-   * 主业是"用定好的模型 + 工作区 + 工具 + 记忆装一台能跑的 agent"。和
-   * buildSubagent 对齐 —— 主代理/子代理都是 build,只是一个走全量配置一个走角色白名单。
-   *
-   * @throws AgentUnavailableError 当没有可用的 provider/模型配置时。
+   * 主业是"用定好的模型 + 工作区 + 工具 + 记忆装一台能跑的 agent"。
    */
-  build(options: AgentBuildOptions): ResolvedAgent {
+  build(options: AgentBuildOptions): ResolvedOptions {
     const models = this.resolveModels({ modelId: options.modelId });
 
     const tools = buildBaseTools(
@@ -309,81 +281,60 @@ export class AgentFactory {
       createWebFetchPromptSection(),
     ];
 
-    const agent = createAgent({
-      model: this.getModel(models.chat),
-      tools,
-      systemPrompt: buildAgentSystemPrompt({ sections }),
-      maxSteps: MAIN_AGENT_MAX_STEPS,
-      toolTimeout: TOOL_TIMEOUT,
-      callSettings: {
-        temperature: models.temperature,
-        ...defined("maxOutputTokens", models.chat.maxOutputTokens),
-      },
-      ...defined("canUseTool", options.canUseTool),
-      // plan mode 提醒走 dynamicInstructions:它不能活在工具结果里(会被压缩折走),
-      // 每次调模型前读一次 state —— enter/exit 中途变化下一步就能看见。
-      ...options.planGate
-        ? {
-          dynamicInstructions: () =>
-            planGateReminder(options.planGate!.state.current()),
-        }
-        : {},
-      contextPolicy: {
-        ...defined("contextWindow", models.chat.contextWindow),
-        ...defined("reservedOutputTokens", models.chat.maxOutputTokens),
-      },
-      modelIdentity: {
-        providerId: models.chat.providerId,
-        modelId: models.chat.modelId,
-      },
-      observer: options.observer,
-    });
+    const callSettings = {
+      temperature: models.temperature,
+      ...defined("maxOutputTokens", models.chat.maxOutputTokens),
+    };
 
     return {
-      agent,
+      options: {
+        model: this.binding(models.chat),
+        tools,
+        systemPrompt: buildAgentSystemPrompt({ sections }),
+        maxTurns: MAIN_AGENT_MAX_STEPS,
+        ...defined("canUseTool", options.canUseTool),
+        callSettings,
+        limits: { toolTimeoutMs: TOOL_TIMEOUT },
+        // plan mode 提醒走 dynamicInstructions:它不能活在工具结果里(会被压缩折走),
+        // 每次调模型前读一次 state —— enter/exit 中途变化下一步就能看见。
+        ...(options.planGate
+          ? {
+            dynamicInstructions: () =>
+              planGateReminder(options.planGate!.state.current()),
+          }
+          : {}),
+      },
       mainModel: models.chat,
-      toolModel: models.tool,
+      toolModel: options.toolModel ?? models.tool,
+      callSettings,
     };
   }
 
-  private getModel(binding: ModelBinding): LanguageModel {
-    const key = modelCacheKey(binding);
-    const cached = this.models.get(key);
-
-    if (cached) return cached;
-
-    const model = toAgentModel(binding);
-    this.models.set(key, model);
-    return model;
-  }
-
   /**
-   * 装配一个子代理(S7):工具槽模型 + 角色白名单工具 + 角色 system prompt。
+   * 装配一个子代理的 Options(工具槽模型 + 角色白名单)。
    *
    * 阀1(便宜):子代理用 tool 槽位模型,不走 chat。
    * 阀4(收窄):只在 buildBaseTools 的基础集上按角色的 allowedTools 过滤 ——
    *   角色能拿到的永远是进程里真实存在的工具,白名单只是让写工具/执行工具缺席。
-   *   一个 fork 是全新装配(不是复用主 agent),所以深度/委托闸在 Task 里判。
-   * @throws AgentUnavailableError 没配好 provider 时(与主 agent 同一路径)。
    */
-  buildSubagent(options: {
-    readonly role: import("../subagents/index.js").SubagentRole;
+  buildSubagentOptions(options: {
     readonly workspace?: WorkspaceContext | undefined;
     readonly extraTools?: readonly PipelineTool[] | undefined;
-    readonly temperature?: number | undefined;
-    /**
-     * 子代理与父 Run 共用审批通道。缺省时 harness 会拒绝危险工具。
-     */
-    readonly canUseTool?: CanUseTool | undefined;
-  readonly planGate?: {
-    readonly state: PlanGateState;
-    readonly store: PlanGateStore;
-  } | undefined;
+    readonly canUseTool?: Options["canUseTool"];
+    readonly planGate?:
+    | {
+      readonly state: PlanGateState;
+      readonly store: PlanGateStore;
+    }
+    | undefined;
     /** 主代理装配时已解析并冻结的 tool-model binding。 */
     readonly model: ModelBinding;
-    /** run-scoped observer：与父 Run 共用 recorder，并绑定到 taskId。 */
-    readonly observer: AgentObserver;
-  }): Agent {
+    readonly temperature?: number | undefined;
+    /** 子代理的 system prompt(角色的)。 */
+    readonly systemPrompt: string;
+    readonly role: SubagentRole;
+    readonly maxTurns: number;
+  }): Options {
     const baseTools = buildBaseTools(
       {
         skills: this.infra.skills,
@@ -405,17 +356,58 @@ export class AgentFactory {
 
     const tools = [...filterToolsForRole(baseTools, options.role)];
 
-    return createAgent({
-      model: this.getModel(options.model),
+    return {
+      model: this.binding(options.model),
       tools,
-      systemPrompt: options.role.systemPrompt,
-      maxSteps: options.role.maxSteps ?? SUBAGENT_MAX_STEPS,
-      toolTimeout: TOOL_TIMEOUT,
+      systemPrompt: options.systemPrompt,
+      maxTurns: options.maxTurns,
+      ...defined("canUseTool", options.canUseTool),
       callSettings: {
         ...defined("temperature", options.temperature),
       },
-      ...defined("canUseTool", options.canUseTool),
-      observer: options.observer,
-    });
+      limits: { toolTimeoutMs: TOOL_TIMEOUT },
+    };
+  }
+
+  private binding(binding: ModelBinding): Options["model"] {
+    return {
+      languageModel: this.getModel(binding),
+      id: binding.qualifiedModelId,
+      ...(binding.contextWindow !== undefined
+        ? { contextWindow: binding.contextWindow }
+        : {}),
+      ...(binding.maxOutputTokens !== undefined
+        ? { maxOutputTokens: binding.maxOutputTokens }
+        : {}),
+    };
+  }
+
+  private getModel(binding: ModelBinding): LanguageModel {
+    const key = modelCacheKey(binding);
+    const cached = this.models.get(key);
+
+    if (cached) return cached;
+
+    const model = toAgentModel(binding);
+    this.models.set(key, model);
+    return model;
   }
 }
+
+/**
+ * LanguageModel 实例缓存键 —— 只包含决定"实例本身"的字段。
+ * temperature/maxOutputTokens 是 call settings,不进键。
+ */
+const modelCacheKey = (b: ModelBinding): string =>
+  [b.kind, b.providerId, b.baseURL ?? "", b.modelId, b.apiKey].join("|");
+
+/**
+ * exactOptionalPropertyTypes 下 `key?: T | undefined` 不许显式传 undefined,
+ * 只能条件展开 —— 这个 helper 就是那个展开的具名版:{...defined("workspace", w)}。
+ */
+export const defined = <K extends string, T>(
+  key: K,
+  value: T | undefined,
+): { [P in K]: T } | Record<never, never> =>
+  value !== undefined ? ({ [key]: value } as { [P in K]: T }) : {};
+

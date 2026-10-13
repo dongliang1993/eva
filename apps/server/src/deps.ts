@@ -14,7 +14,6 @@ import { failStaleTasks } from "./modules/subagents/index.js";
 import { ApprovalRepository } from "./modules/approvals/index.js";
 import {
   applyObservabilityRetention,
-  createPinoObserver,
   sweepAbandonedOperations,
 } from "./modules/observability/index.js";
 import { loadAppSettings } from "./modules/settings/index.js";
@@ -37,7 +36,6 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
   const db = initDb({ dbPath: config.DB_PATH || getDefaultDbPath() });
   migrateMcpServersToFile(db, logger);
   migrateDb(db);
-  const observer = createPinoObserver(logger);
   const workspaceRoot = findMonorepoRoot(process.cwd());
 
   // 用户技能在 ~/.eva/skills(打包后唯一可写位置);dev 时额外扫 monorepo 根的
@@ -126,7 +124,6 @@ export const buildInfrastructure = async (): Promise<AppInfrastructure> => {
     logger,
     skills,
     encryptor,
-    observer,
     soulSection
   };
 };

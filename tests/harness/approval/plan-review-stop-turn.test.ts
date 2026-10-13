@@ -4,7 +4,7 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { createAgent } from "../../../packages/harness/src/agents/agent.js";
+import { query } from "../../../packages/harness/src/query/query.js";
 import {
   createEnterPlanModeTool,
   createExitPlanModeTool,
@@ -107,20 +107,23 @@ const runOnce = async (decision: PlanReviewDecision["outcome"]) => {
   const state = createPlanGateState({ active: false });
   state.enter(handle);
   const counter = { calls: 0 };
-  const agent = createAgent({
-    model: modelWithExitThenText(counter),
-    tools: [
-      createExitPlanModeTool(store, state),
-      dummy
-    ],
-    maxSteps: 5,
-    canUseTool: async () => permissionForDecision(decision),
+  const run = query({
+    prompt: [{ role: "user", content: "exit" }],
+    options: {
+      model: { languageModel: modelWithExitThenText(counter), id: "mock:model" },
+      tools: [
+        createExitPlanModeTool(store, state),
+        dummy
+      ],
+      maxTurns: 5,
+      canUseTool: async () => permissionForDecision(decision),
+    }
   });
 
-  for await (const message of agent.stream({ messages: [{ role: "user", content: "exit" }] })) {
+  for await (const message of run) {
     for (const _ of toRunStreamFrames(message)) {
     void _;
-  
+
     }
   }
 

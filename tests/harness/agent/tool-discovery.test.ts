@@ -5,11 +5,11 @@ import {
   CORE_TOOL_NAMES,
   MAX_DISCOVERY_ACTIVATED_TOOLS,
   ToolDiscoveryController,
-} from "../../../packages/harness/src/agents/tool-discovery.js";
+} from "../../../packages/harness/src/tools/tool-discovery.js";
 import {
   resolveToolExposure,
   TOOL_COUNT_SAFETY_LIMIT,
-} from "../../../packages/harness/src/agents/tool-safety-net.js";
+} from "../../../packages/harness/src/tools/tool-safety-net.js";
 import { textResult, tool, type PipelineTool } from "../../../packages/harness/src/tools/index.js";
 import { rankToolCatalog } from "../../../packages/harness/src/tools/tool-search/index.js";
 
@@ -60,7 +60,7 @@ describe("resolveToolExposure + ToolDiscoveryController", () => {
     ]);
     const discovery = new ToolDiscoveryController();
 
-    const exposure = resolveToolExposure(tools, undefined, discovery);
+    const exposure = resolveToolExposure(tools, discovery);
 
     expect(exposure.degraded).toBe(true);
     expect(exposure.totalCount).toBe(tools.size);
@@ -79,54 +79,21 @@ describe("resolveToolExposure + ToolDiscoveryController", () => {
     const tools = toolMap(45, ["tool_search", "read_file", "write", "edit", "bash"]);
     const discovery = new ToolDiscoveryController();
 
-    const exposure = resolveToolExposure(tools, undefined, discovery);
+    const exposure = resolveToolExposure(tools, discovery);
 
     expect(exposure.degraded).toBe(true);
     expect(exposure.activeTools).toContain("write");
     expect(exposure.activeTools).toContain("edit");
   });
 
-  it("explicit activeToolNames win and skip discovery mode", () => {
-    const tools = toolMap(45, ["tool_search", "read_file", "mcp__x__y"]);
-    const discovery = new ToolDiscoveryController();
-
-    const exposure = resolveToolExposure(
-      tools,
-      ["read_file", "mcp__x__y", "missing_tool"],
-      discovery,
-    );
-
-    expect(exposure.degraded).toBe(false);
-    expect(exposure.activeTools).toEqual(["read_file", "mcp__x__y"]);
-    expect(discovery.isDiscoveryMode()).toBe(false);
-    expect(discovery.activeTools()).toEqual(["read_file", "mcp__x__y"]);
-  });
-
-  it("merges preferredToolNames into the initial active set in discovery mode", () => {
-    const tools = toolMap(45, ["tool_search", "read_file", "bash", "mcp__x__y"]);
-    const discovery = new ToolDiscoveryController();
-
-    const exposure = resolveToolExposure(tools, undefined, discovery, [
-      "mcp__x__y",
-      "missing_tool",
-    ]);
-
-    expect(exposure.degraded).toBe(true);
-    expect(exposure.activeTools).toContain("mcp__x__y");
-    expect(exposure.activeTools).toContain("tool_search");
-    expect(exposure.keptCount).toBe(exposure.activeTools?.length);
-
-    const small = toolMap(30, ["tool_search", "mcp__x__y"]);
-    expect(
-      resolveToolExposure(small, undefined, discovery, ["mcp__x__y"]).activeTools,
-    ).toBeUndefined();
-  });
+  // activeToolNames/preferredToolNames 参数已随 AgentRunInput 删:
+  // 显式名单与 skill 并集语义无替代(超限时只剩 core ∪ tool_search 激活路径)。
 
   it("at or under the limit leaves tools unrestricted", () => {
     const tools = toolMap(TOOL_COUNT_SAFETY_LIMIT - 1, ["tool_search"]);
     const discovery = new ToolDiscoveryController();
 
-    const exposure = resolveToolExposure(tools, undefined, discovery);
+    const exposure = resolveToolExposure(tools, discovery);
 
     expect(tools.size).toBe(TOOL_COUNT_SAFETY_LIMIT);
     expect(exposure.degraded).toBe(false);
@@ -137,7 +104,7 @@ describe("resolveToolExposure + ToolDiscoveryController", () => {
   it("caps activated tools and reports omitted names", () => {
     const tools = toolMap(45, ["tool_search", "read_file"]);
     const discovery = new ToolDiscoveryController();
-    resolveToolExposure(tools, undefined, discovery);
+    resolveToolExposure(tools, discovery);
 
     const names = Array.from({ length: MAX_DISCOVERY_ACTIVATED_TOOLS + 6 }, (_, i) => `filler-${i}`);
     const activation = discovery.activateTools(names);

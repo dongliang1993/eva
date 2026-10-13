@@ -4,16 +4,16 @@
  * SDK v7 的 LanguageModelUsage 已标准化 inputTokenDetails.{cacheReadTokens,
  * cacheWriteTokens} + outputTokenDetails.reasoningTokens(ai@7.0.64)。Eva 的
  * readTokenUsage 原本只取 input/output/total,导致 cached/reasoning 永远写 0、
- * cache_write 无处可存。这里验证整条链:读明细 → 累加 → 透传 StreamTokenUsage。
+ * cache_write 无处可存。这里验证整条链:读明细 → 累加 → 透传 toContractTokenUsage。
  */
 import { describe, expect, it } from "vitest";
 
 import {
   addTokenUsage,
   readTokenUsage,
-  toStreamTokenUsage,
   type TokenUsage,
-} from "../../../packages/harness/src/agents/observer.js";
+} from "../../../packages/harness/src/query/usage.js";
+import { toContractTokenUsage } from "../../../packages/harness/src/query/usage.js";
 
 /** SDK LanguageModelUsage 的最小形状(含 cache/reasoning 明细)。 */
 const sdkUsage = (over: Record<string, unknown> = {}) => ({
@@ -107,9 +107,10 @@ describe("addTokenUsage 累加三新字段", () => {
   });
 });
 
-describe("toStreamTokenUsage 透传 cache/reasoning", () => {
-  it("带明细 → StreamTokenUsage 含 cacheWriteTokens/cachedInputTokens/reasoningTokens", () => {
-    const s = toStreamTokenUsage({
+// toStreamTokenUsage 已删:透传语义由 query/usage.ts 的 toContractTokenUsage + turn_complete 消息覆盖。
+describe("toContractTokenUsage 透传 cache/reasoning", () => {
+  it("带明细 → 契约 TokenUsage 含 cache_read/cache_creation/reasoning", () => {
+    const s = toContractTokenUsage({
       promptTokens: 100,
       completionTokens: 50,
       totalTokens: 150,
@@ -118,22 +119,21 @@ describe("toStreamTokenUsage 透传 cache/reasoning", () => {
       reasoningTokens: 10,
     });
     expect(s).toEqual({
-      inputTokens: 100,
-      outputTokens: 50,
-      totalTokens: 150,
-      cachedInputTokens: 30,
-      cacheWriteTokens: 20,
-      reasoningTokens: 10,
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_input_tokens: 30,
+      cache_creation_input_tokens: 20,
+      reasoning_tokens: 10,
     });
   });
 
-  it("不带明细 → 只透 input/output/total,不写 undefined 键", () => {
-    const s = toStreamTokenUsage({
+  it("不带明细 → 只透 input/output,不写 undefined 键", () => {
+    const s = toContractTokenUsage({
       promptTokens: 100,
       completionTokens: 50,
       totalTokens: 150,
     });
-    expect(s).toEqual({ inputTokens: 100, outputTokens: 50, totalTokens: 150 });
-    expect("cacheWriteTokens" in s).toBe(false);
+    expect(s).toEqual({ input_tokens: 100, output_tokens: 50 });
+    expect("cache_creation_input_tokens" in s).toBe(false);
   });
 });

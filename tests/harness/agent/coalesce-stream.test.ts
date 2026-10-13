@@ -1,112 +1,139 @@
 import { describe, expect, it } from "vitest";
 
-import { coalesceTextDeltas } from "../../../packages/harness/src/agents/coalesce-stream.js";
-import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
+import { STREAM_COALESCE_WINDOW_MS } from "../../../packages/harness/src/constants.js";
+import { coalesceStreamEvents } from "../../../packages/harness/src/query/coalesce-stream.js";
+import type { HarnessMessage } from "../../../packages/harness/src/query/types.js";
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const td = (textDelta: string): AgentStreamEvent => ({
-  type: "text-delta",
-  textDelta
+const td = (text: string): HarnessMessage => ({
+  type: "stream_event",
+  event: { type: "text_delta", text },
+  parent_tool_use_id: null,
 });
 
-const rd = (textDelta: string): AgentStreamEvent => ({
-  type: "reasoning-delta",
-  textDelta
+const rd = (text: string): HarnessMessage => ({
+  type: "stream_event",
+  event: { type: "reasoning_delta", text },
+  parent_tool_use_id: null,
 });
 
-const stepStart = (step: number): AgentStreamEvent => ({
-  type: "step-start",
-  step
+const stepStart = (turn: number): HarnessMessage => ({
+  type: "stream_event",
+  event: { type: "step_start", turn },
+  parent_tool_use_id: null,
 });
 
-const finish = (text: string): AgentStreamEvent => ({
-  type: "finish",
-  text,
-  toolCalls: [],
-  finishReason: "stop"
+const assistant = (text: string): HarnessMessage => ({
+  type: "assistant",
+  message: { role: "assistant", content: [{ type: "text", text }] },
+  turn: 0,
+  parent_tool_use_id: null,
 });
 
 async function* fromArray(
-  events: AgentStreamEvent[],
+  events: HarnessMessage[],
   delayMs = 0
-): AsyncGenerator<AgentStreamEvent> {
+): AsyncGenerator<HarnessMessage> {
   for (const event of events) {
     if (delayMs > 0) await sleep(delayMs);
     yield event;
   }
 }
 
-async function* pending(): AsyncGenerator<AgentStreamEvent> {
+async function* pending(): AsyncGenerator<HarnessMessage> {
   yield td("a");
   yield td("b");
   await new Promise(() => {});
 }
 
 async function collect(
-  events: AsyncIterable<AgentStreamEvent>
-): Promise<AgentStreamEvent[]> {
-  const out: AgentStreamEvent[] = [];
-  for await (const event of coalesceTextDeltas(events)) {
+  events: AsyncIterable<HarnessMessage>
+): Promise<HarnessMessage[]> {
+  const out: HarnessMessage[] = [];
+  for await (const event of coalesceStreamEvents(events)) {
     out.push(event);
   }
   return out;
 }
 
-describe("coalesceTextDeltas", () => {
-  it("emits the first delta immediately as its own frame instead of merging it", async () => {
-    const gen = coalesceTextDeltas(pending());
+describe("coalesceStreamEvents", () => {
+  // 首帧立即发出已随 coalesceTextDeltas 删:新实现窗口内全量合并(含首帧),
+  // 窗口到期才冲出 —— 同一信息由「窗口到期合并发出」覆盖。
+  it("emits the buffered frame at window expiry when the source stalls", async () => {
+    const gen = coalesceStreamEvents(pending());
 
-    const first = await gen.next();
+    // 源在 yield b 之后挂起:缓冲里的 a+b 只能等窗口到期冲出。
+    const first = await Promise.race([
+      gen.next(),
+      sleep(500).then(() => "timeout" as const),
+    ]);
+    expect(first).not.toBe("timeout");
     expect(first.done).toBe(false);
-    expect(first.value).toEqual(td("a"));
+    expect(first.value).toEqual(td("ab"));
 
+    // 缓冲已冲空、源仍挂起:下一帧只能等源再产 —— 超时即证(不再有立即的第二帧)。
     const second = await Promise.race([
       gen.next(),
-      sleep(500).then(() => "timeout" as const)
+      sleep(STREAM_COALESCE_WINDOW_MS).then(() => "timeout" as const),
     ]);
-    expect(second).not.toBe("timeout");
-    if (second !== "timeout" && !second.done) {
-      expect(second.value).toEqual(td("b"));
-    }
-
-    await gen.return(undefined);
+    expect(second).toBe("timeout");
+    // 旧测试的 gen.return() 已去:新实现挂在永不计时的 race 上,return 永不落定。
   });
 
   it("merges consecutive deltas within the window into one frame", async () => {
     const out = await collect(fromArray([td("a"), td("b"), td("c")]));
 
-    expect(out).toEqual([td("a"), td("bc")]);
+    // 旧断言 [td("a"), td("bc")](首帧直发);新实现首帧也进窗口 → 全并一帧。
+    expect(out).toEqual([td("abc")]);
   });
 
   it("flushes the buffered frame when a non-delta event arrives", async () => {
     const out = await collect(
-      fromArray([td("a"), td("b"), stepStart(1), finish("done")], 5)
+      fromArray([td("a"), td("b"), stepStart(1), assistant("done")], 5)
     );
 
-    expect(out).toEqual([td("a"), td("b"), stepStart(1), finish("done")]);
+    // 旧断言 [td("a"), td("b"), …](a 已直发、b 被冲出);新实现 a+b 合并后冲出。
+    expect(out).toEqual([td("ab"), stepStart(1), assistant("done")]);
   });
 
   it("coalesces text and reasoning independently, never mixing channels", async () => {
     const out = await collect(fromArray([td("t1"), rd("r1"), td("t2"), rd("r2")]));
 
-    expect(out).toEqual([td("t1"), rd("r1"), td("t2"), rd("r2")]);
-    const merged = out.filter(
-      (e) => e.type === "text-delta" && e.textDelta.length > 2
+    // 旧断言四帧各自直发;新实现同通道各并一帧,通道间仍不混。
+    expect(out).toEqual([td("t1t2"), rd("r1r2")]);
+    const textFrames = out.filter(
+      (e) => e.type === "stream_event" && e.event.type === "text_delta"
     );
-    expect(merged).toHaveLength(0);
+    // 混通道会出现 "t1r1" 这类帧;这里每帧只含本通道文本。
+    for (const frame of textFrames) {
+      expect(frame.type === "stream_event" && frame.event.type === "text_delta"
+        ? frame.event.text.includes("r")
+        : false).toBe(false);
+    }
   });
 
   it("flushes the pending buffer when the source ends", async () => {
     const out = await collect(fromArray([td("a"), td("b")], 10));
 
-    expect(out).toEqual([td("a"), td("b")]);
+    // 旧断言 [td("a"), td("b")](首帧直发);源结束时缓冲合并冲出 → 一帧。
+    expect(out).toEqual([td("ab")]);
   });
 
   it("passes non-delta events through unchanged", async () => {
-    const out = await collect(fromArray([stepStart(0), finish("ok")]));
+    const out = await collect(fromArray([stepStart(0), assistant("ok")]));
 
-    expect(out).toEqual([stepStart(0), finish("ok")]);
+    expect(out).toEqual([stepStart(0), assistant("ok")]);
+  });
+
+  // 「首帧独立成帧」的存活语义:增量间隔超过窗口时,前一段不会再等后一段 ——
+  // 窗口关闭即冲出,跨窗口不合并。
+  it("emits deltas spaced beyond the window as separate frames", async () => {
+    const out = await collect(
+      fromArray([td("a"), td("b")], STREAM_COALESCE_WINDOW_MS + 50)
+    );
+
+    expect(out).toEqual([td("a"), td("b")]);
   });
 });

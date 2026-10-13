@@ -1,5 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
-import type { AgentRunInput, HookCallbackMatcher } from "@eva/harness";
+import type { HookCallback, HookCallbackMatcher, Options } from "@eva/harness";
 import type { AppDatabase } from "../../db/index.js";
 import { toolOperations } from "../../db/schema.js";
 
@@ -13,8 +13,8 @@ export function toolOperationHooks(
   db: AppDatabase,
   runId: string,
   agent: string,
-): Partial<Record<"PreToolUse" | "PostToolUse" | "PostToolUseFailure", readonly HookCallbackMatcher[]>> {
-  const pre: import("@eva/harness").HookCallback = async (input) => {
+): NonNullable<Options["hooks"]> {
+  const pre: HookCallback = async (input) => {
     if (input.hook_event_name !== "PreToolUse") return {};
     db.insert(toolOperations).values({
       runId, agent, toolCallId: input.tool_use_id, toolName: input.tool_name,
@@ -22,7 +22,7 @@ export function toolOperationHooks(
     }).run();
     return {};
   };
-  const post: import("@eva/harness").HookCallback = async (input) => {
+  const post: HookCallback = async (input) => {
     if (input.hook_event_name !== "PostToolUse") return {};
     db.update(toolOperations).set({
       status: "completed",
@@ -35,7 +35,7 @@ export function toolOperationHooks(
     )).run();
     return {};
   };
-  const postFailure: import("@eva/harness").HookCallback = async (input) => {
+  const postFailure: HookCallback = async (input) => {
     if (input.hook_event_name !== "PostToolUseFailure") return {};
     db.update(toolOperations).set({
       status: "failed",
@@ -52,32 +52,6 @@ export function toolOperationHooks(
     PreToolUse: [{ hooks: [pre] }],
     PostToolUse: [{ hooks: [post] }],
     PostToolUseFailure: [{ hooks: [postFailure] }],
-  };
-}
-
-/** 旧形态(过渡):onToolExecution 事件 → 台账。toolOperationHooks 落地后删。 */
-export function recordToolExecution(
-  db: AppDatabase,
-  runId: string,
-  agent: string,
-): NonNullable<AgentRunInput["onToolExecution"]> {
-  return event => {
-    if (event.type === "started") {
-      db.insert(toolOperations).values({
-        runId, agent, toolCallId: event.toolCallId, toolName: event.toolName,
-        input: JSON.stringify(event.input) ?? "null", status: "running", startedAt: Date.now()
-      }).run();
-      return;
-    }
-    db.update(toolOperations).set({
-      status: event.type === "completed" ? "completed" : "failed",
-      ...(event.type === "completed" ? { output: JSON.stringify(event.output) ?? "null" } : { error: event.error }),
-      endedAt: Date.now()
-    }).where(and(
-      eq(toolOperations.runId, runId),
-      eq(toolOperations.agent, agent),
-      eq(toolOperations.toolCallId, event.toolCallId),
-    )).run();
   };
 }
 

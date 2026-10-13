@@ -3,8 +3,8 @@ import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
 
-import { createAgent } from "../../../packages/harness/src/agents/agent.js";
-import type { AgentStreamEvent } from "../../../packages/harness/src/agents/types.js";
+import { query } from "../../../packages/harness/src/query/query.js";
+import type { RunAgentStreamEvent } from "../../../packages/shared/src/index.js";
 import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 import { createWebFetchTool } from "../../../packages/harness/src/index.js";
 import { Semaphore } from "../../../packages/harness/src/tools/concurrency-cap.js";
@@ -98,7 +98,7 @@ describe("Semaphore(T24 只读并发帽)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 装配层帽(createAgent)
+// 装配层帽(query limits.readOnlyConcurrency)
 // ---------------------------------------------------------------------------
 
 /** N 个 tool-call 一步齐发、下一步收尾的假模型。 */
@@ -164,32 +164,31 @@ const probeTool = (
   });
 
 const collectEvents = async (
-  agent: ReturnType<typeof createAgent>,
-): Promise<AgentStreamEvent[]> => {
-  const events: AgentStreamEvent[] = [];
-  for await (const message of agent.stream({
-    messages: [{ role: "user", content: "hi" }],
-  })) {
+  options: Parameters<typeof query>[0]["options"],
+): Promise<RunAgentStreamEvent[]> => {
+  const events: RunAgentStreamEvent[] = [];
+  const run = query({
+    prompt: [{ role: "user", content: "hi" }],
+    options,
+  });
+  for await (const message of run) {
     for (const event of toRunStreamFrames(message)) {
-    events.push(event);
-  
+      events.push(event);
     }
   }
   return events;
 };
 
-describe("装配层帽(createAgent readOnlyConcurrency)", () => {
+describe("装配层帽(query limits.readOnlyConcurrency)", () => {
   it("readOnlyConcurrency 2 + 一步 5 个只读工具 → 最大同时在飞 ≤ 2,结果无丢失", async () => {
     const metrics = { active: 0, max: 0 };
-    const agent = createAgent({
-      model: multiToolCallModel(["r0", "r1", "r2", "r3", "r4"]),
+    const events = await collectEvents({
+      model: { languageModel: multiToolCallModel(["r0", "r1", "r2", "r3", "r4"]), id: "mock:model" },
       tools: [0, 1, 2, 3, 4].map((i) =>
         probeTool(`r${i}`, { readOnly: true, metrics }),
       ),
-      readOnlyConcurrency: 2,
+      limits: { readOnlyConcurrency: 2 },
     });
-
-    const events = await collectEvents(agent);
 
     expect(metrics.max).toBeLessThanOrEqual(2);
     expect(metrics.max).toBeGreaterThanOrEqual(2); // 帽真的在放行,不是串行
@@ -239,14 +238,12 @@ describe("装配层帽(createAgent readOnlyConcurrency)", () => {
       },
     });
 
-    const agent = createAgent({
-      model: multiToolCallModel(["ro0", "ro1", "w0"]),
+    const events = await collectEvents({
+      model: { languageModel: multiToolCallModel(["ro0", "ro1", "w0"]), id: "mock:model" },
       tools: [...readOnly, writeTool],
-      readOnlyConcurrency: 2,
+      limits: { readOnlyConcurrency: 2 },
       canUseTool: async () => ({ behavior: "allow" } as const),
     });
-
-    const events = await collectEvents(agent);
 
     const toolResults = events.filter(
       (e) => e.type === "tool-result",
@@ -265,14 +262,12 @@ describe("装配层帽(createAgent readOnlyConcurrency)", () => {
 
   it("不传 readOnlyConcurrency → 默认帽 10:10 个只读工具全部同时在飞", async () => {
     const metrics = { active: 0, max: 0 };
-    const agent = createAgent({
-      model: multiToolCallModel(Array.from({ length: 10 }, (_, i) => `d${i}`)),
+    await collectEvents({
+      model: { languageModel: multiToolCallModel(Array.from({ length: 10 }, (_, i) => `d${i}`)), id: "mock:model" },
       tools: Array.from({ length: 10 }, (_, i) =>
         probeTool(`d${i}`, { readOnly: true, metrics }),
       ),
     });
-
-    await collectEvents(agent);
 
     // 默认 10:10 个并发 acquire 全部直通,不排队。
     expect(metrics.max).toBe(10);

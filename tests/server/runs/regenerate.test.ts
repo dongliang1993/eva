@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "../../../apps/server/node_modules/fastify/fastify.js";
 import type { FastifyInstance } from "../../../apps/server/node_modules/fastify";
 
-import { createAgent } from "../../../packages/harness/src/index.js";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { loadConfig } from "../../../apps/server/src/config.js";
 import {
@@ -11,6 +10,8 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
+import type { ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
+import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
 import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
@@ -44,6 +45,17 @@ const textModel = (text: string): MockLanguageModelV4 =>
     })
   });
 
+/** build 桩的模型 binding(ResolvedOptions 需要的字段集)。 */
+const testBinding = (qualifiedModelId: string): ModelBinding => ({
+  slot: "tool",
+  providerId: "openai",
+  providerType: "openai",
+  kind: "openai-compatible",
+  qualifiedModelId,
+  modelId: qualifiedModelId.split(":")[1] ?? qualifiedModelId,
+  apiKey: "test-key",
+});
+
 let app: FastifyInstance;
 let db: AppDatabase;
 
@@ -56,10 +68,16 @@ const startApp = async (): Promise<void> => {
   });
   app.decorate("services", {
     agents: {
-      build: () => ({
-        agent: createAgent({ model: textModel("reply"), tools: [], maxSteps: 3 }),
-        mainModel: { qualifiedModelId: "openai:test" },
-        toolModel: { qualifiedModelId: "openai:test-tool" }
+      // build 桩:Options + 双模型 binding(与 resolveModels 桩同存,thread 路由用后者)。
+      build: (): ResolvedOptions => ({
+        options: {
+          model: { languageModel: textModel("reply"), id: "openai:test" },
+          tools: [],
+          maxTurns: 3,
+        },
+        mainModel: testBinding("openai:test"),
+        toolModel: testBinding("openai:test-tool"),
+        callSettings: {},
       }),
       resolveModels: () => ({ tool: { qualifiedModelId: "openai:test" } })
     },
@@ -141,7 +159,7 @@ const assistants = (sessionId: string): readonly StoredMessage[] =>
 const users = (sessionId: string): readonly StoredMessage[] =>
   allMessages(sessionId).filter((m) => m.role === "user");
 
-describe("T12 重生成 + 版本切换(API 级)", () => {
+describe("重生成 + 版本切换(API 级)", () => {
   it("send → regenerate → 同 slot 2 条消息、active_leaf = v2", async () => {
     const sessionId = await startSession();
     const v1 = assistants(sessionId)[0]!;

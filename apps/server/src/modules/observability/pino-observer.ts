@@ -1,115 +1,74 @@
 import type { FastifyBaseLogger } from "fastify";
 
-import type { AgentTelemetryEvent } from "@eva/harness";
+import type { HarnessMessage } from "@eva/harness";
 
+/**
+ * HarnessMessage → pino 日志(第二订阅者)。
+ *
+ * 只留有诊断价值的行:压缩、失败、终态。逐 token 的增量不进日志 ——
+ * 那是 SSE 与轨迹页的事。ledger 写挂了 Pino 照常,反之亦然。
+ */
 export const createPinoObserver = (
-  logger: FastifyBaseLogger
-): ((event: AgentTelemetryEvent) => void) => {
-  return (event: AgentTelemetryEvent): void => {
-    switch (event.type) {
-      case "agent_run_start":
-        logger.info({ event: "agent_run_start" }, "agent run started");
-        break;
-      case "agent_run_failed":
-        logger.error(
-          {
-            event: "agent_run_failed",
-            failureLayer: event.failureLayer,
-            error: event.error
-          },
-          "agent run failed"
-        );
-        break;
-      case "model_call_failed":
-        logger.warn(
-          {
-            event: "model_call_failed",
-            step: event.step,
-            attempt: event.attempt,
-            willRetry: event.willRetry,
-            error: event.error
-          },
-          event.willRetry ? "model call failed; retrying after reactive compact" : "model call failed"
-        );
-        break;
-      case "agent_run_end":
+  logger: FastifyBaseLogger,
+): ((message: HarnessMessage) => void) => {
+  return (message: HarnessMessage): void => {
+    if (message.type === "system" && message.subtype === "compact_boundary") {
+      logger.info(
+        {
+          event: "context_compacted",
+          trigger: message.trigger,
+          messageCountBefore: message.pre_messages,
+          messageCountAfter: message.post_messages,
+          estimatedTokensBefore: message.pre_tokens,
+          estimatedTokensAfter: message.post_tokens,
+        },
+        `agent context compacted via ${message.trigger === "auto" ? "proactive_loop_compact" : "reactive_compact_retry"}`
+      );
+      return;
+    }
+
+    if (message.type !== "result") return;
+
+    switch (message.subtype) {
+      case "success":
         logger.info(
           {
             event: "agent_run_end",
-            durationMs: event.totalDurationMs,
-            steps: event.stepCount,
-            tokens: event.totalTokenUsage,
-            toolCalls: event.toolCallCount
+            durationMs: message.duration_ms,
+            steps: message.num_turns,
+            tokens: message.usage,
           },
           "agent run completed"
         );
         break;
-      case "llm_call_start":
-        logger.debug(
-          { event: "llm_call_start", step: event.step, model: event.model },
-          "LLM call started"
-        );
-        break;
-      case "llm_call_end":
+      case "interrupted":
         logger.info(
-          {
-            event: "llm_call_end",
-            step: event.step,
-            durationMs: event.durationMs,
-            tokens: event.tokenUsage,
-            hasToolCalls: event.hasToolCalls
-          },
-          "LLM call completed"
+          { event: "agent_run_end", durationMs: message.duration_ms, aborted: true },
+          "agent run aborted"
         );
         break;
-      case "loop_transition":
-        logger.info(
-          {
-            event: "loop_transition",
-            step: event.step,
-            reason: event.reason,
-            ...(event.attempt !== undefined ? { attempt: event.attempt } : {})
-          },
-          `agent loop transitioned via ${event.reason}`
-        );
-        break;
-      case "context_compacted":
-        logger.info(
-          {
-            event: "context_compacted",
-            step: event.step,
-            reason: event.reason,
-            messageCountBefore: event.messageCountBefore,
-            messageCountAfter: event.messageCountAfter,
-            estimatedTokensBefore: event.estimatedTokensBefore,
-            estimatedTokensAfter: event.estimatedTokensAfter
-          },
-          `agent context compacted via ${event.reason}`
-        );
-        break;
-      case "context_overflow":
+      case "error_max_turns":
         logger.warn(
           {
-            event: "context_overflow",
-            model: event.modelId,
-            contextWindow: event.contextWindow,
-            observedTokens: event.observedTokens
+            event: "agent_run_end",
+            durationMs: message.duration_ms,
+            steps: message.num_turns,
           },
-          `[AutoCompact] ${event.modelId} rejected ${event.observedTokens} tokens — retrying with compacted context`
+          "agent run ended at max steps"
         );
         break;
-      case "tool_count_degraded":
-        // T43: 工具数超限进 discovery mode —— 必须可见,否则「配的 MCP 工具没直接出现」无从排查。
-        logger.warn(
+      case "error_during_execution": {
+        const [firstError] = message.errors;
+        logger.error(
           {
-            event: "tool_count_degraded",
-            totalCount: event.totalCount,
-            keptCount: event.keptCount,
-            limit: event.limit
+            event: "agent_run_failed",
+            failureLayer: message.failure_layer,
+            error: firstError ?? "Unknown error",
           },
-          `[ToolSafetyNet] ${event.totalCount} tools > ${event.limit} — discovery mode (${event.keptCount} core tools active; use tool_search to activate more)`
+          "agent run failed"
         );
         break;
+      }
     }
   };
 };
