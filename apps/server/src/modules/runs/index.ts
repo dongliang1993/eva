@@ -17,6 +17,7 @@ export {
   interruptToolExecutions,
   listToolExecutions,
   recordToolExecution,
+  toolOperationHooks,
 } from "./tool-operations.js";
 
 export {

@@ -23,6 +23,10 @@ export type ToolExecutionEvent =
 
 export interface AgentRunInput {
   onToolExecution?: ((event: ToolExecutionEvent) => void) | undefined;
+  /** server 注册的 hooks(tool_operations 台账等);与 onToolExecution 二选一,hooks 优先。 */
+  hooks?:
+    | Partial<Record<import("../query/types.js").HookEvent, readonly import("../query/types.js").HookCallbackMatcher[]>>
+    | undefined;
   messages: ModelMessage[];
   context?: Record<string, unknown>;
   maxSteps?: number;

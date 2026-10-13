@@ -186,6 +186,8 @@ class RunLoopAgent implements AgentInterface {
     const pipeline = buildToolPipeline({
       ...this.options,
       onToolExecution: input.onToolExecution,
+      // server 注册的 hooks 优先于 onToolExecution 的翻译(同时给时二选一)。
+      ...(input.hooks !== undefined ? { hooks: input.hooks } : {}),
       tools: [...(this.options.tools ?? []), ...(input.additionalTools ?? [])],
       ...(input.agentID !== undefined ? { agentID: input.agentID } : {}),
     });

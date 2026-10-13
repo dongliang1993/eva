@@ -1,4 +1,4 @@
-import { recordToolExecution } from "./tool-operations.js";
+import { toolOperationHooks } from "./tool-operations.js";
 import { randomUUID } from "node:crypto";
 
 import type { AgentObserver, Skill } from "@eva/harness";
@@ -179,7 +179,7 @@ export class Coordinator {
       const recorder = this.startRecording(run, assembled, progress);
       for await (const message of assembled.resolved.agent.stream({
         messages: context.modelMessages,
-        onToolExecution: recordToolExecution(this.deps.db, run.id, "main"),
+        hooks: toolOperationHooks(this.deps.db, run.id, "main"),
         abortSignal: run.controller.signal,
         additionalTools: [...assembled.additionalTools],
       })) {

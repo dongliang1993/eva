@@ -1,9 +1,61 @@
 import { and, asc, eq } from "drizzle-orm";
-import type { AgentRunInput } from "@eva/harness";
+import type { AgentRunInput, HookCallbackMatcher } from "@eva/harness";
 import type { AppDatabase } from "../../db/index.js";
 import { toolOperations } from "../../db/schema.js";
 
-/** Synchronous SQLite writes: the intent is committed before execute starts. */
+/**
+ * tool_operations 的写入改由 hooks 完成(FR-008):
+ * intent 在 PreToolUse(权限通过后、execute 前 —— 被拒的调用不写 intent),
+ * result 在 PostToolUse / PostToolUseFailure。
+ * Synchronous SQLite writes: the intent is committed before execute starts.
+ */
+export function toolOperationHooks(
+  db: AppDatabase,
+  runId: string,
+  agent: string,
+): Partial<Record<"PreToolUse" | "PostToolUse" | "PostToolUseFailure", readonly HookCallbackMatcher[]>> {
+  const pre: import("@eva/harness").HookCallback = async (input) => {
+    if (input.hook_event_name !== "PreToolUse") return {};
+    db.insert(toolOperations).values({
+      runId, agent, toolCallId: input.tool_use_id, toolName: input.tool_name,
+      input: JSON.stringify(input.tool_input) ?? "null", status: "running", startedAt: Date.now()
+    }).run();
+    return {};
+  };
+  const post: import("@eva/harness").HookCallback = async (input) => {
+    if (input.hook_event_name !== "PostToolUse") return {};
+    db.update(toolOperations).set({
+      status: "completed",
+      output: JSON.stringify(input.tool_response) ?? "null",
+      endedAt: Date.now()
+    }).where(and(
+      eq(toolOperations.runId, runId),
+      eq(toolOperations.agent, agent),
+      eq(toolOperations.toolCallId, input.tool_use_id),
+    )).run();
+    return {};
+  };
+  const postFailure: import("@eva/harness").HookCallback = async (input) => {
+    if (input.hook_event_name !== "PostToolUseFailure") return {};
+    db.update(toolOperations).set({
+      status: "failed",
+      error: input.error,
+      endedAt: Date.now()
+    }).where(and(
+      eq(toolOperations.runId, runId),
+      eq(toolOperations.agent, agent),
+      eq(toolOperations.toolCallId, input.tool_use_id),
+    )).run();
+    return {};
+  };
+  return {
+    PreToolUse: [{ hooks: [pre] }],
+    PostToolUse: [{ hooks: [post] }],
+    PostToolUseFailure: [{ hooks: [postFailure] }],
+  };
+}
+
+/** 旧形态(过渡):onToolExecution 事件 → 台账。toolOperationHooks 落地后删。 */
 export function recordToolExecution(
   db: AppDatabase,
   runId: string,

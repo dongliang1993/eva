@@ -1,4 +1,4 @@
-import { recordToolExecution } from "./tool-operations.js";
+import { toolOperationHooks } from "./tool-operations.js";
 import {
   createSubagentTool,
   type PipelineTool,
@@ -243,7 +243,7 @@ export class RunRuntimeBuilder {
       abortSignal: scope.abortSignal,
       canUseTool: scope.permissions.canUseTool,
       toolExecutionForTask: (taskId) =>
-        recordToolExecution(this.deps.db, scope.runId, taskId),
+        toolOperationHooks(this.deps.db, scope.runId, taskId),
       onSubagentEvent: (event) => {
         scope.emit({ type: "subagent_update", ...event });
       },

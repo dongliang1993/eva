@@ -174,7 +174,7 @@ const resultFrames = (
   }
 
   if (message.subtype === "interrupted" || message.subtype === "error_max_turns") {
-    // 文案进 finish.text(与旧 finishRun 一致):max-steps 带步数与续跑路径,interrupted 带已产出文本。
+    // 文案进 finish.text:max-steps 带步数与续跑路径,interrupted 带已产出文本。
     const [firstError] = message.errors;
     return [{
       type: "finish",

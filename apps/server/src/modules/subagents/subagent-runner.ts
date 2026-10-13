@@ -16,7 +16,7 @@ import { SubagentTaskRepository } from "./subagent-task-repository.js";
 import { SubagentRecorder } from "./subagent-recorder.js";
 
 export interface SubagentRunnerOptions {
-  readonly toolExecutionForTask?: (taskId: string) => AgentRunInput["onToolExecution"];
+  readonly toolExecutionForTask?: (taskId: string) => AgentRunInput["hooks"];
   readonly sessionId: string;
   readonly db: AppDatabase;
   readonly runId: string;
@@ -65,7 +65,9 @@ export class SubagentRunner {
         messages: [{ role: "user", content: prompt }],
         abortSignal: signal,
         agentID: taskId,
-        onToolExecution: this.options.toolExecutionForTask?.(taskId),
+        ...(this.options.toolExecutionForTask?.(taskId) !== undefined
+          ? { hooks: this.options.toolExecutionForTask?.(taskId) }
+          : {}),
       })) {
         // 一条消息流 → 帧:recorder 与 onSubagentEvent 吃帧(信封不变),
         // 子代理的终态从 result 消息读。
