@@ -33,7 +33,10 @@ import type { ToolExtra } from "./types.js";
  * 与今天 onToolExecution 写库失败会让工具失败的语义一致 —— intent 没写进去就不能执行。
  */
 
-/** 三段计时 + aborted 标记,tool_timing 的 run 内形态。 */
+/**
+ * 三段计时的 run 内可变形状。契约 ToolTiming 是它的对外只读视图
+ * (UserMessage.tool_timing 直接消费);计时期间在这里累加,发消息前不再改。
+ */
 export interface ToolTimingMutable {
   approval_wait_ms: number;
   queue_wait_ms: number;

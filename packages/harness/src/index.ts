@@ -10,12 +10,23 @@ export type {
 } from "./query/tool-call.js";
 export type {
   CanUseTool,
+  HarnessMessage,
   HookCallback,
   HookCallbackMatcher,
   HookEvent,
   HookInput,
   HookJSONOutput,
   PermissionResult,
+  AssistantMessage,
+  CompactBoundaryMessage,
+  ResultMessage,
+  StreamDelta,
+  StreamEventMessage,
+  SystemInitMessage,
+  TokenUsage,
+  ToolTiming,
+  TurnCompleteMessage,
+  UserMessage,
 } from "./query/types.js";
 export type {
   Agent,
