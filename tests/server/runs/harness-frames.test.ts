@@ -92,7 +92,14 @@ const user: UserMessage = {
         type: "tool-result",
         toolCallId: "tc-2",
         toolName: "boom",
-        output: { type: "text", value: "Error: kaput" },
+        output: { type: "error-text", value: "Error: kaput" },
+      },
+      {
+        // 成功结果的文本恰好以 Error: 开头 —— status 只看 output.type
+        type: "tool-result",
+        toolCallId: "tc-3",
+        toolName: "grep",
+        output: { type: "text", value: "Error: in log line 3" },
       },
     ],
   },
@@ -100,6 +107,7 @@ const user: UserMessage = {
   tool_timing: {
     "tc-1": { approval_wait_ms: 5, queue_wait_ms: 0, exec_ms: 12, aborted: false },
     "tc-2": { approval_wait_ms: 0, queue_wait_ms: 0, exec_ms: 8, aborted: false },
+    "tc-3": { approval_wait_ms: 0, queue_wait_ms: 0, exec_ms: 1, aborted: false },
   },
   parent_tool_use_id: null,
 };
@@ -177,7 +185,7 @@ describe("toRunStreamFrames(plan §3.5 映射表)", () => {
     }]);
   });
 
-  it("user:每个 tool-result part 一帧;status 由 Error: 前缀判,计时取 tool_timing", () => {
+  it("user:每个 tool-result part 一帧;status 由 output.type(error-text)判,计时取 tool_timing", () => {
     expect(toRunStreamFrames(user)).toEqual([
       {
         type: "tool-result",
@@ -194,6 +202,14 @@ describe("toRunStreamFrames(plan §3.5 映射表)", () => {
         output: "Error: kaput",
         status: "error",
         toolExecMs: 8, approvalWaitMs: 0, queueWaitMs: 0,
+      },
+      {
+        type: "tool-result",
+        toolCallId: "tc-3",
+        toolName: "grep",
+        output: "Error: in log line 3",
+        status: "success",
+        toolExecMs: 1, approvalWaitMs: 0, queueWaitMs: 0,
       },
     ]);
   });

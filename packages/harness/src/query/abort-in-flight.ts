@@ -1,4 +1,5 @@
 import { userMessage } from "./messages.js";
+import { toToolResultOutput } from "./tool-output.js";
 import type { HarnessMessage, ToolTiming } from "./types.js";
 import type { ToolTimingMutable } from "./tool-call.js";
 import { TOOL_CALL_ABORTED_OUTPUT } from "../tools/tool.js";
@@ -53,7 +54,7 @@ export function* abortInFlightMessages(
         toolCallId: result.toolCallId,
         toolName: result.toolName,
         input: {},
-        output: { type: "text" as const, value: result.outputText },
+        output: toToolResultOutput(result.outputText, result.isError),
       })) as import("ai").ToolModelMessage["content"],
     },
     turn: input.step,

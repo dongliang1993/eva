@@ -1,3 +1,4 @@
+import { isErrorOutput, toolOutputText } from "@eva/harness";
 import type { HarnessMessage } from "@eva/harness";
 
 import { canonicalStringify, sha256Hex } from "./canonical.js";
@@ -226,11 +227,7 @@ const userMessages = (
   for (const part of message.message.content) {
     if (part.type !== "tool-result") continue;
     const timing = message.tool_timing[part.toolCallId];
-    const output = part.output;
-    const outputText =
-      output.type === "text" && typeof output.value === "string"
-        ? output.value
-        : JSON.stringify((output as { value?: unknown }).value ?? null);
+    const outputText = toolOutputText(part.output);
     if (timing?.aborted) {
       // abort 补发:duration_ms 是未分解墙钟(三段之和),decomposed=false。
       recorder.record({
@@ -256,7 +253,7 @@ const userMessages = (
       ...(timing !== undefined ? { durationMs: timing.exec_ms } : {}),
       payload: {
         toolName: part.toolName,
-        status: outputText.startsWith("Error:") ? "error" : "success",
+        status: isErrorOutput(part.output) ? "error" : "success",
         output: outputText,
         ...(timing !== undefined
           ? {

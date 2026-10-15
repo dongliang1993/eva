@@ -1,4 +1,5 @@
 import type { ModelMessage } from "ai";
+import { isErrorOutput, toolOutputText } from "@eva/harness";
 import type { HarnessMessage as Message } from "@eva/harness";
 import type { RunStreamEvent } from "@eva/shared";
 
@@ -17,7 +18,7 @@ import type { RunStreamEvent } from "@eva/shared";
  * | assistant(tool-call part) | tool-call 帧 |
  * | assistant(text/reasoning) | 无(增量已由 stream_event 发过) |
  * | system/turn_complete      | 无 |
- * | user                      | 每个 tool-result part → tool-result 帧(status 由 isError,计时取 tool_timing) |
+ * | user                      | 每个 tool-result part → tool-result 帧(status 由 output.type,计时取 tool_timing) |
  * | result success / error_max_turns / interrupted | finish 帧 |
  * | result error_during_execution | error 帧(带 failureLayer)+ finish(error) |
  * | system/init / compact_boundary | 无 |
@@ -105,21 +106,14 @@ const toolResultFrames = (
   if (typeof message.message.content !== "string") {
     for (const part of message.message.content) {
       if (part.type !== "tool-result") continue;
-      const output = part.output;
-      // output 是 ToolResultOutput:text 分支是 toModelOutput(textOf) 的产物。
-      const outputText =
-        output.type === "text" && typeof output.value === "string"
-          ? output.value
-          : JSON.stringify((output as { value?: unknown }).value ?? null);
       const timing = timingOf(part.toolCallId);
       frames.push({
         type: "tool-result",
         toolCallId: part.toolCallId,
         toolName: part.toolName,
-        output: outputText,
-        // isError 不在 AI SDK 的 part 上:Error: 前缀是 runToolCall 的 errorResult 拼的
-        // (与 turn.ts 的收集同一通道);aborted() 也带前缀,abort 补发同样命中。
-        status: outputText.startsWith("Error:") ? "error" : "success",
+        output: toolOutputText(part.output),
+        // 成败只看 output.type(error-text = is_error),不看文本前缀 —— 与 harness 同一事实源。
+        status: isErrorOutput(part.output) ? "error" : "success",
         ...(timing !== undefined
           ? {
               toolExecMs: timing.exec_ms,

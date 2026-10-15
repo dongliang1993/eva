@@ -5,26 +5,10 @@ import type {
 } from "ai";
 
 import type { ContextWindowPolicy } from "./policy.js";
+import { isErrorOutput, toolOutputText, toToolResultOutput } from "../query/tool-output.js";
 
 const TOOL_RESULT_BUDGET_NOTICE = "Tool result omitted due to context budget.";
 const ESTIMATED_CHARS_PER_TOKEN = 4;
-
-// ToolResultPart.output 的类型(ai 没直接导出 ToolResultOutput,用索引取)。
-type ToolResultOutput = ToolResultPart["output"];
-
-// 把 ToolResultOutput 拍平成纯文本用于 token 估算和裁剪判断。
-const stringifyToolOutput = (output: ToolResultOutput): string => {
-  switch (output.type) {
-    case "text":
-      return output.value;
-    case "json":
-      return typeof output.value === "string" ? output.value : JSON.stringify(output.value);
-    case "execution-denied":
-      return `Execution denied${output.reason ? `: ${output.reason}` : ""}`;
-    default:
-      return JSON.stringify(output);
-  }
-};
 
 const estimateTokens = (text: string): number =>
   Math.max(1, Math.ceil(text.length / ESTIMATED_CHARS_PER_TOKEN));
@@ -75,14 +59,15 @@ const buildTrimmedToolResult = (
   type: "tool-result",
   toolCallId: original.toolCallId,
   toolName: original.toolName,
-  output: {
-    type: "text",
-    value: [
+  // 裁掉的是正文,不是成败:error 结果裁剪后仍是 error-text(Claude Code microcompact 同款,is_error 保留)。
+  output: toToolResultOutput(
+    [
       `[${TOOL_RESULT_BUDGET_NOTICE}]`,
       `Tool call ID: ${original.toolCallId}`,
       `Original output length: ${originalText.length} chars`
-    ].join(" ")
-  }
+    ].join(" "),
+    isErrorOutput(original.output)
+  )
 });
 
 interface ToolMessageBudgetCandidate {
@@ -137,7 +122,7 @@ export const applyToolResultBudget = (
     }
 
     const toolName = toolNameByCallId.get(toolResult.toolCallId);
-    const text = stringifyToolOutput(toolResult.output);
+    const text = toolOutputText(toolResult.output);
 
     if (text.length === 0 || isTrimmedToolResult(text)) {
       continue;

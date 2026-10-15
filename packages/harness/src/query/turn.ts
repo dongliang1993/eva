@@ -10,7 +10,8 @@ import {
   turnCompleteMessage,
   userMessage,
 } from "./messages.js";
-import type { HarnessMessage, TokenUsage, ToolResult } from "./types.js";
+import { readToolOutput, toToolResultOutput } from "./tool-output.js";
+import type { HarnessMessage, TokenUsage } from "./types.js";
 
 /**
  * 一次模型调用（一个 turn）：消费 AI SDK stream part,按契约顺序产出消息。
@@ -42,49 +43,13 @@ export interface TurnOutput {
   readonly ttftMs: number | null;
 }
 
-/** tool-result part 的收集形态:状态(isError)从输出文本判(单一通道,与投影一致)。 */
+/** tool-result part 的收集形态:isError 来自 ToolResult.isError(结构,不看文本)。 */
 export interface ToolResultOnStream {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly outputText: string;
   readonly isError: boolean;
 }
-
-/**
- * part.output → (text, isError)。
- *
- * Eva 的工具(toAiTool)execute 返回 ToolResult:{ content: [{type:"text", text}], isError? }。
- * part.output 是这个对象原样(回灌给模型的 toModelOutput 是另一条路)。
- * Error: 前缀是 runToolCall 的 errorResult 拼的 —— isError 优先读对象字段,前缀是兜底
- * (历史消息 / abort 补发只有文本)。
- */
-const toolResultFromOutput = (
-  output: unknown,
-): { outputText: string; isError: boolean } => {
-  if (
-    typeof output === "object" && output !== null &&
-    "content" in output && Array.isArray((output as { content?: unknown }).content)
-  ) {
-    const evaResult = output as {
-      content: readonly { readonly type: string; readonly text?: string }[];
-      isError?: boolean;
-    };
-    const text = evaResult.content
-      .map((part2) => (part2.type === "text" ? part2.text ?? "" : ""))
-      .join("");
-    return { outputText: text, isError: evaResult.isError === true || text.startsWith("Error:") };
-  }
-  if (
-    typeof output === "object" && output !== null && "type" in output &&
-    (output as { type?: unknown }).type === "text"
-  ) {
-    const value = (output as { value?: unknown }).value;
-    const text = typeof value === "string" ? value : JSON.stringify(value ?? null);
-    return { outputText: text, isError: text.startsWith("Error:") };
-  }
-  const text = JSON.stringify(output ?? null);
-  return { outputText: text, isError: text.startsWith("Error:") };
-};
 
 /**
  * runTurn 的流式版:逐消息产出(生成器),终局(toolResults/ttft)由 final() 取。
@@ -193,30 +158,16 @@ export const runTurnStream = (
             input: (part.input as Record<string, unknown>) ?? {},
           }]);
           break;
-        case "tool-result": {
-          const collectedResult = toolResultFromOutput(part.output);
-          collected.push({
-            toolCallId: part.toolCallId,
-            toolName: part.toolName,
-            outputText: collectedResult.outputText,
-            isError: collectedResult.isError,
-          });
+        case "tool-result":
+          collected.push(collectToolResult(part.toolCallId, part.toolName, part.output));
           break;
-        }
         case "error":
           // 流级错误:往上抛,run-loop 的 catch 接住走 reactive compact / 终态。
           throw part.error;
-        case "tool-error": {
+        case "tool-error":
           // ai 层错误(execute 之外):折叠成已收口的结果,状态 error。
-          const collectedResult = toolResultFromOutput({ type: "text", value: `Error: ${part.error instanceof Error ? part.error.message : String(part.error)}` });
-          collected.push({
-            toolCallId: part.toolCallId,
-            toolName: part.toolName,
-            outputText: collectedResult.outputText,
-            isError: true,
-          });
+          collected.push(collectToolError(part.toolCallId, part.toolName, part.error));
           break;
-        }
         default:
           // start/start-step/finish-step/finish/raw/source/file:
           // 控制流与终态由调用方(run-loop)处理。
@@ -361,35 +312,16 @@ export const runTurn = async (input: TurnInput): Promise<TurnOutput> => {
         break;
       }
 
-      case "tool-result": {
-        // output 是 ToolResultOutput(text 是 toModelOutput(textOf) 的产物);
-        // isError 经 output 里的 Error: 判不可靠 —— 状态由 timings/output 双源:
-        // runToolCall 的结果对象不进 part,这里只收 id/name,input 从 tool-call part
-        // 拿不到(它已发过 assistant),由 runToolCall 侧通过 timings 附带 —— 不行。
-        // 真正的单一事实源:run-loop 在派发后持有结果对象,turn 只按 id 收集。
-        const collected = toolResultFromOutput(part.output);
-        toolResults.push({
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          outputText: collected.outputText,
-          isError: collected.isError,
-        });
+      case "tool-result":
+        toolResults.push(collectToolResult(part.toolCallId, part.toolName, part.output));
         break;
-      }
 
       case "error":
         // 流级错误:往上抛,调用方的 catch 接住。
         throw part.error;
-      case "tool-error": {
-        const collectedResult = toolResultFromOutput({ type: "text", value: `Error: ${part.error instanceof Error ? part.error.message : String(part.error)}` });
-        toolResults.push({
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          outputText: collectedResult.outputText,
-          isError: true,
-        });
+      case "tool-error":
+        toolResults.push(collectToolError(part.toolCallId, part.toolName, part.error));
         break;
-      }
       default:
         // start / start-step / finish-step / finish / raw / source / file:
         // 控制流与终态由调用方(run-loop)处理。
@@ -405,6 +337,26 @@ export const runTurn = async (input: TurnInput): Promise<TurnOutput> => {
 
   return { messages, toolResults, ttftMs };
 };
+
+const collectToolResult = (
+  toolCallId: string,
+  toolName: string,
+  output: unknown,
+): ToolResultOnStream => {
+  const { text, isError } = readToolOutput(output);
+  return { toolCallId, toolName, outputText: text, isError };
+};
+
+const collectToolError = (
+  toolCallId: string,
+  toolName: string,
+  error: unknown,
+): ToolResultOnStream => ({
+  toolCallId,
+  toolName,
+  outputText: `Error: ${error instanceof Error ? error.message : String(error)}`,
+  isError: true,
+});
 
 const isTokenPart = (part: TextStreamPart<ToolSet>): boolean =>
   part.type === "text-delta" ||
@@ -443,10 +395,7 @@ export const finishTurn = (input: {
           toolCallId: result.toolCallId,
           toolName: result.toolName,
           input: {},
-          output: {
-            type: "text" as const,
-            value: result.outputText,
-          },
+          output: toToolResultOutput(result.outputText, result.isError),
         })) as ToolModelMessage["content"],
       },
       turn: input.turn,

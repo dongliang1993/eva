@@ -9,6 +9,7 @@ import type {
 } from "ai";
 
 import type { ContextWindowPolicy } from "./policy.js";
+import { isErrorOutput, toolOutputText } from "../query/tool-output.js";
 
 const ESTIMATED_CHARS_PER_TOKEN = 4;
 // T37: 压缩产出对齐 Alma —— <context_summary> 包裹的 user 消息(不再是 system Runtime summary)。
@@ -59,7 +60,7 @@ const stringifyContent = (content: unknown): string => {
           }
           if (part.type === "tool-result") {
             const tr = part as unknown as ToolResultPart;
-            return stringifyToolOutput(tr.output);
+            return toolOutputText(tr.output);
           }
           return JSON.stringify(part);
         }
@@ -70,19 +71,6 @@ const stringifyContent = (content: unknown): string => {
   }
 
   return JSON.stringify(content) ?? "";
-};
-
-const stringifyToolOutput = (output: ToolResultPart["output"]): string => {
-  switch (output.type) {
-    case "text":
-      return output.value;
-    case "json":
-      return typeof output.value === "string" ? output.value : JSON.stringify(output.value);
-    case "execution-denied":
-      return `Execution denied${output.reason ? `: ${output.reason}` : ""}`;
-    default:
-      return JSON.stringify(output);
-  }
 };
 
 const normalizeSummaryText = (text: string): string => {
@@ -186,12 +174,10 @@ const buildToolNameByCallId = (
   return toolNameByCallId;
 };
 
-// 从 tool result 的 output 文本判断状态(tool() 的 errorResult 把错误包成 "Error: ..." 文本)。
+// 成败只看 output.type(error-text = is_error),不看文本前缀。
 const readToolStatus = (message: ToolModelMessage): "success" | "error" => {
   const result = readToolResult(message);
-  if (!result) return "success";
-  const text = stringifyToolOutput(result.output);
-  return text.startsWith("Error:") ? "error" : "success";
+  return result && isErrorOutput(result.output) ? "error" : "success";
 };
 
 const summarizeMessage = (
@@ -202,7 +188,7 @@ const summarizeMessage = (
     const result = readToolResult(message);
     const toolCallId = result?.toolCallId;
     const toolName = (toolCallId && toolNameByCallId.get(toolCallId)) ?? "unknown";
-    const content = result ? normalizeSummaryText(stringifyToolOutput(result.output)) : "";
+    const content = result ? normalizeSummaryText(toolOutputText(result.output)) : "";
     const status = readToolStatus(message);
 
     if (!content) {

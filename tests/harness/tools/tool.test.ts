@@ -213,6 +213,7 @@ describe("toAiTool()", () => {
       input: {},
       output,
     } as never);
-    expect(modelOutput).toEqual({ type: "text", value: "Error: connection lost" });
+    // 失败走 error-text(provider 译成 is_error:true);文本逐字不变。
+    expect(modelOutput).toEqual({ type: "error-text", value: "Error: connection lost" });
   });
 });

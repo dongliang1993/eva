@@ -1,6 +1,7 @@
 import { jsonSchema, tool as aiTool, type Tool, type ToolSet } from "ai";
 import { z } from "zod";
 
+import { toToolResultOutput } from "../query/tool-output.js";
 import type { ToolDefinition, ToolExtra, ToolResult } from "../query/types.js";
 
 // 契约里的工具类型在这里转出,tools 域的消费者不必直接 import query/types。
@@ -117,13 +118,19 @@ export const toolFromJsonSchema = <Input = Record<string, unknown>>(
   return { ...definition, execute: guarded };
 };
 
-/** AI SDK 适配：模型看到的是 `textOf(result)`，不再由 SDK JSON 化结果对象。 */
+/**
+ * AI SDK 适配：模型看到的是 `textOf(result)`；`isError` 映射成 error-text
+ * （provider 译成 tool_result 的 is_error: true —— Claude Code 同款）。
+ */
 const toModelOutput = (): NonNullable<Tool["toModelOutput"]> =>
-  ({ output }) => ({ type: "text", value: textOf(output as ToolResult) });
+  ({ output }) => {
+    const result = output as ToolResult;
+    return toToolResultOutput(textOf(result), result.isError === true);
+  };
 
 /**
  * `ToolDefinition` → AI SDK `Tool`。传给 `streamText` 的每个工具都经过这里：
- * `toModelOutput` 保证模型看到的文本与旧字符串返回值逐字一致。
+ * `toModelOutput` 保证模型看到的文本与旧字符串返回值逐字一致，成败走 output.type。
  */
 export const toAiTool = (definition: ToolDefinition): Tool => {
   const schema = isJsonSchemaInput(definition.inputSchema)

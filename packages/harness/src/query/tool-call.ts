@@ -1,5 +1,10 @@
 import { Semaphore } from "../tools/concurrency-cap.js";
-import { aborted, errorResultFrom, textOf } from "../tools/tool.js";
+import {
+  aborted,
+  errorResultFrom,
+  textOf,
+  TOOL_CALL_ABORTED_OUTPUT,
+} from "../tools/tool.js";
 import type { PipelineTool } from "../tools/tool.js";
 import {
   runPostToolUse,
@@ -231,7 +236,7 @@ const executeWithTiming = async (
   timing.aborted =
     extra.signal.aborted === true &&
     result.isError === true &&
-    textOf(result) === "Error: tool call aborted";
+    textOf(result) === TOOL_CALL_ABORTED_OUTPUT;
 
   if (result.isError === true) {
     // execute 的结构化失败(不是抛):同样走 PostToolUseFailure。

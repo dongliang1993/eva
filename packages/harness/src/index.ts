@@ -10,6 +10,8 @@ export type { Query } from "./query/types.js";
 export { evaluatePermission } from "./query/permission.js";
 export { runPreToolUse, runPostToolUse, runPostToolUseFailure } from "./query/hooks.js";
 export { runToolCall } from "./query/tool-call.js";
+export { isErrorOutput, toolOutputText } from "./query/tool-output.js";
+export type { ToolResultOutput } from "./query/tool-output.js";
 export type {
   ToolCallContext,
   ToolCallResult,

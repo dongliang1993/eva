@@ -98,28 +98,42 @@ describe("runTurn 顺序保证", () => {
     expect(assistant.message.content).toEqual([
       { type: "tool-call", toolCallId: "tc-1", toolName: "echo", input: { msg: "hi" } },
     ]);
-    // tool-result 收集:outputText + isError(前缀判,与 errorResult 同一通道)。
+    // tool-result 收集:outputText + isError(结构判,不看文本前缀)。
     expect(output.toolResults).toEqual([
       { toolCallId: "tc-1", toolName: "echo", outputText: "out:hi", isError: false },
     ]);
     expect(output.ttftMs).not.toBeNull();
   });
 
-  it("error 输出(text 带 Error: 前缀)→ isError=true", async () => {
+  it("isError 只看结构:ToolResult.isError / error-text,文本前缀不算(cc 的 is_error 单一事实源)", async () => {
     const output = await runTurn({
       ...base,
       includePartialMessages: true,
       stream: streamOf([
+        // execute 的原样返回值(AI SDK 的 tool-result part.output 是工具结果对象)
         part({
-          type: "tool-result",
-          toolCallId: "tc-1",
-          toolName: "boom",
-          input: {},
-          output: { type: "text", value: "Error: kaput" },
+          type: "tool-result", toolCallId: "tc-1", toolName: "boom", input: {},
+          output: { content: [{ type: "text", text: "kaput" }], isError: true },
         } as never),
+        // 成功结果的文本恰好以 Error: 开头(比如 grep 搜到的一行) —— 不是失败
+        part({
+          type: "tool-result", toolCallId: "tc-2", toolName: "grep", input: {},
+          output: { content: [{ type: "text", text: "Error: in log line 3" }] },
+        } as never),
+        // 已经是 ToolResultOutput 形态(abort 补发 / 历史)
+        part({
+          type: "tool-result", toolCallId: "tc-3", toolName: "x", input: {},
+          output: { type: "error-text", value: "denied" },
+        } as never),
+        part({ type: "tool-error", toolCallId: "tc-4", toolName: "y", input: {}, error: new Error("sdk") } as never),
       ]),
     });
-    expect(output.toolResults[0]?.isError).toBe(true);
+    expect(output.toolResults.map((r) => [r.toolCallId, r.isError, r.outputText])).toEqual([
+      ["tc-1", true, "kaput"],
+      ["tc-2", false, "Error: in log line 3"],
+      ["tc-3", true, "denied"],
+      ["tc-4", true, "Error: sdk"],
+    ]);
   });
 });
 
@@ -150,6 +164,10 @@ describe("finishTurn 终局两条", () => {
     if (user?.type !== "user") throw new Error("unreachable");
     expect(user.tool_timing["tc-2"]?.approval_wait_ms).toBe(30);
     expect(user.message.content).toHaveLength(2);
+    // 失败结果的 output 是 error-text(→ Anthropic is_error:true);成功是 text。
+    if (typeof user.message.content === "string") throw new Error("unreachable");
+    expect(user.message.content.map((p) => p.type === "tool-result" ? p.output.type : p.type))
+      .toEqual(["text", "error-text"]);
   });
 
   it("无工具结果:只有 turn_complete,不发空 user", () => {
