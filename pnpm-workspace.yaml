@@ -5,6 +5,12 @@ packages:
 # 允许跑安装脚本的包(native 编译/二进制下载)。必须是 YAML 列表 ——
 # 写成 '["electron"]' 这种字符串形式 pnpm 不认,会导致 better-sqlite3
 # 的 native 编译被静默跳过,只留下 ABI 可能不匹配的预编译产物。
+#
+# ABI 纪律(2026-10-15 实测):本仓库固定 nvm node v22.22.0(NODE_MODULE_VERSION 127)。
+# better-sqlite3 的预编译产物只带这个 ABI;在任何别的 Node(如 homebrew node 24,
+# ABI 137)下 require 会直接 ERR_DLOPEN_FAILED。重编译只会把破口推到另一边 ——
+# 谁后重编译,二进制就只服务谁的 ABI。测试脚本(package.json 的 test)已把
+# node 22 前置进 PATH;任何要跑 native 模块的入口都必须和它一致。
 onlyBuiltDependencies:
   - better-sqlite3
   - electron

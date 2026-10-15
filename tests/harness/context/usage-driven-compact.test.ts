@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { ModelMessage } from "ai";
 
 import { isOverflowing } from "../../../packages/harness/src/context/runtime-compact.js";
-import { resolveContextWindowPolicy } from "../../../packages/harness/src/context/policy.js";
+import { normalizeContextWindowPolicy } from "../../../packages/harness/src/context/policy.js";
 
 // T36: compact 判定从 chars/4 估算换上一步真实 usage.inputTokens。
 // 阈值 = contextWindow - reservedOutputTokens - loopCompactBufferTokens。
 // contextWindow 128k / reserved 8k / buffer 12k → 阈值 108k。
-const policy = resolveContextWindowPolicy({
+const policy = normalizeContextWindowPolicy({
   contextWindow: 128_000,
   reservedOutputTokens: 8_000,
   loopCompactBufferTokens: 12_000

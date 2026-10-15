@@ -32,7 +32,7 @@ export const readSessionUsage = (
   session: SessionService,
   sessionId: string
 ): SessionUsage => {
-  const history = session.buildModelHistory(db, sessionId);
+  const history = session.activeChainHistory(db, sessionId);
   const contextTokens = estimateModelHistoryTokens(history);
 
   // 窗口大小来自**这个会话绑定的模型**(sessions.model = 最近一轮 run 选定的),

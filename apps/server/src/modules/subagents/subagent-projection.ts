@@ -47,6 +47,11 @@ export interface SubagentProjection {
   settleOrphans(reason: string): void;
 }
 
+/** 消息分拣器
+ ** harness 的内置 subagent 工具跑子代理时，子代理的消息不会开一条独立的流，
+ ** 而是并回父 query() 的同一条消息流，靠 parent_tool_use_id(派发那次工具调用的 id)标记“这条是那个子代理产生的”。
+ ** 系统还会插两条生命周期消息:task_started(派发了)和 task_notification(子代理跑完了)。
+*/
 export const createSubagentProjection = (
   options: SubagentProjectionOptions,
 ): SubagentProjection => {
@@ -81,9 +86,10 @@ export const createSubagentProjection = (
   const finish = (
     toolUseID: string,
     outcome: { readonly result?: string; readonly error?: string },
-  ): void => {
+  ) => {
     const task = active.get(toolUseID);
     if (task === undefined) return;
+
     active.delete(toolUseID);
     options.db.transaction(() => {
       task.recorder.flush();
@@ -109,16 +115,18 @@ export const createSubagentProjection = (
   };
 
   return {
-    accepts: (message) =>
-      message.parent_tool_use_id !== null ||
-      (message.type === "system" &&
-        (message.subtype === "task_started" || message.subtype === "task_notification")),
+    accepts: (message) => {
+      return message.parent_tool_use_id !== null ||
+        (message.type === "system" &&
+          (message.subtype === "task_started" || message.subtype === "task_notification"))
+    },
 
     record(message) {
       if (message.type === "system" && message.subtype === "task_started") {
         start(message);
         return;
       }
+
       if (message.type === "system" && message.subtype === "task_notification") {
         finish(
           message.tool_use_id,
@@ -128,6 +136,7 @@ export const createSubagentProjection = (
         );
         return;
       }
+
       const toolUseID = message.parent_tool_use_id;
       if (toolUseID === null) return;
       const task = active.get(toolUseID);

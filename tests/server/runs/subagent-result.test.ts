@@ -18,7 +18,7 @@ import {
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
 import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { DrizzleRunRepository } from "../../../apps/server/src/modules/runs/index.js";
-import type { AgentFactory, ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
+import type { AgentFactory, ModelResolution } from "../../../apps/server/src/modules/runs/index.js";
 import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessions/index.js";
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
@@ -88,7 +88,7 @@ const reportingSubagentModel = (): MockLanguageModelV4 => new MockLanguageModelV
 let app: FastifyInstance;
 let db: AppDatabase;
 
-/** build 桩的模型 binding(ResolvedOptions 需要的字段集)。 */
+/** build 桩的模型 binding(ModelResolution 需要的字段集)。 */
 const testBinding = (qualifiedModelId: string): ModelBinding => ({
   slot: "tool",
   providerId: "openai",
@@ -106,7 +106,7 @@ const stubAgentFactory = (
   },
 ): AgentFactory =>
   ({
-    build: (): ResolvedOptions => ({
+    build: (): ModelResolution => ({
       options: {
         model: { languageModel: forkingModel(), id: "openai:test" },
         tools: [...child.tools],

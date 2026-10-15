@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { ModelMessage } from "ai";
 
 import { applyProactiveLoopCompactWithStats } from "../../../packages/harness/src/context/runtime-compact.js";
-import { resolveContextWindowPolicy } from "../../../packages/harness/src/context/policy.js";
+import { normalizeContextWindowPolicy } from "../../../packages/harness/src/context/policy.js";
 
 // T37: 压缩产出对齐 Alma —— <context_summary> user 消息 + 「不要从头再来」reminder + 六段摘要。
-const policy = resolveContextWindowPolicy({
+const policy = normalizeContextWindowPolicy({
   contextWindow: 20, // 极小窗口,逼必然触发 compact(8 条估算 ~27 token > 20)
   reservedOutputTokens: 0,
   loopCompactBufferTokens: 0

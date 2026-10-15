@@ -10,7 +10,7 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import type { ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
+import type { ModelResolution } from "../../../apps/server/src/modules/runs/index.js";
 import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
 import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
@@ -45,7 +45,7 @@ const textModel = (text: string): MockLanguageModelV4 =>
     })
   });
 
-/** build 桩的模型 binding(ResolvedOptions 需要的字段集)。 */
+/** build 桩的模型 binding(ModelResolution 需要的字段集)。 */
 const testBinding = (qualifiedModelId: string): ModelBinding => ({
   slot: "tool",
   providerId: "openai",
@@ -69,7 +69,7 @@ const startApp = async (): Promise<void> => {
   app.decorate("services", {
     agents: {
       // build 桩:Options + 双模型 binding(与 resolveModels 桩同存,thread 路由用后者)。
-      build: (): ResolvedOptions => ({
+      build: (): ModelResolution => ({
         options: {
           model: { languageModel: textModel("reply"), id: "openai:test" },
           tools: [],
@@ -179,12 +179,12 @@ describe("重生成 + 版本切换(API 级)", () => {
     expect(sess.activeLeafId).toBe(v2.id);
   });
 
-  it("buildModelHistory 只含激活分支(v1 不在里面)", async () => {
+  it("activeChainHistory 只含激活分支(v1 不在里面)", async () => {
     const sessionId = await startSession();
     const v1 = assistants(sessionId)[0]!;
     await streamRun({ sessionId, retryMessageId: v1.id });
 
-    const history = service().buildModelHistory(db, sessionId);
+    const history = service().activeChainHistory(db, sessionId);
     // 激活链 = [user, v2];v1 已被 v2 覆盖,不该出现在模型历史里。
     expect(history.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(history.messages[1]!.id).toBe(assistants(sessionId)[1]!.id);
@@ -196,7 +196,7 @@ describe("重生成 + 版本切换(API 级)", () => {
     await streamRun({ sessionId, retryMessageId: v1.id });
 
     // 模型不仅不含 v1 → 应从"被重试消息的父(user)"回溯,末端是 user。
-    const history = service().buildModelHistory(db, sessionId);
+    const history = service().activeChainHistory(db, sessionId);
     expect(history.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
     // 那条 assistant 是 v2,不是 v1
     expect(history.messages[1]!.id).not.toBe(v1.id);

@@ -110,7 +110,7 @@ export class MemoryAutomationService {
     this.messages = new DrizzleMessageRepository(deps.db);
   }
 
-  start(): void {
+  start() {
     if (this.closed) return;
     const recovered = this.jobs.recoverInterrupted();
     if (recovered > 0) {
@@ -141,7 +141,10 @@ export class MemoryAutomationService {
   }
 
   commitRetrieval(runId: string, result: MemoryRetrievalResult | undefined): void {
-    if (!result) return;
+    if (!result) {
+      return;
+    }
+
     try {
       recordMemoryRetrieval(this.deps.db, runId, result);
     } catch (error) {

@@ -8,7 +8,7 @@ import {
   Coordinator,
   type RunOutcome,
   type RunRequestLog
-} from "./run-coordinator.js";
+} from "./coordinator.js";
 import type { RunEventStream } from "../../transports/sse/event-stream.js";
 
 export type { RunOutcome, RunRequestLog };

@@ -24,10 +24,10 @@ import type {
  */
 
 export const systemInitMessage = (input: {
-  readonly model: string;
-  readonly tools: readonly string[];
-  readonly systemPrompt: string;
-  readonly parentToolUseID: string | null;
+  model: string;
+  tools: string[];
+  systemPrompt: string;
+  parentToolUseID: string | null;
 }): SystemInitMessage => ({
   type: "system",
   subtype: "init",

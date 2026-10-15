@@ -46,7 +46,10 @@ const CHECKPOINT_INTERVAL_MS = 1000;
 const isCheckpointBoundary = (event: RunAgentStreamEvent): boolean =>
   event.type === "tool-call" || event.type === "tool-result" || event.type === "step-start";
 
-/** Persists one assistant message throughout the run. */
+/** 
+ * 对话内容记录器
+ * 用户在 UI 里看到的消息文本、工具调用、工具结果，最终存进 messages 表(会话对话记录)。
+ * */
 export class AssistantMessageRecorder {
   private builder = new UiMessageBuilder(randomUUID());
   private position: MessagePosition;

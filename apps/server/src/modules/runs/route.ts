@@ -11,7 +11,7 @@ const RUN_GONE = { error: "run not found or already finished" } as const;
  * Run 的三条 HTTP 端点 —— **只做协议翻译**(宪法 C2)。
  *
  * 这个文件里没有业务顺序,也没有装配:一次 Run 怎么跑在
- * 业务顺序在 run-coordinator.ts，依赖装配在本模块 api.ts。
+ * 业务顺序在 coordinator.ts，依赖装配在本模块 api.ts。
  * 留在这里的只有 SSE 连接的建立、`RunOutcome` → HTTP 状态码、以及 404 语义。
  */
 export const registerRunRoutes = (app: FastifyInstance): void => {

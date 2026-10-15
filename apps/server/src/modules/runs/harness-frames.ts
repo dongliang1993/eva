@@ -116,17 +116,17 @@ const toolResultFrames = (
         status: isErrorOutput(part.output) ? "error" : "success",
         ...(timing !== undefined
           ? {
-              toolExecMs: timing.exec_ms,
-              approvalWaitMs: timing.approval_wait_ms,
-              queueWaitMs: timing.queue_wait_ms,
-              // abort 补发:durationMs 是未分解墙钟(等三段之和),历史徽章的兼容字段。
-              ...(timing.aborted
-                ? {
-                    durationMs:
-                      timing.approval_wait_ms + timing.queue_wait_ms + timing.exec_ms,
-                  }
-                : {}),
-            }
+            toolExecMs: timing.exec_ms,
+            approvalWaitMs: timing.approval_wait_ms,
+            queueWaitMs: timing.queue_wait_ms,
+            // abort 补发:durationMs 是未分解墙钟(等三段之和),历史徽章的兼容字段。
+            ...(timing.aborted
+              ? {
+                durationMs:
+                  timing.approval_wait_ms + timing.queue_wait_ms + timing.exec_ms,
+              }
+              : {}),
+          }
           : {}),
       });
     }
@@ -140,20 +140,20 @@ const resultFrames = (
   const usage =
     message.usage.input_tokens > 0 || message.usage.output_tokens > 0
       ? {
-          inputTokens: message.usage.input_tokens,
-          outputTokens: message.usage.output_tokens,
-          totalTokens:
-            message.usage.input_tokens + message.usage.output_tokens,
-          ...(message.usage.cache_read_input_tokens !== undefined
-            ? { cachedInputTokens: message.usage.cache_read_input_tokens }
-            : {}),
-          ...(message.usage.cache_creation_input_tokens !== undefined
-            ? { cacheWriteTokens: message.usage.cache_creation_input_tokens }
-            : {}),
-          ...(message.usage.reasoning_tokens !== undefined
-            ? { reasoningTokens: message.usage.reasoning_tokens }
-            : {}),
-        }
+        inputTokens: message.usage.input_tokens,
+        outputTokens: message.usage.output_tokens,
+        totalTokens:
+          message.usage.input_tokens + message.usage.output_tokens,
+        ...(message.usage.cache_read_input_tokens !== undefined
+          ? { cachedInputTokens: message.usage.cache_read_input_tokens }
+          : {}),
+        ...(message.usage.cache_creation_input_tokens !== undefined
+          ? { cacheWriteTokens: message.usage.cache_creation_input_tokens }
+          : {}),
+        ...(message.usage.reasoning_tokens !== undefined
+          ? { reasoningTokens: message.usage.reasoning_tokens }
+          : {}),
+      }
       : undefined;
 
   if (message.subtype === "success") {

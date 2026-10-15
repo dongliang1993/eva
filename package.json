@@ -11,7 +11,7 @@
     "lint:arch": "node scripts/check-architecture.mjs",
     "verify": "pnpm lint:arch && pnpm typecheck && pnpm test",
     "serve:dev": "pnpm --filter @eva/server dev",
-    "test": "vitest run",
+    "test": "PATH=\"$HOME/.nvm/versions/node/v22.22.0/bin:$PATH\" vitest run",
     "typecheck": "pnpm -r --if-present typecheck",
     "web:dev": "pnpm --filter @eva/web -r dev",
     "web:build": "pnpm --filter @eva/web build",

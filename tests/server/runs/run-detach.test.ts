@@ -6,7 +6,7 @@ import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import type { RunStreamFrame } from "../../../packages/shared/src/index.js";
 import { loadConfig } from "../../../apps/server/src/config.js";
 import { closeDb, initDb, migrateDb, type AppDatabase } from "../../../apps/server/src/db/index.js";
-import type { ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
+import type { ModelResolution } from "../../../apps/server/src/modules/runs/index.js";
 import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { ApprovalRepository } from "../../../apps/server/src/modules/approvals/index.js";
 import { DrizzleMessageRepository } from "../../../apps/server/src/modules/sessions/index.js";
@@ -23,7 +23,7 @@ const usage = {
   outputTokens: { total: 5, text: 5, reasoning: 0 }
 };
 
-/** build 桩的模型 binding(ResolvedOptions 需要的字段集)。 */
+/** build 桩的模型 binding(ModelResolution 需要的字段集)。 */
 const testBinding = (qualifiedModelId: string): ModelBinding => ({
   slot: "tool",
   providerId: "openai",
@@ -35,7 +35,7 @@ const testBinding = (qualifiedModelId: string): ModelBinding => ({
 });
 
 /** 一次跑得够久的 run —— 断连、重连、abort 都要在它还在飞的时候发生。 */
-const slowAgent = (): ResolvedOptions => ({
+const slowAgent = (): ModelResolution => ({
   options: {
     model: {
       languageModel: new MockLanguageModelV4({

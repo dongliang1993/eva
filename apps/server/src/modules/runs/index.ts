@@ -2,12 +2,12 @@ export { createRunsApi, type RunsApi } from "./api.js";
 export {
   AgentFactory,
   AgentUnavailableError,
-  type ResolvedOptions,
+  type ModelResolution,
   type WorkspaceContext,
 } from "./agent-factory.js";
 export { AssistantMessageRecorder } from "./assistant-message-recorder.js";
 export { registerRunRoutes } from "./route.js";
-export { Coordinator, type RunOutcome, type RunRequestLog } from "./run-coordinator.js";
+export { Coordinator, type RunOutcome, type RunRequestLog } from "./coordinator.js";
 export { RunHub } from "./run-hub.js";
 export { prepareRunInput, SessionBusyError } from "./run-preparation.js";
 export { RunRegistry } from "./run-registry.js";

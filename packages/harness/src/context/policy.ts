@@ -25,7 +25,7 @@ const DEFAULT_TOOL_RESULT_BUDGET_TOKENS = 12_000;
 const MAX_TOOL_RESULT_BUDGET_TOKENS = 24_000;
 const MIN_TOOL_RESULT_BUDGET_TOKENS = 1_000;
 
-export const resolveContextWindowPolicy = (
+export const normalizeContextWindowPolicy = (
   options: ContextWindowPolicyOptions | undefined
 ): ContextWindowPolicy => {
   const contextWindow = Math.max(

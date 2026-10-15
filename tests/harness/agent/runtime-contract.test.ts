@@ -47,7 +47,7 @@ describe("runtime contracts", () => {
       ] }),
     } : response("stop") }) });
     const extra = tool({ name: "mutate", description: "mutate", inputSchema: z.object({}), execute: execute });
-    for await (const message of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [extra] })) {
+    for await (const message of agent.stream({ messages: [{ role: "user", content: "go" }], tools: [extra] })) {
       for (const _ of toRunStreamFrames(message)) {
       }
     }
@@ -59,7 +59,7 @@ describe("runtime contracts", () => {
     const sameName = tool({ name: "same", description: "same", inputSchema: z.object({}), execute: async () => textResult("ok") });
     const agent = createRunLoopAgent({ tools: [sameName], model: new MockLanguageModelV4({ doStream: async () => response("stop") }) });
     const events = [];
-    for await (const message of agent.stream({ messages: [{ role: "user", content: "go" }], additionalTools: [sameName] })) {
+    for await (const message of agent.stream({ messages: [{ role: "user", content: "go" }], tools: [sameName] })) {
       for (const event of toRunStreamFrames(message)) events.push(event);
     }
     expect(events).toEqual([{ type: "error", message: "Duplicate tool name: same" }]);

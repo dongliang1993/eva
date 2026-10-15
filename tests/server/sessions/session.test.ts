@@ -165,7 +165,7 @@ describe("SessionService", () => {
     expect(second!.isNew).toBe(false);
     expect(second!.session.id).toBe(first.session.id);
 
-    const history = service.buildModelHistory(db, first.session.id);
+    const history = service.activeChainHistory(db, first.session.id);
     expect(history.messages).toHaveLength(3);
     expect(uiMessageText(history.messages[0]!)).toBe("First message");
     expect(uiMessageText(history.messages[1]!)).toBe("Bot reply");
@@ -228,7 +228,7 @@ describe("SessionService", () => {
       service.positionAfterActiveLeaf(session.id)
     );
 
-    const history = service.buildModelHistory(db, session.id);
+    const history = service.activeChainHistory(db, session.id);
     const modelMessages = await convertToModelMessages([...history.messages], {
       ignoreIncompleteToolCalls: true
     });
@@ -255,7 +255,7 @@ describe("SessionService", () => {
       service.positionAfterActiveLeaf(session.id)
     );
 
-    const history = service.buildModelHistory(db, session.id);
+    const history = service.activeChainHistory(db, session.id);
 
     // ignoreIncompleteToolCalls 下不抛,且结果里没有孤儿 tool-call
     const modelMessages = await convertToModelMessages([...history.messages], {
@@ -293,8 +293,8 @@ describe("SessionService", () => {
 
     expect(a2.session.id).not.toBe(b2.session.id);
 
-    const aHistory = service.buildModelHistory(db, a.session.id);
-    const bHistory = service.buildModelHistory(db, b.session.id);
+    const aHistory = service.activeChainHistory(db, a.session.id);
+    const bHistory = service.activeChainHistory(db, b.session.id);
     expect(aHistory.messages).toHaveLength(2);
     expect(bHistory.messages).toHaveLength(2);
   });

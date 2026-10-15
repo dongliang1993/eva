@@ -6,7 +6,7 @@ export const resolveFinalText = (
 ): string =>
   finishReason === "max-steps"
     ? `The agent reached the maximum tool-calling steps (${maxSteps}) without producing a final answer. ` +
-      "The work so far is preserved in this conversation — ask me to continue and I'll pick up where I left off."
+    "The work so far is preserved in this conversation — ask me to continue and I'll pick up where I left off."
     : accumulated.trim() || "The model returned an empty response.";
 
 export const isAbortError = (error: unknown): boolean =>

@@ -10,7 +10,7 @@ import {
   migrateDb,
   type AppDatabase
 } from "../../../apps/server/src/db/index.js";
-import type { ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
+import type { ModelResolution } from "../../../apps/server/src/modules/runs/index.js";
 import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { DrizzleRunRepository, runStatusFor } from "../../../apps/server/src/modules/runs/index.js";
 import { runs } from "../../../apps/server/src/db/schema.js";
@@ -49,7 +49,7 @@ const textModel = (text: string): MockLanguageModelV4 =>
 const rawClient = (db: AppDatabase): import("better-sqlite3").Database =>
   (db as unknown as { $client: import("better-sqlite3").Database }).$client;
 
-/** build 桩的模型 binding(ResolvedOptions 需要的字段集)。 */
+/** build 桩的模型 binding(ModelResolution 需要的字段集)。 */
 const testBinding = (qualifiedModelId: string): ModelBinding => ({
   slot: "tool",
   providerId: "openai",
@@ -61,7 +61,7 @@ const testBinding = (qualifiedModelId: string): ModelBinding => ({
 });
 
 /** build 桩:Options(model + maxTurns)+ 双模型 binding,Coordinator 拿它跑 query()。 */
-const buildResolved = (model: MockLanguageModelV4): ResolvedOptions => ({
+const buildModelResolution = (model: MockLanguageModelV4): ModelResolution => ({
   options: {
     model: { languageModel: model, id: "openai:test" },
     tools: [],
@@ -74,9 +74,9 @@ const buildResolved = (model: MockLanguageModelV4): ResolvedOptions => ({
 
 let app: FastifyInstance;
 let db: AppDatabase;
-let harness: ResolvedOptions;
+let harness: ModelResolution;
 
-const startApp = async (resolved: ResolvedOptions, memoryAutomation?: object): Promise<void> => {
+const startApp = async (models: ModelResolution, memoryAutomation?: object): Promise<void> => {
   app = Fastify();
   app.decorate("infra", {
     config: loadConfig({ env: {}, cwd: "/tmp" }),
@@ -85,7 +85,7 @@ const startApp = async (resolved: ResolvedOptions, memoryAutomation?: object): P
   });
   app.decorate("services", {
     agents: {
-      build: () => resolved,
+      build: () => models,
     },
     session: new SessionService(
       new DrizzleSessionRepository(db),
@@ -115,7 +115,7 @@ beforeEach(async () => {
     security: { ...settings.security, autoApproveToolRequests: true }
   });
 
-  harness = buildResolved(textModel("hello world"));
+  harness = buildModelResolution(textModel("hello world"));
   await startApp(harness);
 });
 
@@ -282,7 +282,7 @@ describe("run 台账", () => {
   it("模型报错 → status error,error 字段非空", async () => {
     // 重新起一个会在流中途抛错的 agent(error 事件帧 → run 收成 error)
     await app.close();
-    const errorAgent = buildResolved(new MockLanguageModelV4({
+    const errorAgent = buildModelResolution(new MockLanguageModelV4({
       doStream: async () => ({
         stream: simulateReadableStream({
           chunks: [

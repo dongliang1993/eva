@@ -138,7 +138,7 @@ export interface CompactOptions {
 
 /**
  * 非破坏性 compact:在 `session_compactions` 里写摘要快照,不删消息。
- * 摘要供 `buildModelHistory()` 构造 agent 的上下文视图用。
+ * 摘要供 `buildModelMessages()` 构造 agent 的上下文视图用。
  */
 export const compactSession = async (
   db: AppDatabase,

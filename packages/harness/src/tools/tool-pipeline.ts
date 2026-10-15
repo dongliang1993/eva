@@ -70,7 +70,7 @@ export const buildToolPipeline = (options: ToolPipelineOptions): ToolPipeline =>
   const pending = new Set<Promise<unknown>>();
   const track = <T>(task: Promise<T>): Promise<T> => {
     pending.add(task);
-    void task.then(() => pending.delete(task), () => pending.delete(task));
+    task.then(() => pending.delete(task), () => pending.delete(task));
     return task;
   };
 

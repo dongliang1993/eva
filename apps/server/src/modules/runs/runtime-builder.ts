@@ -12,7 +12,7 @@ import type {
   ApprovalGateway,
   ApprovalPolicyStore,
 } from "../approvals/index.js";
-import type { AgentFactory, ResolvedOptions } from "./agent-factory.js";
+import type { AgentFactory, ModelResolution } from "./agent-factory.js";
 import { defined } from "./agent-factory.js";
 import type { McpRegistry } from "../mcp/index.js";
 import { createMemoryTools, loadMemoryFilesSection, todayString } from "../memory/index.js";
@@ -30,35 +30,27 @@ import type { MemoryAutomationService } from "../memory/index.js";
 import { loadAppSettings } from "../settings/index.js";
 import type { MemoryRetrievalResult } from "../memory/index.js";
 
-export interface RunRuntimeBuilderDependencies {
-  readonly config: AppConfig;
-  readonly db: AppDatabase;
-  readonly logger: { warn(object: unknown, message?: string): void };
-  readonly skills: readonly Skill[];
-  readonly agents: AgentFactory;
-  readonly mcp: McpRegistry;
-  readonly plans: DrizzlePlanRepository;
-  readonly approvals: ApprovalGateway;
-  readonly approvalPolicies: ApprovalPolicyStore;
-  readonly memoryAutomation?: MemoryAutomationService | undefined;
+export interface RuntimeBuilderDependencies {
+  config: AppConfig;
+  db: AppDatabase;
+  logger: { warn(object: unknown, message?: string): void };
+  skills: readonly Skill[];
+  agents: AgentFactory;
+  mcp: McpRegistry;
+  plans: DrizzlePlanRepository;
+  approvals: ApprovalGateway;
+  approvalPolicies: ApprovalPolicyStore;
+  memoryAutomation?: MemoryAutomationService | undefined;
 }
 
 /** 装配一次 run 需要知道的「这一轮是谁」。 */
 export interface RunRuntimeScope {
-  readonly runId: string;
-  readonly sessionId: string;
-  readonly input: RunInput;
-  readonly permissions: RunPermissions;
-  readonly abortSignal: AbortSignal;
-  readonly emit: (event: RunStreamEvent) => void;
-}
-
-/** 装配期定形的消息消费者(recorder 的输入域)。 */
-export interface RunConsumers {
-  /** run_events 的 recorder(轨迹页);观测关着时短路,不写。 */
-  readonly recorder: RunRecorder;
-  /** HarnessMessage 的第二订阅者(pino 日志);可以为 undefined。 */
-  readonly pino: ((message: HarnessMessage) => void) | undefined;
+  runId: string;
+  sessionId: string;
+  input: RunInput;
+  permissions: RunPermissions;
+  abortSignal: AbortSignal;
+  emit: (event: RunStreamEvent) => void;
 }
 
 /** 每个子代理任务一个 trajectory(agent = taskId)。 */
@@ -66,10 +58,11 @@ export interface SubagentTrajectory {
   record(message: HarnessMessage): void;
 }
 
+/** 观测域:run_events 的 recorder + per-task 轨迹工厂。观测关着时 recorder 照样返回,只是不写。 */
 export interface RunObservability {
-  readonly recorder: RunRecorder;
+  recorder: RunRecorder;
   /** 每次调用一个新 trajectory?不 —— 同一 recorder,per-agent 由 createRunTrajectory 内部不区分。 */
-  readonly trajectory: () => SubagentTrajectory;
+  trajectory: () => SubagentTrajectory;
 }
 
 /**
@@ -77,21 +70,23 @@ export interface RunObservability {
  * 不需要提取(关着 / 没有 memory 服务)时为 undefined。
  */
 export interface MemoryExtractionPlan {
-  readonly modelId: string;
-  readonly mode: "review" | "automatic";
-  readonly workspaceId?: string | undefined;
+  modelId: string;
+  mode: "review" | "automatic";
+  workspaceId?: string | undefined;
 }
 
-/** 这一轮 agent 有什么 —— 装配阶段的全部产出。 */
+/** 这一轮 agent 有什么 —— 装配阶段的全部产出(input/permissions/models 同源,一体携带)。 */
 export interface AgentRuntime {
-  readonly resolved: ResolvedOptions;
-  readonly consumers: RunConsumers;
-  readonly extraction?: MemoryExtractionPlan | undefined;
-  readonly memoryRetrieval?: MemoryRetrievalResult | undefined;
+  input: RunInput;
+  permissions: RunPermissions;
+  models: ModelResolution;
+  observability: RunObservability;
+  extraction?: MemoryExtractionPlan | undefined;
+  memoryRetrieval?: MemoryRetrievalResult | undefined;
 }
 
-export class RunRuntimeBuilder {
-  constructor(private readonly deps: RunRuntimeBuilderDependencies) { }
+export class RuntimeBuilder {
+  constructor(private readonly deps: RuntimeBuilderDependencies) { }
 
   /**
    * 权限链(coordinator 在 agent 装配之前调):
@@ -99,13 +94,13 @@ export class RunRuntimeBuilder {
    * 无 workspace 的 run 不带 planGate(enter/exit 工具与 plan 路径直放都缺席)。
    */
   createPermissions(
-    run: { readonly id: string; readonly emit: (event: RunStreamEvent) => void },
+    run: { id: string; emit: (event: RunStreamEvent) => void },
     input: RunInput,
     events: {
-      readonly record: (event: {
-        readonly kind: "approval_asked" | "approval_decided";
-        readonly toolCallId: string;
-        readonly payload?: unknown;
+      record: (event: {
+        kind: "approval_asked" | "approval_decided";
+        toolCallId: string;
+        payload?: unknown;
       }) => void;
     }
   ): RunPermissions {
@@ -145,10 +140,10 @@ export class RunRuntimeBuilder {
 
   /** 本轮的诊断记录器。观测关着时 recorder 照样返回,只是不写。 */
   createObservability(scope: {
-    readonly runId: string;
-    readonly sessionId: string;
-    readonly enabled: boolean;
-    readonly captureLevel: CaptureLevel;
+    runId: string;
+    sessionId: string;
+    enabled: boolean;
+    captureLevel: CaptureLevel;
   }): RunObservability {
     const recorder = createRunRecorder(
       {
@@ -160,7 +155,7 @@ export class RunRuntimeBuilder {
       { runId: scope.runId, sessionId: scope.sessionId }
     );
     // trajectory 的 request 上下文(provider/model)在模型解析后才有 ——
-    // 由 coordinator 在流式阶段用 resolved 构造(recorder 共享同一实例)。
+    // 由 coordinator 在流式阶段用 models 构造(recorder 共享同一实例)。
     return { recorder, trajectory: () => { throw new Error("use coordinator trajectory"); } };
   }
 
@@ -201,7 +196,7 @@ export class RunRuntimeBuilder {
     // plan gate 工具(enter/exit)与权限链共用同一个 state 引用 ——
     // permissions.planGate 是装配期定下来的,工具执行中途 enter/exit 改的就是它。
     const planGate = scope.permissions.planGate;
-    const resolved = this.deps.agents.build({
+    const models = this.deps.agents.build({
       modelId: input.modelId,
       extraTools: sharedTools,
       canUseTool: scope.permissions.canUseTool,
@@ -214,19 +209,17 @@ export class RunRuntimeBuilder {
     const extraction: MemoryExtractionPlan | undefined =
       this.deps.memoryAutomation && memorySettings.enabled && memorySettings.autoSummarize
         ? {
-          modelId: resolved.toolModel.qualifiedModelId,
+          modelId: models.toolModel.qualifiedModelId,
           mode: memorySettings.autoSummarizeMode,
           ...(input.workspace ? { workspaceId: input.workspace.id } : {})
         }
         : undefined;
 
     return {
-      resolved,
-      consumers: {
-        recorder: observability.recorder,
-        // pino 是第二订阅者:coordinator 在流式阶段构造(它有完整 logger)。
-        pino: undefined,
-      },
+      input: scope.input,
+      permissions: scope.permissions,
+      models,
+      observability,
       ...defined("extraction", extraction),
       ...defined("memoryRetrieval", memoryRetrieval)
     };

@@ -3,6 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { UiMessageBuilder, createUserUIMessage } from "@eva/shared";
 
+import { randomUUID } from "../../../shared/uuid";
+
 import {
   abortRun,
   attachRun as attachRunApi,
@@ -127,7 +129,7 @@ export function useRunController({
     // 已经在跟这个 run 了(发现逻辑可能被触发两次),别开第二条连接。
     if (getProjection().runId === runId) return;
 
-    const assistantId = crypto.randomUUID();
+    const assistantId = randomUUID();
     builderRef.current = new UiMessageBuilder(assistantId);
     dispatch({ type: "run/attaching", runId, assistantId });
 
@@ -173,10 +175,10 @@ export function useRunController({
       return;
     }
 
-    const userMessage = createUserUIMessage(crypto.randomUUID(), trimmed);
+    const userMessage = createUserUIMessage(randomUUID(), trimmed);
     // 用户消息一次性进 committed;assistant 走 streaming 通道。
     dispatch({ type: "message/appended", message: userMessage });
-    startRun(crypto.randomUUID(), { text: trimmed }, modelId, () => {
+    startRun(randomUUID(), { text: trimmed }, modelId, () => {
       // 409:服务端没收这条,本地也不能留着假消息。
       dispatch({ type: "message/dropped", messageId: userMessage.id });
     });
@@ -189,7 +191,7 @@ export function useRunController({
     }
     // 先移除被重试的那条(同槽位会重新落库一个 v2),再开一个流式气泡。
     dispatch({ type: "message/dropped", messageId });
-    startRun(crypto.randomUUID(), { retryMessageId: messageId }, undefined, () => {
+    startRun(randomUUID(), { retryMessageId: messageId }, undefined, () => {
       // 409:这条 assistant 消息还在服务端,把刚才移除的它拉回来。
       syncFromServer(sessionId);
     });

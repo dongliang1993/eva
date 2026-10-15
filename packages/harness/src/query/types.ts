@@ -186,13 +186,13 @@ export type HarnessMessage =
   | ResultMessage;
 
 export interface SystemInitMessage {
-  readonly type: "system";
-  readonly subtype: "init";
-  readonly model: string;
-  readonly tools: readonly string[];
+  type: "system";
+  subtype: "init";
+  model: string;
+  tools: readonly string[];
   /** 真实发给模型的 system prompt（含 dynamicInstructions 的首次取值）。轨迹页的 request_snapshot 用它。 */
-  readonly system_prompt: string;
-  readonly parent_tool_use_id: string | null;
+  system_prompt: string;
+  parent_tool_use_id: string | null;
 }
 
 export interface StreamEventMessage {

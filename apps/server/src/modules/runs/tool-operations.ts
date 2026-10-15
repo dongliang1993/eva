@@ -62,7 +62,8 @@ export function toolOperationHooks(
 }
 
 export function interruptToolExecutions(db: AppDatabase): void {
-  db.update(toolOperations).set({ status: "unknown", endedAt: Date.now(),
+  db.update(toolOperations).set({
+    status: "unknown", endedAt: Date.now(),
     error: "Server restarted before an execution result was recorded; do not automatically replay."
   }).where(eq(toolOperations.status, "running")).run();
 }
@@ -70,6 +71,8 @@ export function interruptToolExecutions(db: AppDatabase): void {
 export function listToolExecutions(db: AppDatabase, runId: string) {
   return db.select().from(toolOperations).where(eq(toolOperations.runId, runId))
     .orderBy(asc(toolOperations.startedAt), asc(toolOperations.agent), asc(toolOperations.toolCallId)).all()
-    .map(row => ({ ...row, input: JSON.parse(row.input) as unknown,
-      output: row.output === null ? null : JSON.parse(row.output) as unknown }));
+    .map(row => ({
+      ...row, input: JSON.parse(row.input) as unknown,
+      output: row.output === null ? null : JSON.parse(row.output) as unknown
+    }));
 }

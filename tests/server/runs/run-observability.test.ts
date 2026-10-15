@@ -29,7 +29,7 @@ import {
   createSubagentProjection,
 } from "../../../apps/server/src/modules/subagents/index.js";
 import { query } from "../../../packages/harness/src/index.js";
-import type { AgentFactory, ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
+import type { AgentFactory, ModelResolution } from "../../../apps/server/src/modules/runs/index.js";
 import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { registerRunRoutes } from "../../../apps/server/src/modules/runs/index.js";
 import { decorateAppApi } from "../../helpers/app-api.js";
@@ -98,7 +98,7 @@ const waitFor = async (cond: () => boolean): Promise<void> => {
   }
 };
 
-/** build 桩的模型 binding(ResolvedOptions 需要的字段集)。 */
+/** build 桩的模型 binding(ModelResolution 需要的字段集)。 */
 const testBinding = (qualifiedModelId: string): ModelBinding => ({
   slot: "tool",
   providerId: "openai",
@@ -126,7 +126,7 @@ describe("run observability(route 级)", () => {
     app.decorate("services", {
       // 关键:ledger 由 createRunTrajectory 从 query() 的消息流推 —— 这是要测的链路。
       agents: {
-        build: (): ResolvedOptions => ({
+        build: (): ModelResolution => ({
           options: {
             model: { languageModel: model, id: "openai:test" },
             tools: [...tools],

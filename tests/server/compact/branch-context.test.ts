@@ -24,7 +24,7 @@ it("compaction only sees ancestors of the selected branch", async () => {
 
   // The summary's anchor is not an ancestor of this version.
   const service = new SessionService(sessions, messages);
-  const discarded = service.buildModelHistory(db, "s", "discarded");
+  const discarded = service.activeChainHistory(db, "s", "discarded");
   expect(discarded.summary).toBeUndefined();
   expect(discarded.messages.map(m => m.id)).toEqual(["root", "discarded"]);
 });
@@ -39,7 +39,7 @@ it("history follows the leaf beyond 2000 messages", () => {
     });
     sessions.updateActiveLeaf("long", "m2001");
   });
-  const history = new SessionService(sessions, messages).buildModelHistory(db, "long");
+  const history = new SessionService(sessions, messages).activeChainHistory(db, "long");
   expect(history.messages).toHaveLength(2002);
   expect(history.messages.at(-1)?.id).toBe("m2001");
 });

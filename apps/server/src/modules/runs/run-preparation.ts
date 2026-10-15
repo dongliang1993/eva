@@ -42,29 +42,30 @@ export interface RunPreparationDependencies {
  * 从哪条消息回溯"。不是"一轮对话"(turn),是 run 的事实。
  */
 export interface RunInput {
-  readonly sessionId: string;
+  sessionId: string;
   /** runs 台账的 user_message_id，同时也是模型可见历史的末端。 */
-  readonly userMessageId: string;
+  userMessageId: string;
   /** 本轮人工输入文本：send = body.text；retry = 被重试回复的父 user 文本。 */
-  readonly humanText: string;
+  humanText: string;
   /** 本轮 assistant 消息在树里的落点。 */
-  readonly assistantPosition: MessagePosition;
+  assistantPosition: MessagePosition;
   /** send 从新 user 回溯；retry 从被重试 assistant 的父消息回溯。 */
-  readonly historyLeafId: string;
-  readonly workspace?: WorkspaceContext | undefined;
+  historyLeafId: string;
+  workspace?: WorkspaceContext | undefined;
   /**
    * 本轮主对话模型("providerId:modelId")。**非空** —— 两条分支各有唯一来源,
    * 到这里已经定了,下游不需要再兜底:
    * - send:`body.modelId`(schema 强制必填,前端选了模型才让发送);
    * - retry:`body.modelId` 优先,缺省用 `sessions.model`(被重试那轮选的模型)。
    */
-  readonly modelId: string;
+  modelId: string;
 }
 
-export interface RunContext {
+/** 阶段③的产物:本轮分支可见、已转换的模型输入。 */
+export interface ModelMessages {
   readonly sessionId: string;
   readonly userMessageId: string;
-  readonly modelMessages: ModelMessage[];
+  readonly messages: ModelMessage[];
 }
 
 const loadWorkspaceContext = async (
@@ -187,16 +188,16 @@ export const prepareRunWorkspace = async (
   return { ...input, ...(workspace ? { workspace } : {}) };
 };
 
-/** 阶段③：拿输入材料与已解析模型，构建本轮分支可见的模型历史。 */
-export const prepareRunContext = async (
+/** 阶段③：拿输入材料与已解析模型，构建本轮分支可见的模型输入。 */
+export const buildModelMessages = async (
   dependencies: RunPreparationDependencies,
   input: RunInput,
   resolved: { readonly mainModel: ModelBinding; readonly toolModel: ModelBinding }
-): Promise<RunContext> => {
+): Promise<ModelMessages> => {
   const { mainModel } = resolved;
   dependencies.sessions.updateModel(input.sessionId, mainModel.qualifiedModelId);
 
-  const history = dependencies.session.buildModelHistory(
+  const history = dependencies.session.activeChainHistory(
     dependencies.db,
     input.sessionId,
     input.historyLeafId
@@ -207,13 +208,13 @@ export const prepareRunContext = async (
   const converted = await convertToModelMessages([...strippedHistory], {
     ignoreIncompleteToolCalls: true
   });
-  const modelMessages: ModelMessage[] = history.summary
+  const messages: ModelMessage[] = history.summary
     ? [{ role: "system", content: history.summary }, ...converted]
     : converted;
 
   return {
     sessionId: input.sessionId,
     userMessageId: input.userMessageId,
-    modelMessages
+    messages
   };
 };

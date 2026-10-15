@@ -2,7 +2,7 @@ import type { HarnessMessage } from "./types.js";
 import { STREAM_COALESCE_WINDOW_MS } from "../constants.js";
 
 /**
- * HarnessMessage 流的 text/reasoning 合并窗口(T3 起 stream() 的外壳)。
+ * HarnessMessage 流的 text/reasoning 合并窗口。
  *
  * 只作用 stream_event 的 text_delta / reasoning_delta(与旧 coalesceTextDeltas
  * 同一个窗口常量);其余消息(assistant/user/result/…)原样透传、不缓冲 ——
@@ -124,7 +124,7 @@ const delayUntilFirst = (
   type: "text" | "reasoning",
 ): Promise<{ kind: "timer"; type: "text" | "reasoning" }> => {
   if (deadline === undefined) {
-    return new Promise(() => {});
+    return new Promise(() => { });
   }
   return new Promise((resolve) => {
     setTimeout(() => resolve({ kind: "timer", type }), Math.max(0, deadline - Date.now()));

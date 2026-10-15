@@ -13,11 +13,11 @@ import type {
 export interface AgentRunInput {
   /** server 注册的 hooks(tool_operations 台账等)。 */
   hooks?:
-    | Partial<Record<HookEvent, readonly HookCallbackMatcher[]>>
-    | undefined;
+  | Partial<Record<HookEvent, readonly HookCallbackMatcher[]>>
+  | undefined;
   messages: ModelMessage[];
   maxSteps?: number;
-  additionalTools?: readonly PipelineTool[];
+  tools?: readonly PipelineTool[];
   /** 子代理 run 带它(= taskId);主 agent 不带。进 canUseTool 的 options.agentID。 */
   agentID?: string;
   abortSignal?: AbortSignal;

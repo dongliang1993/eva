@@ -16,7 +16,7 @@ import {
   type TokenUsage,
 } from "../query/usage.js";
 import {
-  resolveContextWindowPolicy,
+  normalizeContextWindowPolicy,
   type ContextWindowPolicy,
 } from "../context/policy.js";
 import { estimateMessagesTokens } from "../context/runtime-compact.js";
@@ -40,7 +40,6 @@ import type { HarnessMessage } from "../query/types.js";
 import type { AgentRunInput, CreateAgentOptions } from "./types.js";
 import { coalesceStreamEvents } from "../query/coalesce-stream.js";
 import { isAbortError } from "../query/finish-run.js";
-import type { ToolTimingMutable } from "../query/tool-call.js";
 import { resolveFinalText } from "../query/finish-run.js";
 import { abortInFlightMessages } from "../query/abort-in-flight.js";
 
@@ -51,7 +50,7 @@ const TOOL_DISCOVERY_NOTICE: SystemModelMessage = {
     "Use `tool_search` to find and activate additional tools; activated tools become callable from the next model step.",
 };
 
-const resolveSystemMessage = (
+const buildSystemMessage = (
   prompt: string | SystemModelMessage | undefined,
 ): SystemModelMessage =>
   typeof prompt === "object" && prompt !== null && prompt.role === "system"
@@ -76,9 +75,9 @@ class RunLoopAgent {
   private readonly contextPolicy: ContextWindowPolicy;
 
   constructor(private readonly options: RunLoopOptions) {
-    this.systemMessage = resolveSystemMessage(options.systemPrompt);
+    this.systemMessage = buildSystemMessage(options.systemPrompt);
     this.maxSteps = options.maxSteps ?? 5;
-    this.contextPolicy = resolveContextWindowPolicy(options.contextPolicy);
+    this.contextPolicy = normalizeContextWindowPolicy(options.contextPolicy);
   }
 
   private buildMessages(input: AgentRunInput): {
@@ -118,9 +117,10 @@ class RunLoopAgent {
       ...this.options,
       // server 注册的 hooks(权限/台账)在这条链上。
       ...(input.hooks !== undefined ? { hooks: input.hooks } : {}),
-      tools: [...(this.options.tools ?? []), ...(input.additionalTools ?? [])],
+      tools: [...(this.options.tools ?? []), ...(input.tools ?? [])],
       ...(input.agentID !== undefined ? { agentID: input.agentID } : {}),
     });
+
     try {
       const { toolDiscovery, catalog: resolvedTools } = pipeline;
       const exposure = resolveToolExposure(resolvedTools, toolDiscovery);
@@ -262,11 +262,13 @@ class RunLoopAgent {
           stream: abortableStream,
           turnStartedAt: stepStartTime,
         });
+
         try {
           for await (const message of turnStream) {
             if (message.type === "stream_event" && message.event.type === "text_delta") {
               text += message.event.text;
             }
+
             if (message.type === "assistant") {
               for (const part of message.message.content) {
                 if (typeof part === "object" && part !== null && part.type === "tool-call") {

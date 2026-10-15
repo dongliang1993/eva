@@ -292,7 +292,7 @@ describe("Phase 4 API routes", () => {
       new DrizzleSessionRepository(db),
       new DrizzleMessageRepository(db)
     );
-    const modelHistory = sessionService.buildModelHistory(db, thread.id);
+    const modelHistory = sessionService.activeChainHistory(db, thread.id);
 
     expect(modelHistory.summary).toContain("Conversation summary");
     expect(modelHistory.summary).toContain("First user request");

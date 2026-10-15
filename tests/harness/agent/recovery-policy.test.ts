@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveContextWindowPolicy } from "../../../packages/harness/src/context/policy.js";
+import { normalizeContextWindowPolicy } from "../../../packages/harness/src/context/policy.js";
 import {
   buildMaxOutputRecovery,
   planReactiveRecovery,
@@ -35,7 +35,7 @@ describe("Agent recovery policy", () => {
 
   it("max-output 恢复保留累计正文并追加固定续写消息", () => {
     // 字段随 T4 上移改名:maxOutputRecoveries → maxOutputRecoveryLimit(policy 唯一命名)。
-    const policy = resolveContextWindowPolicy({ maxOutputRecoveryLimit: 1 });
+    const policy = normalizeContextWindowPolicy({ maxOutputRecoveryLimit: 1 });
     expect(
       shouldRecoverMaxOutput({
         finishReason: "length",

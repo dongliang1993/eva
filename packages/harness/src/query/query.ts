@@ -140,6 +140,7 @@ export function runQuery(params: QueryParams, internal: InternalContext): Query 
   }
 
   const generator = mergeWithSideChannel(run(), channel);
+
   return {
     [Symbol.asyncIterator]: () => generator,
     next: (args) => generator.next(args),

@@ -83,7 +83,7 @@ export class SessionService {
    * @param leafId 从哪条回溯;缺省用 session.activeLeafId;retry 模式传
    *   "被重试消息的父",这样历史里不含被重试的那条回复本身。
    */
-  buildModelHistory(
+  activeChainHistory(
     db: AppDatabase,
     sessionId: string,
     leafId?: string

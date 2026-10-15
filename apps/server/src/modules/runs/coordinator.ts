@@ -28,16 +28,15 @@ import { AssistantMessageRecorder, type RecordedAssistantRun } from "./assistant
 import { toRunStreamFrames } from "./harness-frames.js";
 import { createRunTrajectory } from "../observability/index.js";
 import { createSubagentProjection } from "../subagents/index.js";
-import { createRunPermissions, type RunPermissions } from "./run-permissions.js";
 import { runStatusFor } from "./run-repository.js";
 import {
-  prepareRunContext,
+  buildModelMessages,
   prepareRunInput,
   prepareRunWorkspace,
   type RunInput,
   type RunPreparationDependencies
 } from "./run-preparation.js";
-import { RunRuntimeBuilder, type AgentRuntime } from "./run-runtime-builder.js";
+import { RuntimeBuilder, type AgentRuntime } from "./runtime-builder.js";
 import type { MemoryAutomationService } from "../memory/index.js";
 
 export interface CoordinatorDependencies {
@@ -100,11 +99,8 @@ interface AcceptedRun {
   readonly observability: AppSettings["observability"];
 }
 
-/** ② 的产出:带工作区的输入、权限链,以及装好的 agent。 */
-interface AssembledRun extends AgentRuntime {
-  readonly input: RunInput;
-  readonly permissions: RunPermissions;
-}
+/** ② 的产出 = builder.assemble() 的 AgentRuntime(input/permissions/models/observability 一体)。 */
+
 
 /** 进入一个准备阶段:在这期间抛出的错误,台账记为这一层的失败。 */
 const inStage = <T>(progress: RunProgress, layer: RunFailureLayer, stage: () => Promise<T>): Promise<T> => {
@@ -127,7 +123,7 @@ const inStage = <T>(progress: RunProgress, layer: RunFailureLayer, stage: () => 
  */
 export class Coordinator {
   private readonly preparation: RunPreparationDependencies;
-  private readonly builder: RunRuntimeBuilder;
+  private readonly builder: RuntimeBuilder;
 
   constructor(private readonly deps: CoordinatorDependencies) {
     this.preparation = {
@@ -139,7 +135,8 @@ export class Coordinator {
       messages: deps.messages,
       runs: deps.runs
     };
-    this.builder = new RunRuntimeBuilder({
+
+    this.builder = new RuntimeBuilder({
       config: deps.config,
       db: deps.db,
       logger: deps.logger,
@@ -163,21 +160,22 @@ export class Coordinator {
 
     const run = this.register(runId);
     const progress: RunProgress = { streamOpened: false };
+
     try {
       // ① 接收(同步事务)
       const accepted = this.accept(run, parsed.data, progress);
       // ② 装配 ③ 上下文 —— 抛错时台账记对应的失败层
-      const assembled = await inStage(progress, "routing", () => this.assemble(run, accepted));
-      const context = await inStage(progress, "context", () =>
-        prepareRunContext(this.preparation, assembled.input, assembled.resolved));
+      const agentRuntime = await inStage(progress, "routing", () => this.assemble(run, accepted));
+      const { messages } = await inStage(progress, "context", () =>
+        buildModelMessages(this.preparation, agentRuntime.input, agentRuntime.models));
       run.controller.signal.throwIfAborted();
-      this.deps.memoryAutomation?.commitRetrieval(run.id, assembled.memoryRetrieval);
+      this.deps.memoryAutomation?.commitRetrieval(run.id, agentRuntime.memoryRetrieval);
       progress.failureLayer = undefined;
 
       // ④ 开流 ⑤ 流式
       this.openStream(run, stream, log, progress);
-      const recorder = this.startRecording(run, assembled, progress);
-      await this.stream(run, assembled, context.modelMessages, recorder);
+      const recorder = this.startRecording(run, agentRuntime, progress);
+      await this.stream(run, agentRuntime, messages, recorder);
 
       run.emit({ type: "end", finishReason: this.settle(run, progress) });
       return { kind: "streamed" };
@@ -196,49 +194,54 @@ export class Coordinator {
    */
   private async stream(
     run: ActiveRun,
-    assembled: AssembledRun,
+    agentRuntime: AgentRuntime,
     prompt: Parameters<typeof query>[0]["prompt"],
     recorder: AssistantMessageRecorder,
   ): Promise<void> {
-    const runRecorder = assembled.consumers.recorder;
-    const trajectory = createRunTrajectory(runRecorder, {
-      provider: assembled.resolved.mainModel.providerId,
-      modelId: assembled.resolved.mainModel.modelId,
-      callSettings: assembled.resolved.callSettings as Record<string, unknown>,
+    const { observability, models, input } = agentRuntime;
+    const trajectory = createRunTrajectory(observability.recorder, {
+      provider: models.mainModel.providerId,
+      modelId: models.mainModel.modelId,
+      callSettings: models.callSettings as Record<string, unknown>,
     });
     const subagents = createSubagentProjection({
       db: this.deps.db,
-      sessionId: assembled.input.sessionId,
+      sessionId: input.sessionId,
       runId: run.id,
-      model: assembled.resolved.toolModel.qualifiedModelId,
+      model: models.toolModel.qualifiedModelId,
       // 子代理轨迹:同一 recorder(连续 seq),agent = taskId。
       trajectoryForTask: (taskId) => createRunTrajectory(
-        { runId: runRecorder.runId, record: (event) => runRecorder.record({ ...event, agent: taskId }) },
+        { runId: observability.recorder.runId, record: (event) => observability.recorder.record({ ...event, agent: taskId }) },
         {
-          provider: assembled.resolved.toolModel.providerId,
-          modelId: assembled.resolved.toolModel.modelId,
+          provider: models.toolModel.providerId,
+          modelId: models.toolModel.modelId,
           callSettings: {},
         },
       ),
       emit: run.emit,
     });
+
     const q = query({
       prompt,
       options: {
-        ...assembled.resolved.options,
-        hooks: toolOperationHooks(this.deps.db, run.id),
+        ...models.options,
+        hooks: {
+          ...toolOperationHooks(this.deps.db, run.id)
+        },
         abortController: run.controller,
         includePartialMessages: true,
       },
     });
+
     try {
       for await (const message of q) {
+        // 是子代理的消息(含 task_* 起止)就交给 SubagentProjection 内部处理
         if (subagents.accepts(message)) {
           subagents.record(message);
           continue;
         }
+
         trajectory.record(message);
-        assembled.consumers.pino?.(message);
         for (const frame of toRunStreamFrames(message)) {
           recorder.record(frame);
           run.emit(frame);
@@ -252,7 +255,13 @@ export class Coordinator {
   private register(runId: string): ActiveRun {
     const controller = this.deps.runRegistry.register(runId);
     const hub = this.deps.runRegistry.hubFor(runId)!;
-    return { id: runId, controller, hub, emit: (event) => hub.publish(event) };
+
+    return {
+      id: runId,
+      controller,
+      hub,
+      emit: (event) => hub.publish(event)
+    };
   }
 
   /** ① 同步、单事务:到这一步结束,用户的输入与台账行要么都在,要么都不在。 */
@@ -274,7 +283,7 @@ export class Coordinator {
   }
 
   /** ② 绑工作区、装 agent,并把「实际用了哪个模型」记进台账。 */
-  private async assemble(run: ActiveRun, accepted: AcceptedRun): Promise<AssembledRun> {
+  private async assemble(run: ActiveRun, accepted: AcceptedRun): Promise<AgentRuntime> {
     const input = await prepareRunWorkspace(this.preparation, accepted.input);
     // 观测最先建:run_started 台账必须早于模型解析(provider 配错时也要留下
     // routing 失败记录);权限链的 approval_asked/decided 也写进同一个 recorder。
@@ -312,7 +321,7 @@ export class Coordinator {
       emit: run.emit
     }, observability);
 
-    const resolvedModel = runtime.resolved.mainModel.qualifiedModelId;
+    const resolvedModel = runtime.models.mainModel.qualifiedModelId;
     this.deps.runs.patchRouting(run.id, input.modelId, resolvedModel);
     observability.recorder.record({
       agent: "main",
@@ -337,18 +346,20 @@ export class Coordinator {
     run.emit({ type: "run_start", runId: run.id, sessionId: progress.sessionId! });
   }
 
-  /** 从这里起 run 有了 assistant 消息:收尾以消息为准,成功时可以入队记忆提取。 */
-  private startRecording(run: ActiveRun, assembled: AssembledRun, progress: RunProgress): AssistantMessageRecorder {
+  /** 
+   * 从这里起 run 有了 assistant 消息:收尾以消息为准,成功时可以入队记忆提取。
+   *  */
+  private startRecording(run: ActiveRun, agentRuntime: AgentRuntime, progress: RunProgress): AssistantMessageRecorder {
     const recorder = new AssistantMessageRecorder(this.deps.session, {
-      sessionId: assembled.input.sessionId,
+      sessionId: agentRuntime.input.sessionId,
       runId: run.id,
-      model: assembled.resolved.mainModel.qualifiedModelId,
-      initialPosition: assembled.input.assistantPosition,
-      lookupDecision: assembled.permissions.lookupApprovalDecision,
-      lookupPlanReviewDecision: assembled.permissions.lookupPlanReviewDecision
+      model: agentRuntime.models.mainModel.qualifiedModelId,
+      initialPosition: agentRuntime.input.assistantPosition,
+      lookupDecision: agentRuntime.permissions.lookupApprovalDecision,
+      lookupPlanReviewDecision: agentRuntime.permissions.lookupPlanReviewDecision
     });
     progress.recorder = recorder;
-    progress.extraction = assembled.extraction;
+    progress.extraction = agentRuntime.extraction;
     return recorder;
   }
 

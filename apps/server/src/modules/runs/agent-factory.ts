@@ -126,7 +126,7 @@ export interface ResolvedModels {
   readonly temperature: number;
 }
 
-export interface ResolvedOptions {
+export interface ModelResolution {
   /** query() 的 Options(主 agent 全量)。 */
   readonly options: Options;
   readonly mainModel: ModelBinding;
@@ -242,7 +242,7 @@ export class AgentFactory {
    * 为什么叫 build 不叫 resolve:resolve 只描述了"定模型"这一半,这个方法的
    * 主业是"用定好的模型 + 工作区 + 工具 + 记忆装一台能跑的 agent"。
    */
-  build(options: AgentBuildOptions): ResolvedOptions {
+  build(options: AgentBuildOptions): ModelResolution {
     const models = this.resolveModels({ modelId: options.modelId });
 
     const tools = buildBaseTools(

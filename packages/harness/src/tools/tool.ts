@@ -88,6 +88,7 @@ export const tool = <Input = Record<string, unknown>>(
     // json-schema 分支不该出现在 tool()：MCP 走 toolFromJsonSchema。
     throw new TypeError("tool() 只接 zod inputSchema；JSON Schema 用 toolFromJsonSchema");
   }
+
   const schema = definition.inputSchema as z.ZodType<Input>;
   const guarded: ToolDefinition<Input>["execute"] = async (input, extra) => {
     try {
@@ -152,6 +153,7 @@ export const toAiTool = (definition: ToolDefinition): Tool => {
           (options as { abortSignal?: AbortSignal } | undefined)?.abortSignal ??
           new AbortController().signal,
       };
+
       return definition.execute(rawInput as never, extra);
     },
     toModelOutput: toModelOutput(),
