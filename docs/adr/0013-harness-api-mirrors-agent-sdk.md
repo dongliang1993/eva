@@ -15,9 +15,14 @@
 - 输出唯一一条 `HarnessMessage` 流（type + subtype 判别）。`AgentObserver` /
   `AgentTelemetryEvent` / `onToolExecution` 删除；`tool_operations` 台账改由
   server 注册的 PreToolUse / PostToolUse / PostToolUseFailure hooks 写。
-- 子代理角色经 `options.agents` 传入（harness 内置 `subagent` 工具递归调 `query()`，
-  消息带 `parent_tool_use_id`）。server 侧另有 `SubagentRunner`（同样的 query()，
-  加消息落库与 SSE 帧）。
+- 子代理角色经 `options.agents` 传入，harness 内置 `subagent` 工具是唯一实现（照 Claude Code
+  的 Agent 工具：全新上下文、工具白名单/`disallowedTools` 且不含自身、父 abort 单向传入、
+  `agentID` 进 `canUseTool` / hooks）。子代理消息并在父流里（SDK 的 `system/task_started` →
+  带 `parent_tool_use_id` 的子代理消息 → `system/task_notification`），server 只做投影
+  （`SubagentProjection`），不再自己跑子代理。
+- 工具成败只由 `ToolResult.isError` 表达，进 AI SDK 是 `error-text`（provider 译成
+  `tool_result.is_error`，同 Claude Code）；帧、轨迹、compact 读 `output.type`，不嗅
+  `"Error:"` 文本前缀（文案仍逐字保留，只给模型看）。
 
 ## 为什么
 
@@ -43,6 +48,12 @@
 - **SDK 让非只读工具串行执行** → 写工具不排队。Eva 的正确性由 workspace 写串行锁
   （`withWorkspaceWrite`）保证，本次不改这个行为。
 - **SDK 的 30+ 种 hooks** → 只实现 PreToolUse / PostToolUse / PostToolUseFailure。
+  子代理起止走消息（`task_started` / `task_notification`）而不是 SubagentStart/Stop hooks ——
+  server 要的是投影所需的数据（类型、描述、任务、结论），消息流本来就承载它。
+- **SDK 的 `agent_id` 在 hook 输入与 `can_use_tool` 上** → Eva 照抄位置，但不进 `Options`：
+  它是内部运行身份，只由内置 subagent 工具设置（`runQuery(params, { agentID })`）。
+- **Claude Code 的后台子代理 / fork 子代理（继承父对话）** → 不做。子代理恒为前台 awaited、
+  全新上下文。
   SSE 协议（`stream-events.ts`）、数据库 schema、`context/` 压缩逻辑都在 out of scope。
 
 ## 什么情况下推翻

@@ -27,6 +27,7 @@ import { runRequestSchema, type RunRequest } from "../../types/runs.js";
 import { AssistantMessageRecorder, type RecordedAssistantRun } from "./assistant-message-recorder.js";
 import { toRunStreamFrames } from "./harness-frames.js";
 import { createRunTrajectory } from "../observability/index.js";
+import { createSubagentProjection } from "../subagents/index.js";
 import { createRunPermissions, type RunPermissions } from "./run-permissions.js";
 import { runStatusFor } from "./run-repository.js";
 import {
@@ -173,35 +174,10 @@ export class Coordinator {
       this.deps.memoryAutomation?.commitRetrieval(run.id, assembled.memoryRetrieval);
       progress.failureLayer = undefined;
 
-      // ④ 开流 ⑤ 流式 —— 一条消息流三个消费方:recorder 帧、轨迹页、SSE。
+      // ④ 开流 ⑤ 流式
       this.openStream(run, stream, log, progress);
       const recorder = this.startRecording(run, assembled, progress);
-      const trajectory = createRunTrajectory(assembled.consumers.recorder, {
-        provider: assembled.resolved.mainModel.providerId,
-        modelId: assembled.resolved.mainModel.modelId,
-        callSettings: assembled.resolved.callSettings as Record<string, unknown>,
-      });
-      const q = query({
-        prompt: context.modelMessages,
-        options: {
-          ...assembled.resolved.options,
-          hooks: toolOperationHooks(this.deps.db, run.id, "main"),
-          abortController: run.controller,
-          includePartialMessages: true,
-          tools: [
-            ...(assembled.resolved.options.tools ?? []),
-            ...assembled.additionalTools,
-          ],
-        },
-      });
-      for await (const message of q) {
-        trajectory.record(message);
-        assembled.consumers.pino?.(message);
-        for (const frame of toRunStreamFrames(message)) {
-          recorder.record(frame);
-          run.emit(frame);
-        }
-      }
+      await this.stream(run, assembled, context.modelMessages, recorder);
 
       run.emit({ type: "end", finishReason: this.settle(run, progress) });
       return { kind: "streamed" };
@@ -210,6 +186,66 @@ export class Coordinator {
     } finally {
       this.deps.approvals.cancelByRun(run.id);
       this.deps.runRegistry.unregister(run.id);
+    }
+  }
+
+  /**
+   * ⑤ 一条消息流,按 parent_tool_use_id 分两路:
+   * 主 agent → recorder 帧 / 轨迹 / SSE;子代理(含 task_* 起止)→ SubagentProjection。
+   * 子代理的消息由 harness 内置 subagent 工具并入这条流(Claude Code 同款)。
+   */
+  private async stream(
+    run: ActiveRun,
+    assembled: AssembledRun,
+    prompt: Parameters<typeof query>[0]["prompt"],
+    recorder: AssistantMessageRecorder,
+  ): Promise<void> {
+    const runRecorder = assembled.consumers.recorder;
+    const trajectory = createRunTrajectory(runRecorder, {
+      provider: assembled.resolved.mainModel.providerId,
+      modelId: assembled.resolved.mainModel.modelId,
+      callSettings: assembled.resolved.callSettings as Record<string, unknown>,
+    });
+    const subagents = createSubagentProjection({
+      db: this.deps.db,
+      sessionId: assembled.input.sessionId,
+      runId: run.id,
+      model: assembled.resolved.toolModel.qualifiedModelId,
+      // 子代理轨迹:同一 recorder(连续 seq),agent = taskId。
+      trajectoryForTask: (taskId) => createRunTrajectory(
+        { runId: runRecorder.runId, record: (event) => runRecorder.record({ ...event, agent: taskId }) },
+        {
+          provider: assembled.resolved.toolModel.providerId,
+          modelId: assembled.resolved.toolModel.modelId,
+          callSettings: {},
+        },
+      ),
+      emit: run.emit,
+    });
+    const q = query({
+      prompt,
+      options: {
+        ...assembled.resolved.options,
+        hooks: toolOperationHooks(this.deps.db, run.id),
+        abortController: run.controller,
+        includePartialMessages: true,
+      },
+    });
+    try {
+      for await (const message of q) {
+        if (subagents.accepts(message)) {
+          subagents.record(message);
+          continue;
+        }
+        trajectory.record(message);
+        assembled.consumers.pino?.(message);
+        for (const frame of toRunStreamFrames(message)) {
+          recorder.record(frame);
+          run.emit(frame);
+        }
+      }
+    } finally {
+      subagents.settleOrphans("run ended before the subagent finished");
     }
   }
 

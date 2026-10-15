@@ -24,7 +24,11 @@ import { DrizzleSessionRepository } from "../../../apps/server/src/modules/sessi
 import { ApprovalGateway } from "../../../apps/server/src/modules/approvals/index.js";
 import { RunRegistry } from "../../../apps/server/src/modules/runs/index.js";
 import { SessionService } from "../../../apps/server/src/modules/sessions/index.js";
-import { SubagentRunner } from "../../../apps/server/src/modules/subagents/index.js";
+import {
+  SubagentTaskRepository,
+  createSubagentProjection,
+} from "../../../apps/server/src/modules/subagents/index.js";
+import { query } from "../../../packages/harness/src/index.js";
 import type { AgentFactory, ResolvedOptions } from "../../../apps/server/src/modules/runs/index.js";
 import type { ModelBinding } from "../../../apps/server/src/modules/providers/index.js";
 import { registerRunRoutes } from "../../../apps/server/src/modules/runs/index.js";
@@ -282,16 +286,28 @@ describe("run observability(子代理)", () => {
     db.insert(runs).values({ id: "parent-run", sessionId: "s-1" }).run();
   };
 
-  /** buildSubagentOptions 桩:真实装配口返回 Options,SubagentRunner 拿它跑 query()。 */
-  const stubFactory = (model: MockLanguageModelV4): AgentFactory =>
-    ({
-      buildSubagentOptions: (): import("@eva/harness").Options => ({
-        model: { languageModel: model, id: "openai:test" },
-        tools: [],
-        systemPrompt: "explorer",
-        maxTurns: 3,
-      }),
-    }) as AgentFactory;
+  /** 父模型第一步派子代理,第二步收尾(子代理消息经 harness 的 subagent 工具并入父流)。 */
+  const dispatchingModel = (): MockLanguageModelV4 => {
+    let call = 0;
+    return new MockLanguageModelV4({
+      doStream: async () => {
+        call += 1;
+        if (call > 1) return textModel("parent done").doStream({} as never);
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start", warnings: [] },
+              {
+                type: "tool-call", toolCallId: "call-1", toolName: "subagent",
+                input: JSON.stringify({ description: "t", prompt: "explore", subagent: "explorer" }),
+              },
+              { type: "finish", finishReason: "tool-calls", usage },
+            ] as never,
+          }),
+        };
+      },
+    });
+  };
 
   it("前台子代理:事件进父 Run、agent=taskId、与主 Agent 共用连续 seq", async () => {
     seedParent();
@@ -300,46 +316,54 @@ describe("run observability(子代理)", () => {
       sessionId: "s-1"
     });
     recorder.record({ agent: "main", kind: "run_started" });
-    // 主 agent 的轨迹不再需要显式保留:子代理行落 agent=taskId 由 trajectoryForTask 改写
-    // (与旧 observer-bridge 的 bridge.forAgent(taskId) 同语义,轨迹页按 agent 区分主/子)。
 
-    const runner = new SubagentRunner(stubFactory(textModel("sub answer")), {
-      sessionId: "s-1",
+    // 子代理轨迹:同一 recorder、agent = taskId(与 coordinator 的 trajectoryForTask 同一装配)。
+    const projection = createSubagentProjection({
       db,
+      sessionId: "s-1",
       runId: "parent-run",
-      model: testBinding("openai:test"),
-      abortSignal: new AbortController().signal,
-      canUseTool: async () => ({ behavior: "allow" }),
-      // hooksForTask/trajectoryForTask/onSubagentEvent:SubagentRunner 的新装配口。
-      hooksForTask: () => ({ PreToolUse: [], PostToolUse: [], PostToolUseFailure: [] }),
-      // createRunTrajectory 固定 agent="main";子代理行落 agent=taskId 由这里包一层改写
-      // (与旧 observer-bridge 的 bridge.forAgent(taskId) 同语义,轨迹页按 agent 区分主/子)。
+      model: "openai:test",
       trajectoryForTask: (taskId) => createRunTrajectory(
-        {
-          runId: recorder.runId,
-          record: (event) => recorder.record({ ...event, agent: taskId }),
-        },
+        { runId: recorder.runId, record: (event) => recorder.record({ ...event, agent: taskId }) },
         { provider: "openai", modelId: "test", callSettings: {} },
       ),
-      onSubagentEvent: () => {},
+      emit: () => {},
+    });
+    const mainTrajectory = createRunTrajectory(recorder, {
+      provider: "openai", modelId: "test", callSettings: {},
     });
 
-    const result = await runner.runFork({
-      prompt: "explore",
-      subagentType: "explorer",
-      description: "t",
-      taskId: "task-f1",
-      parentToolCallId: "call-1"
-    });
-    expect("text" in result).toBe(true);
+    let taskId: string | undefined;
+    for await (const message of query({
+      prompt: [{ role: "user", content: "go" }],
+      options: {
+        model: { languageModel: dispatchingModel(), id: "openai:test" },
+        canUseTool: async () => ({ behavior: "allow" }),
+        agents: {
+          explorer: {
+            description: "e", prompt: "explorer", maxTurns: 3,
+            model: { languageModel: textModel("sub answer"), id: "openai:test" },
+          },
+        },
+      },
+    })) {
+      if (message.type === "system" && message.subtype === "task_started") taskId = message.task_id;
+      if (projection.accepts(message)) projection.record(message);
+      else mainTrajectory.record(message);
+    }
+    if (taskId === undefined) throw new Error("subagent never started");
 
     const rows = new RunEventRepository(db).listByRun("parent-run", { limit: 500 });
     const agents = new Set(rows.map((row) => row.agent));
     expect(agents.has("main")).toBe(true);
-    expect(agents.has("task-f1")).toBe(true);
+    expect(agents.has(taskId)).toBe(true);
     // 子代理事件带有 turn_started 等 harness 事件(不是只有壳)
-    expect(rows.some((row) => row.agent === "task-f1" && row.kind === "turn_started")).toBe(true);
-    expect(rows.some((row) => row.agent === "task-f1" && row.kind === "assistant_message")).toBe(true);
+    expect(rows.some((row) => row.agent === taskId && row.kind === "turn_started")).toBe(true);
+    expect(rows.some((row) => row.agent === taskId && row.kind === "assistant_message")).toBe(true);
+    // 任务行由 task_* 起止消息结算
+    expect(new SubagentTaskRepository(db).findById(taskId)).toMatchObject({
+      status: "done", result: "sub answer", parentToolCallId: "call-1",
+    });
     // 共用一个 seq 序列且连续
     const seqs = rows.map((row) => row.seq).sort((a, b) => a - b);
     expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, i) => i));

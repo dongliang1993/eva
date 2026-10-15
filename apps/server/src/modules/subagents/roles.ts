@@ -1,4 +1,4 @@
-import type { PipelineTool } from "@eva/harness";
+import type { AgentDefinition, ModelBinding, PipelineTool } from "@eva/harness";
 
 export interface SubagentRole {
   readonly type: string;
@@ -15,7 +15,7 @@ export interface SubagentRole {
  * 不同步到 100:子代理是无人值守的成本中心,步数闸是它的熔断器不是束缚 ——
  * 50 步跑不完的窄任务,正确动作是主 agent 拆开再派,不是让子代理硬撑。
  */
-export const SUBAGENT_MAX_STEPS = 50;
+const SUBAGENT_MAX_STEPS = 50;
 
 /** 首批三个角色:都是"只给结论"型(上下文隔离最划算)。 */
 export const SUBAGENT_ROLES: readonly SubagentRole[] = [
@@ -53,23 +53,12 @@ export const SUBAGENT_ROLES: readonly SubagentRole[] = [
 ];
 
 /**
- * 按角色 allowedTools 白名单过滤工具(阀4:工具集收窄)。
- * @param role 已解析的角色(装配期先 crew.get(type),拿不到就报错停摆);
- *        这里不自己查 crew —— 未知角色在解析期就该暴露,不该在过滤期静默丢工具。
- */
-export const filterToolsForRole = (
-  tools: readonly PipelineTool[],
-  role: SubagentRole
-): readonly PipelineTool[] => {
-  const allowed = new Set(role.allowedTools);
-  return tools.filter((t) => allowed.has(t.name));
-};
-/**
  * 角色声明要、但基础集里压根不存在的工具。
  *
  * 白名单是"收窄"语义,过滤不会告诉你某个工具本来就缺席。而文件工具挂在工作区守卫内 ——
  * 没绑工作区的会话里 read_file/list_dir/grep 都不存在,explorer 过滤后只剩 read_skill。
- * 那样的子代理"没有手却被要求读代码",实测会编造出看似完整的目录树。调用方据此早爆。
+ * 那样的子代理"没有手却被要求读代码",实测会编造出看似完整的目录树。
+ * subagentDefinitions 据此不列出这个角色。
  */
 export const missingRoleTools = (
   tools: readonly PipelineTool[],
@@ -78,3 +67,33 @@ export const missingRoleTools = (
   const present = new Set(tools.map((t) => t.name));
   return role.allowedTools.filter((name) => !present.has(name));
 };
+
+/**
+ * 子代理恒不给的工具(Claude Code 的 ALL_AGENT_DISALLOWED_TOOLS 同款):
+ * plan mode 是主对话的交互状态,子代理进出 plan mode 没有人审。
+ */
+const SUBAGENT_DISALLOWED_TOOLS = ["enter_plan_mode", "exit_plan_mode"] as const;
+
+/**
+ * 角色 → harness 的 options.agents。
+ *
+ * 角色要的工具本轮不存在(没绑工作区时文件工具缺席)→ 不列出这个角色:
+ * 模型看不见它,自然不会派(Claude Code 对 MCP 依赖不满足的 agent 同样不列)。
+ * 之前是派发时才报错 —— "没有手却被要求读代码"的子代理会编造目录树。
+ */
+export const subagentDefinitions = (
+  tools: readonly PipelineTool[],
+  model: ModelBinding,
+): Readonly<Record<string, AgentDefinition>> =>
+  Object.fromEntries(
+    SUBAGENT_ROLES
+      .filter((role) => missingRoleTools(tools, role).length === 0)
+      .map((role) => [role.type, {
+        description: role.summary,
+        prompt: role.systemPrompt,
+        tools: role.allowedTools,
+        disallowedTools: SUBAGENT_DISALLOWED_TOOLS,
+        model,
+        maxTurns: role.maxSteps ?? SUBAGENT_MAX_STEPS,
+      } satisfies AgentDefinition]),
+  );

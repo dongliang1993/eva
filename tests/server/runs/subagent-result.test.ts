@@ -2,8 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "../../../apps/server/node_modules/fastify/fastify.js";
 import type { FastifyInstance } from "../../../apps/server/node_modules/fastify";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
+import { z } from "zod";
 
-import type { Options, PipelineTool } from "../../../packages/harness/src/index.js";
+import { textResult, tool, type PipelineTool } from "../../../packages/harness/src/index.js";
+import { SubagentTaskRepository } from "../../../apps/server/src/modules/subagents/index.js";
+import { runs } from "../../../apps/server/src/db/schema.js";
+
 import { loadConfig } from "../../../apps/server/src/config.js";
 import {
   closeDb,
@@ -95,36 +99,36 @@ const testBinding = (qualifiedModelId: string): ModelBinding => ({
   apiKey: "test-key",
 });
 
-/** build/buildSubagentOptions 桩:真实 AgentFactory 的两个装配口(类型对齐签名)。 */
-const stubAgentFactory = (): AgentFactory =>
+/** build 桩:真实 AgentFactory 的装配口。子代理随 options.agents(工具槽位模型)。 */
+const stubAgentFactory = (
+  child: { readonly model: () => MockLanguageModelV4; readonly tools: readonly PipelineTool[] } = {
+    model: reportingSubagentModel, tools: [],
+  },
+): AgentFactory =>
   ({
     build: (): ResolvedOptions => ({
       options: {
         model: { languageModel: forkingModel(), id: "openai:test" },
-        tools: [],
+        tools: [...child.tools],
         maxTurns: 6,
-        // 测试环境无审批 UI:全放行(生产由权限链注入)。
-        canUseTool: async () => ({ behavior: "allow" as const })
+        // 测试环境无审批 UI:全放行(生产由权限链注入;子代理共用同一个)。
+        canUseTool: async () => ({ behavior: "allow" as const }),
+        agents: {
+          explorer: {
+            description: "explores",
+            prompt: "子代理",
+            model: { languageModel: child.model(), id: "openai:test-tool" },
+            maxTurns: 4,
+          },
+        },
       },
       mainModel: testBinding("openai:test"),
       toolModel: testBinding("openai:test-tool"),
       callSettings: {}
     }),
-    // 子代理装配:返回 Options(真实 buildSubagentOptions 的形状),
-    // SubagentRunner 拿它跑 query(),并接收本轮冻结的附加能力。
-    buildSubagentOptions: (input: {
-      readonly extraTools?: readonly PipelineTool[];
-    }): Options => ({
-      model: { languageModel: reportingSubagentModel(), id: "openai:test-tool" },
-      tools: [...(input.extraTools ?? [])],
-      systemPrompt: "子代理",
-      maxTurns: 4,
-      // 测试环境无审批 UI:子代理的权限链全放行(生产由 SubagentRunner 注入)。
-      canUseTool: async () => ({ behavior: "allow" as const })
-    }),
   }) as AgentFactory;
 
-const startApp = async (): Promise<void> => {
+const startApp = async (agents: AgentFactory = stubAgentFactory()): Promise<void> => {
   app = Fastify();
   app.decorate("infra", {
     config: loadConfig({ env: {}, cwd: "/tmp" }),
@@ -132,9 +136,8 @@ const startApp = async (): Promise<void> => {
     skills: []
   });
   app.decorate("services", {
-    // build/buildSubagentOptions 桩:真实 AgentFactory 的两个装配口,
-    // 主/子 mock 模型在这里区分(生产由 provider 解析出 ModelBinding)。
-    agents: stubAgentFactory(),
+    // build 桩:主/子 mock 模型在这里区分(生产由 provider 解析出 ModelBinding)。
+    agents,
     session: new SessionService(
       new DrizzleSessionRepository(db),
       new DrizzleMessageRepository(db)
@@ -215,5 +218,51 @@ describe("awaited subagents", () => {
       .toBe("openai:test-tool");
     expect(chain.every(m => m.parentToolCallId === null)).toBe(true);
     expect(events.some(e => e.type === "subagent_update")).toBe(true);
+  });
+
+  it("父 run 被 abort 时子代理随之停止,任务行收口(不留 running)", async () => {
+    // 子代理第一步调一个只等 abort 的工具;它开跑时从外部 abort 整个 run(停止按钮同一路径)。
+    let childToolSawAbort = false;
+    const waitForAbort = tool({
+      name: "read_file", description: "slow", inputSchema: z.object({}),
+      annotations: { readOnlyHint: true },
+      execute: async (_input, extra) => {
+        const runId = db.select().from(runs).all().find((r) => r.status === "running")?.id;
+        if (runId) app.api.runs.abort(runId);
+        await new Promise<void>((resolve) => {
+          if (extra.signal.aborted) return resolve();
+          extra.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        childToolSawAbort = extra.signal.aborted;
+        return textResult("aborted");
+      },
+    });
+    let childCalls = 0;
+    const slowChild = (): MockLanguageModelV4 => new MockLanguageModelV4({
+      doStream: async () => {
+        childCalls += 1;
+        return {
+          stream: simulateReadableStream({
+            chunks: childCalls === 1
+              ? [
+                { type: "stream-start", warnings: [] },
+                { type: "tool-call", toolCallId: "child-1", toolName: "read_file", input: "{}" },
+                { type: "finish", finishReason: "tool-calls", usage },
+              ]
+              : textChunks("late", "不该走到这里"),
+          }),
+        };
+      },
+    });
+    await app.close();
+    await startApp(stubAgentFactory({ model: slowChild, tools: [waitForAbort] }));
+
+    const events = await streamRun({ text: "研究一下", modelId: "openai:test" });
+
+    expect(childToolSawAbort).toBe(true);
+    expect(childCalls).toBe(1);
+    expect(events.at(-1)).toMatchObject({ type: "end", finishReason: "aborted" });
+    const task = new SubagentTaskRepository(db).findByParentToolCallId("call_00");
+    expect(task?.status).toBe("failed");
   });
 });

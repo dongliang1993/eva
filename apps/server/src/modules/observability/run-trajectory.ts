@@ -168,6 +168,11 @@ const systemMessages = (
         });
       }
       return;
+    case "task_started":
+    case "task_notification":
+      // 子代理的起止落 subagent_tasks(SubagentProjection),不进轨迹的 26 种 kind ——
+      // 子代理自己的轨迹由它的消息(agent=taskId)记。
+      return;
     default: {
       const unreachable: never = message;
       return unreachable;

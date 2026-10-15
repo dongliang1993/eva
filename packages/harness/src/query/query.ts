@@ -5,6 +5,7 @@ import type { AgentModel } from "../models/agent-model.js";
 import { buildAgentSystemPrompt } from "../prompts/prompt-builder.js";
 import { createSubagentToolDefinition } from "./subagent-tool.js";
 import { systemInitMessage } from "./messages.js";
+import { createSideChannel, mergeWithSideChannel } from "./side-channel.js";
 import type { HarnessMessage, Options, Query } from "./types.js";
 
 /**
@@ -15,35 +16,47 @@ import type { HarnessMessage, Options, Query } from "./types.js";
  */
 const DEFAULT_MAX_TURNS = 100;
 
-export function query(params: {
+interface QueryParams {
   readonly prompt: readonly import("ai").ModelMessage[];
   readonly options: Options;
-}): Query {
-  const { options } = params;
+}
 
-  // 工具名唯一:同步抛(契约)。重复名让 toolSet 静默覆盖彼此 —— 必须在入口拒绝。
+/** 契约之外、只给 harness 内部用的运行身份(同 Claude Code 的 toolUseContext.agentId)。 */
+interface InternalContext {
+  /** 子代理的 agent_id:进 canUseTool 的 options.agentID 与 hooks 的 agent_id。 */
+  readonly agentID?: string;
+}
+
+export function query(params: QueryParams): Query {
+  return runQuery(params, {});
+}
+
+/** query() 本体。内置 subagent 工具递归调它,带上子代理的 agentID。 */
+export function runQuery(params: QueryParams, internal: InternalContext): Query {
+  const { options } = params;
+  const abortController = options.abortController ?? new AbortController();
+
+  // 子代理消息的旁路:subagent 工具在 streamText 里执行,不能直接 yield 给这个生成器。
+  const channel = createSideChannel<HarnessMessage>();
+  // 内置 subagent 工具:agents 为空时不注册(模型看不见它)。
+  const subagentTool = createSubagentToolDefinition({ options, channel });
+  const tools = [
+    ...(options.tools ?? []),
+    ...(subagentTool !== undefined ? [subagentTool] : []),
+  ];
+
+  // 工具名唯一(含内置 subagent):同步抛(契约)。重复名让 toolSet 静默覆盖彼此。
   const names = new Set<string>();
-  for (const tool of options.tools ?? []) {
+  for (const tool of tools) {
     if (names.has(tool.name)) {
       throw new Error(`Duplicate tool name: ${tool.name}`);
     }
     names.add(tool.name);
   }
 
-  const abortController = options.abortController ?? new AbortController();
-
-  // 内置 subagent 工具:agents 为空时不注册(模型看不见它)。
-  const subagentTool = createSubagentToolDefinition({
-    options,
-    parentPrompt: params.prompt,
-  });
-
   const agentOptions: RunLoopOptions = {
     model: options.model.languageModel as AgentModel,
-    tools: [
-      ...(options.tools ?? []),
-      ...(subagentTool !== undefined ? [subagentTool] : []),
-    ],
+    tools,
     ...(options.systemPrompt !== undefined
       ? {
         systemPrompt:
@@ -119,13 +132,14 @@ export function query(params: {
     yield* agent.stream({
       messages: [...params.prompt],
       abortSignal: abortController.signal,
+      ...(internal.agentID !== undefined ? { agentID: internal.agentID } : {}),
       ...(options.includePartialMessages !== undefined
         ? { includePartialMessages: options.includePartialMessages }
         : {}),
     });
   }
 
-  const generator = run();
+  const generator = mergeWithSideChannel(run(), channel);
   return {
     [Symbol.asyncIterator]: () => generator,
     next: (args) => generator.next(args),

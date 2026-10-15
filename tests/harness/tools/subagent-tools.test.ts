@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
 import { createSubagentToolDefinition } from "../../../packages/harness/src/query/subagent-tool.js";
+import { createSideChannel } from "../../../packages/harness/src/query/side-channel.js";
+import type { HarnessMessage } from "../../../packages/harness/src/query/types.js";
 import { toToolSet } from "../../../packages/harness/src/tools/tool.js";
 import { runToolText } from "../../helpers/run-tool.js";
 
@@ -46,7 +48,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
     // (内置 subagent 工具,单工具名 "subagent")承担。
     const tool = createSubagentToolDefinition({
       options: optionsWithExplorer(),
-      parentPrompt: [],
+      channel: createSideChannel<HarnessMessage>(),
     });
 
     expect(tool?.name).toBe("subagent");
@@ -55,7 +57,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
   it("agents 为空 → 不注册(undefined)", () => {
     const tool = createSubagentToolDefinition({
       options: { model: { languageModel: textModel("ok"), id: "mock:model" }, agents: {} },
-      parentPrompt: [],
+      channel: createSideChannel<HarnessMessage>(),
     });
 
     expect(tool).toBeUndefined();
@@ -78,7 +80,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
     });
     const tool = createSubagentToolDefinition({
       options: optionsWithExplorer(childModel),
-      parentPrompt: [],
+      channel: createSideChannel<HarnessMessage>(),
     });
     expect(tool).toBeDefined();
     if (tool === undefined) throw new Error("unreachable");
@@ -94,7 +96,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
   it("description 必填 —— 缺了就报错(否则卡片无法分辨)", async () => {
     const tool = createSubagentToolDefinition({
       options: optionsWithExplorer(),
-      parentPrompt: [],
+      channel: createSideChannel<HarnessMessage>(),
     });
     expect(tool).toBeDefined();
     if (tool === undefined) throw new Error("unreachable");
@@ -111,7 +113,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
   it("未知 subagent 类型 → Error: 文本(isError)", async () => {
     const tool = createSubagentToolDefinition({
       options: optionsWithExplorer(),
-      parentPrompt: [],
+      channel: createSideChannel<HarnessMessage>(),
     });
     expect(tool).toBeDefined();
     if (tool === undefined) throw new Error("unreachable");
@@ -129,7 +131,7 @@ describe("subagent 原语 (S7 push 模型)", () => {
   it("进 toolSet 后名字是 subagent(供 SDK 装配)", () => {
     const tool = createSubagentToolDefinition({
       options: optionsWithExplorer(),
-      parentPrompt: [],
+      channel: createSideChannel<HarnessMessage>(),
     });
     expect(tool).toBeDefined();
     if (tool === undefined) throw new Error("unreachable");

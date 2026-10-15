@@ -26,36 +26,38 @@ describe("tool operation receipts", () => {
   afterEach(() => closeDb(db));
 
   it("isolates identical provider call ids from main and child agents", async () => {
-    // recordToolExecution 已删:同一 run 下按 agent 建两组 hooks,
-    // 直接驱动 Pre/Post 回调,隔离断言(main/task-1 各一行)保持原样。
-    const main = toolOperationHooks(db, "run", "main");
-    const child = toolOperationHooks(db, "run", "task-1");
+    // 一组 hooks 服务主/子:agent 列取 hook 输入的 agent_id(主 agent 不带 = "main")。
+    const hooks = toolOperationHooks(db, "run");
     const signal = new AbortController().signal;
 
-    const started = (hooks: NonNullable<typeof main>, toolName: string, input: Record<string, unknown>) =>
+    const started = (agentId: string | undefined, toolName: string, input: Record<string, unknown>) =>
       hooks.PreToolUse![0]!.hooks[0]!(
-        { hook_event_name: "PreToolUse", tool_name: toolName, tool_input: input, tool_use_id: "call-1" },
+        {
+          hook_event_name: "PreToolUse", tool_name: toolName, tool_input: input, tool_use_id: "call-1",
+          ...(agentId !== undefined ? { agent_id: agentId } : {}),
+        },
         "call-1",
         { signal },
       );
-    const completed = (hooks: NonNullable<typeof main>, toolResponse: unknown) =>
+    const completed = (agentId: string | undefined, toolResponse: unknown) =>
       hooks.PostToolUse![0]!.hooks[0]!(
         {
           hook_event_name: "PostToolUse",
           tool_name: "unused",
           tool_input: {},
-          tool_response: toolResponse,
+          tool_response: toolResponse as never,
           tool_use_id: "call-1",
           duration_ms: 3,
+          ...(agentId !== undefined ? { agent_id: agentId } : {}),
         },
         "call-1",
         { signal },
       );
 
-    await started(main, "read_file", { path: "a" });
-    await started(child, "grep", { query: "a" });
-    await completed(main, { content: [{ type: "text", text: "main output" }] });
-    await completed(child, { content: [{ type: "text", text: "child output" }] });
+    await started(undefined, "read_file", { path: "a" });
+    await started("task-1", "grep", { query: "a" });
+    await completed(undefined, { content: [{ type: "text", text: "main output" }] });
+    await completed("task-1", { content: [{ type: "text", text: "child output" }] });
 
     // tool_response 从字符串变成 ToolResult 对象:output 断言跟着换成解析后的对象形状。
     expect(listToolExecutions(db, "run")).toEqual([
@@ -87,7 +89,7 @@ describe("toolOperationHooks(FR-008:hooks 写台账)", () => {
   const signal = new AbortController().signal;
 
   it("intent 在 PreToolUse 写(权限通过后、execute 前);result 在 Post 两个", async () => {
-    const hooks = toolOperationHooks(db, "run", "main");
+    const hooks = toolOperationHooks(db, "run");
     const pre = hooks.PreToolUse?.[0]?.hooks[0]!;
     const post = hooks.PostToolUse?.[0]?.hooks[0]!;
     const postFailure = hooks.PostToolUseFailure?.[0]?.hooks[0]!;
@@ -137,7 +139,7 @@ describe("toolOperationHooks(FR-008:hooks 写台账)", () => {
     // runToolCall 的顺序:PreToolUse hooks → 权限 → execute。
     // hooks 是 server 注册的「台账 hook」;canUseTool deny 时 execute 不跑,
     // Post hooks 也不触发 —— 台账里不会有这条调用。
-    const hooks = toolOperationHooks(db, "run", "main");
+    const hooks = toolOperationHooks(db, "run");
     expect(hooks.PreToolUse).toBeDefined();
     expect(listToolExecutions(db, "run")).toHaveLength(0);
   });

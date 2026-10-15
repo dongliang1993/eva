@@ -169,6 +169,10 @@ export interface HookJSONOutput {
  *
  * user 是这次模型调用全部工具的结果（一条消息装全部结果），在全部工具收口后发。
  * 每条消息有 parent_tool_use_id：子代理的消息带上派发它的那次 subagent 调用的 id，主 agent 为 null。
+ *
+ * 子代理（同 SDK）：父的 assistant(tool-call subagent) 之后、父的 user(tool-result) 之前，
+ * 同一条流里依次出现 system/task_started → 子代理的全部消息（parent_tool_use_id = 那次调用）→
+ * system/task_notification。子代理消息的顺序保证与上面相同（自己的 init … result）。
  */
 export type HarnessMessage =
   | SystemInitMessage
@@ -177,6 +181,8 @@ export type HarnessMessage =
   | TurnCompleteMessage
   | UserMessage
   | CompactBoundaryMessage
+  | TaskStartedMessage
+  | TaskNotificationMessage
   | ResultMessage;
 
 export interface SystemInitMessage {
@@ -263,6 +269,31 @@ export interface CompactBoundaryMessage {
   readonly parent_tool_use_id: string | null;
 }
 
+/** 同 SDK：子代理开始。task_id 即子代理的 agent_id（进 canUseTool / hooks 的 agentID）。 */
+export interface TaskStartedMessage {
+  readonly type: "system";
+  readonly subtype: "task_started";
+  readonly task_id: string;
+  /** 派发它的那次 subagent 调用。 */
+  readonly tool_use_id: string;
+  readonly description: string;
+  /** 子代理类型（options.agents 的键）。 */
+  readonly task_type: string;
+  readonly prompt: string;
+  readonly parent_tool_use_id: string | null;
+}
+
+/** 同 SDK：子代理结束。summary 是回给父的结论文本（失败时是失败原因）。 */
+export interface TaskNotificationMessage {
+  readonly type: "system";
+  readonly subtype: "task_notification";
+  readonly task_id: string;
+  readonly tool_use_id: string;
+  readonly status: "completed" | "failed" | "stopped";
+  readonly summary: string;
+  readonly parent_tool_use_id: string | null;
+}
+
 /** 同 SDK 的 result 消息：subtype 判别成败。迭代结束前恒最后一条。 */
 export type ResultMessage =
   | (ResultBase & { readonly subtype: "success"; readonly result: string })
@@ -323,7 +354,10 @@ export interface Options {
   readonly systemPrompt?: string | readonly string[];
   /** 同 SDK 的语义;SDK 用名字列表 + MCP 注册自定义工具,Eva 直接传定义。名字重复时 query() 同步抛错。 */
   readonly tools?: readonly ToolDefinition[];
-  /** 同 SDK。键是 subagent 类型名,模型调用内置的 `subagent` 工具时按 `subagent_type` 选取。 */
+  /**
+   * 同 SDK。键是 subagent 类型名,模型调用内置的 `subagent` 工具时按 `subagent` 参数选取。
+   * 非空时注册内置 subagent 工具;与 tools 里的同名工具冲突时 query() 同步抛错。
+   */
   readonly agents?: Readonly<Record<string, AgentDefinition>>;
   /** 同 SDK。权限评估走到最后一步时调用;不提供则所有走到这一步的调用被 deny。 */
   readonly canUseTool?: CanUseTool;
@@ -367,8 +401,10 @@ export interface AgentDefinition {
   readonly description: string;
   /** 同 SDK:子代理的 system prompt。 */
   readonly prompt: string;
-  /** 同 SDK:工具名白名单,从父 query 的 tools 里过滤;省略 = 继承全部(除 subagent 自身)。 */
+  /** 同 SDK:工具名白名单,从父 query 的 tools 里过滤;省略 = 继承全部。subagent 自身恒不给(防递归)。 */
   readonly tools?: readonly string[];
+  /** 同 SDK:在 tools 过滤之后再剔除的工具名。 */
+  readonly disallowedTools?: readonly string[];
   /** 同 SDK 语义;省略 = 继承父 model。 */
   readonly model?: ModelBinding;
   /** 同 SDK。默认 50。 */

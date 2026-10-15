@@ -8,6 +8,8 @@ import type {
   StreamDelta,
   StreamEventMessage,
   SystemInitMessage,
+  TaskNotificationMessage,
+  TaskStartedMessage,
   TokenUsage,
   ToolTiming,
   TurnCompleteMessage,
@@ -101,6 +103,40 @@ export const compactBoundaryMessage = (input: {
   post_tokens: input.postTokens,
   pre_messages: input.preMessages,
   post_messages: input.postMessages,
+  parent_tool_use_id: input.parentToolUseID,
+});
+
+export const taskStartedMessage = (input: {
+  readonly taskId: string;
+  readonly toolUseID: string;
+  readonly description: string;
+  readonly taskType: string;
+  readonly prompt: string;
+  readonly parentToolUseID: string | null;
+}): TaskStartedMessage => ({
+  type: "system",
+  subtype: "task_started",
+  task_id: input.taskId,
+  tool_use_id: input.toolUseID,
+  description: input.description,
+  task_type: input.taskType,
+  prompt: input.prompt,
+  parent_tool_use_id: input.parentToolUseID,
+});
+
+export const taskNotificationMessage = (input: {
+  readonly taskId: string;
+  readonly toolUseID: string;
+  readonly status: TaskNotificationMessage["status"];
+  readonly summary: string;
+  readonly parentToolUseID: string | null;
+}): TaskNotificationMessage => ({
+  type: "system",
+  subtype: "task_notification",
+  task_id: input.taskId,
+  tool_use_id: input.toolUseID,
+  status: input.status,
+  summary: input.summary,
   parent_tool_use_id: input.parentToolUseID,
 });
 

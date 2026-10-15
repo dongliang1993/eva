@@ -1,10 +1,5 @@
-import { toolOperationHooks } from "./tool-operations.js";
-import { z } from "zod";
 import {
   createPlanGateState,
-  textResult,
-  tool,
-  type PipelineTool,
   type Skill,
 } from "@eva/harness";
 import type { HarnessMessage } from "@eva/harness";
@@ -23,13 +18,11 @@ import type { McpRegistry } from "../mcp/index.js";
 import { createMemoryTools, loadMemoryFilesSection, todayString } from "../memory/index.js";
 import {
   createRunRecorder,
-  createRunTrajectory,
   type CaptureLevel,
   type RunRecorder,
 } from "../observability/index.js";
 import { createPlanGateStore, planGateRelPath } from "../plan-gate/index.js";
 import { createRunPermissions, type RunPermissions } from "./run-permissions.js";
-import { SubagentRunner } from "../subagents/index.js";
 import { evaDataDir } from "../../paths.js";
 
 import type { RunInput } from "./run-preparation.js";
@@ -92,8 +85,6 @@ export interface MemoryExtractionPlan {
 /** 这一轮 agent 有什么 —— 装配阶段的全部产出。 */
 export interface AgentRuntime {
   readonly resolved: ResolvedOptions;
-  /** 主 agent 之外、本轮追加的工具(子代理)。 */
-  readonly additionalTools: readonly PipelineTool[];
   readonly consumers: RunConsumers;
   readonly extraction?: MemoryExtractionPlan | undefined;
   readonly memoryRetrieval?: MemoryRetrievalResult | undefined;
@@ -174,9 +165,9 @@ export class RunRuntimeBuilder {
   }
 
   /**
-   * 装出这一轮的 agent:MCP 与记忆能力 → 模型与 prompt → 子代理工具。
+   * 装出这一轮的 agent:MCP 与记忆能力 → 模型与 prompt(子代理定义随 options.agents)。
    *
-   * MCP/记忆工具在这里冻结一次,子代理复用同一份 —— 主/子在同一个 run 里
+   * MCP/记忆工具在这里冻结一次,子代理从父 tools 继承同一份 —— 主/子在同一个 run 里
    * 看到的能力必须一致。
    */
   async assemble(scope: RunRuntimeScope, observability: RunObservability): Promise<AgentRuntime> {
@@ -231,7 +222,6 @@ export class RunRuntimeBuilder {
 
     return {
       resolved,
-      additionalTools: this.buildSubagentTools(scope, resolved, sharedTools, observability.recorder),
       consumers: {
         recorder: observability.recorder,
         // pino 是第二订阅者:coordinator 在流式阶段构造(它有完整 logger)。
@@ -241,85 +231,4 @@ export class RunRuntimeBuilder {
       ...defined("memoryRetrieval", memoryRetrieval)
     };
   }
-
-  /**
-   * 子代理是 awaited 工具:构造只是备好 runner,它的事件要等工具在流式循环里
-   * 被调用才发出 —— 所以这里不依赖 SSE 是否已经打开。
-   */
-  private buildSubagentTools(
-    scope: RunRuntimeScope,
-    resolved: ResolvedOptions,
-    sharedTools: readonly PipelineTool[],
-    recorder: RunRecorder,
-  ): readonly PipelineTool[] {
-    const runner = new SubagentRunner(this.deps.agents, {
-      sessionId: scope.sessionId,
-      db: this.deps.db,
-      runId: scope.runId,
-      model: resolved.toolModel,
-      ...(scope.input.workspace !== undefined ? { workspace: scope.input.workspace } : {}),
-      extraTools: sharedTools,
-      abortSignal: scope.abortSignal,
-      canUseTool: scope.permissions.canUseTool,
-      hooksForTask: (taskId) =>
-        toolOperationHooks(this.deps.db, scope.runId, taskId),
-      trajectoryForTask: (taskId) =>
-        createRunTrajectory(recorder, {
-          provider: resolved.toolModel.providerId,
-          modelId: resolved.toolModel.modelId,
-          callSettings: {},
-        }),
-      onSubagentEvent: (event) => {
-        scope.emit({ type: "subagent_update", ...event });
-      },
-    });
-
-    return [createSubagentBridgeTool(runner)];
-  }
 }
-
-/** 子代理桥:SubagentRunner(消息流 + 台账)包成 subagent 工具。 */
-const createSubagentBridgeTool = (runner: SubagentRunner): PipelineTool => {
-  const subagentSchema = z.object({
-    description: z.string().min(1).describe(
-      "A short (3-5 word) description of the delegated task, for display."
-    ),
-    prompt: z.string().min(1).describe(
-      "The complete, self-contained task for the subagent. It does not share this " +
-      "conversation's context, so include everything it needs."
-    ),
-    subagent: z.string().optional().describe(
-      "Subagent type to fork. Defaults to explorer."
-    ),
-  });
-
-  return tool({
-    name: "subagent",
-    description: [
-      "Delegate a self-contained task to a subagent (a separate agent that works in its own " +
-      "context) to offload focused, independent work — research, a scoped analysis — so it does " +
-      "not consume this conversation's context.",
-      "The subagent returns its result, not its intermediate steps. Give it a complete, " +
-      "standalone prompt: it does not see this conversation.",
-      "The tool waits for the child and returns its final result. Independent calls may run in parallel."
-    ].join("\n"),
-    inputSchema: subagentSchema,
-    async execute({ description, prompt, subagent: type }, extra) {
-      const id = crypto.randomUUID();
-      // parentToolCallId 用 SDK 派给这次调用的 toolUseID —— 子代理进程消息、SSE 帧、
-      // 主对话里的卡片三者靠它一对一归位。SDK 总会有,兜底只是防御。
-      const parentToolCallId = extra.toolUseID ?? `task-${id}`;
-
-      const result = await runner.runFork({
-        taskId: id,
-        parentToolCallId,
-        subagentType: type ?? "explorer",
-        description,
-        prompt,
-        abortSignal: extra.signal,
-      });
-
-      return textResult(result.text);
-    }
-  });
-};

@@ -3,19 +3,23 @@ import type { HookCallback, HookCallbackMatcher, Options } from "@eva/harness";
 import type { AppDatabase } from "../../db/index.js";
 import { toolOperations } from "../../db/schema.js";
 
+/** 主 agent 的台账 agent 列;子代理用 hook 的 agent_id(= task_id)。 */
+const MAIN_AGENT = "main";
+
 /**
  * tool_operations 的写入改由 hooks 完成(FR-008):
- * intent 在 PreToolUse(权限通过后、execute 前 —— 被拒的调用不写 intent),
- * result 在 PostToolUse / PostToolUseFailure。
+ * intent 在 PreToolUse,result 在 PostToolUse / PostToolUseFailure。
+ * 一组 hooks 服务主 agent 与全部子代理 —— agent 列取 hook 的 agent_id
+ * (同 SDK:子代理调用带 agent_id,主 agent 不带)。
  * Synchronous SQLite writes: the intent is committed before execute starts.
  */
 export function toolOperationHooks(
   db: AppDatabase,
   runId: string,
-  agent: string,
 ): NonNullable<Options["hooks"]> {
   const pre: HookCallback = async (input) => {
     if (input.hook_event_name !== "PreToolUse") return {};
+    const agent = input.agent_id ?? MAIN_AGENT;
     db.insert(toolOperations).values({
       runId, agent, toolCallId: input.tool_use_id, toolName: input.tool_name,
       input: JSON.stringify(input.tool_input) ?? "null", status: "running", startedAt: Date.now()
@@ -24,6 +28,7 @@ export function toolOperationHooks(
   };
   const post: HookCallback = async (input) => {
     if (input.hook_event_name !== "PostToolUse") return {};
+    const agent = input.agent_id ?? MAIN_AGENT;
     db.update(toolOperations).set({
       status: "completed",
       output: JSON.stringify(input.tool_response) ?? "null",
@@ -37,6 +42,7 @@ export function toolOperationHooks(
   };
   const postFailure: HookCallback = async (input) => {
     if (input.hook_event_name !== "PostToolUseFailure") return {};
+    const agent = input.agent_id ?? MAIN_AGENT;
     db.update(toolOperations).set({
       status: "failed",
       error: input.error,

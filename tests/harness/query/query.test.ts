@@ -3,7 +3,6 @@ import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { z } from "zod";
 
 import { query } from "../../../packages/harness/src/query/query.js";
-import { runSubagentQuery } from "../../../packages/harness/src/query/subagent-tool.js";
 import { textResult, tool } from "../../../packages/harness/src/tools/tool.js";
 import { toRunStreamFrames } from "../../helpers/frames.js";
 import type { HarnessMessage, Options } from "../../../packages/harness/src/query/types.js";
@@ -113,80 +112,5 @@ describe("query()", () => {
     expect(frames.some((f) => f.type === "step-start")).toBe(true);
     expect(frames.some((f) => f.type === "text-delta")).toBe(true);
     expect(frames.at(-1)).toMatchObject({ type: "finish", finishReason: "stop", text: "hey" });
-  });
-});
-
-describe("subagent 递归 query()", () => {
-  it("子代理消息带 parent_tool_use_id;工具调用走父的 canUseTool(agentID=子代理名)", async () => {
-    const seenAgentIDs: Array<string | undefined> = [];
-    const parentOptions: Options = {
-      model: {
-        languageModel: modelOf([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "t1" },
-          { type: "text-delta", id: "t1", delta: "child done" },
-          { type: "text-end", id: "t1" },
-          { type: "finish", finishReason: "stop", usage },
-        ]) as never,
-        id: "openai:child",
-      },
-      canUseTool: async (_toolName, _input, opts) => {
-        seenAgentIDs.push(opts.agentID);
-        return { behavior: "allow" as const };
-      },
-    };
-
-    const messages: HarnessMessage[] = [];
-    for await (const message of runSubagentQuery(
-      { options: parentOptions, parentPrompt: [] },
-      {
-        subagentType: "explorer",
-        definition: { description: "explore", prompt: "You are an explorer." },
-        prompt: "find the answer",
-        parentToolUseID: "parent-call-1",
-        abortSignal: new AbortController().signal,
-      },
-    )) {
-      messages.push(message);
-    }
-
-    // 每条消息都盖了 parent 派发 id;最后一条是子代理自己的 result。
-    expect(messages.every((m) => m.parent_tool_use_id === "parent-call-1")).toBe(true);
-    expect(messages.at(-1)).toMatchObject({ type: "result", subtype: "success" });
-    expect(messages[0]).toMatchObject({ type: "system", subtype: "init", model: "openai:child" });
-  });
-
-  it("tools 白名单过滤父工具;省略 = 继承全部", async () => {
-    const childTool = tool({
-      name: "child_only", description: "c", inputSchema: z.object({}),
-      execute: async () => textResult("ok"),
-    });
-    // 白名单含 child_only → 注册;工具走 canUseTool(allow)。
-    const options: Options = {
-      model: {
-        languageModel: modelOf([
-          { type: "stream-start", warnings: [] },
-          { type: "tool-input-start", id: "tc-1", toolName: "child_only" },
-          { type: "tool-call", toolCallId: "tc-1", toolName: "child_only", input: "{}" },
-          { type: "finish", finishReason: "tool-calls", usage },
-          // 第二步模型不产出(省事):子代理收口在 maxTurns?不 —— 直接第二步文本。
-        ]) as never,
-        id: "openai:child",
-      },
-      tools: [childTool],
-      canUseTool: async () => ({ behavior: "allow" as const }),
-    };
-
-    const q = query({
-      prompt: [],
-      options: { ...options, maxTurns: 2 },
-    });
-    const tools: string[] = [];
-    for await (const message of q) {
-      if (message.type === "system" && message.subtype === "init") {
-        tools.push(...message.tools);
-      }
-    }
-    expect(tools).toContain("child_only");
   });
 });

@@ -51,8 +51,8 @@ POST /api/v1/runs/:runId/abort    真正停下来的唯一方式
 ② 装配    工作区 → MCP / 记忆 / plan gate / 子代理 / 模型 → Options 失败层 routing
 ③ 上下文  本轮分支可见的历史 → 模型消息                          失败层 context
 ④ 开流    SSE 头 → run_start 帧
-⑤ 流式    for await (message of query())：trajectory/pino 吃消息，
-          toRunStreamFrames(message) → recorder + emit 给订阅者
+⑤ 流式    for await (message of query())：子代理消息 → SubagentProjection；
+          主 agent：trajectory/pino 吃消息，toRunStreamFrames(message) → recorder + emit
    收尾    同一事务：最终 assistant 消息 + 终态 + 记忆提取入队
 ```
 
@@ -64,8 +64,11 @@ POST /api/v1/runs/:runId/abort    真正停下来的唯一方式
    `body.modelId ?? sessions.model`，它依赖被重试消息所在的会话记录。
 3. **工作区在 agent 之前。** agent 的工具集依赖工作区，工作区来自会话。
 
-子代理在 ② 里装好：`SubagentRunner` 的构造没有副作用，它的事件要等工具在 ⑤ 里被调用才发出，
-所以不依赖 SSE 是否已经打开。
+子代理在 ② 里只是 `options.agents` 里的定义，没有副作用。harness 的 `subagent` 工具在 ⑤ 里被调用时
+才跑子代理，它的消息并在同一条 `query()` 流里（`task_started` … `task_notification`，中间的消息带
+`parent_tool_use_id`）；⑤ 按 `parent_tool_use_id` 分两路：主 agent → recorder 帧 / 轨迹 / SSE，
+子代理 → `SubagentProjection`（任务行、子代理消息、`subagent_update`、agent=taskId 的轨迹）。
+run 结束时没收到 `task_notification` 的任务收成 failed。
 
 ## 4. 失败与收尾
 

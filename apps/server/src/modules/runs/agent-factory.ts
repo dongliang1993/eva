@@ -24,11 +24,7 @@ import {
 } from "@eva/harness";
 
 import { toolOverflowDir } from "../../paths.js";
-import {
-  filterToolsForRole,
-  missingRoleTools,
-  type SubagentRole,
-} from "../subagents/index.js";
+import { subagentDefinitions } from "../subagents/index.js";
 import type { AppInfrastructure } from "../../types/common.js";
 import {
   resolveModelSlot,
@@ -104,10 +100,6 @@ export interface AgentBuildOptions {
     readonly store: PlanGateStore;
   }
   | undefined;
-  /** tool 槽位模型已解析时直接给(子代理工厂用它);缺省走 settings。 */
-  readonly toolModel?: ModelBinding | undefined;
-  /** 上一轮 build 已解析的 call settings(temperature)。 */
-  readonly temperature?: number | undefined;
 }
 
 // Agent system prompt 的 Memory 板块,由 build 注入。
@@ -286,12 +278,17 @@ export class AgentFactory {
       ...defined("maxOutputTokens", models.chat.maxOutputTokens),
     };
 
+    // 子代理(harness 内置 subagent 工具):工具槽位模型 + 角色白名单。
+    // 角色要的工具本轮不存在 → 不列出(模型看不见它),不在派发时才爆。
+    const agents = subagentDefinitions(tools, this.binding(models.tool));
+
     return {
       options: {
         model: this.binding(models.chat),
         tools,
         systemPrompt: buildAgentSystemPrompt({ sections }),
         maxTurns: MAIN_AGENT_MAX_STEPS,
+        ...(Object.keys(agents).length > 0 ? { agents } : {}),
         ...defined("canUseTool", options.canUseTool),
         callSettings,
         limits: { toolTimeoutMs: TOOL_TIMEOUT },
@@ -305,67 +302,8 @@ export class AgentFactory {
           : {}),
       },
       mainModel: models.chat,
-      toolModel: options.toolModel ?? models.tool,
+      toolModel: models.tool,
       callSettings,
-    };
-  }
-
-  /**
-   * 装配一个子代理的 Options(工具槽模型 + 角色白名单)。
-   *
-   * 阀1(便宜):子代理用 tool 槽位模型,不走 chat。
-   * 阀4(收窄):只在 buildBaseTools 的基础集上按角色的 allowedTools 过滤 ——
-   *   角色能拿到的永远是进程里真实存在的工具,白名单只是让写工具/执行工具缺席。
-   */
-  buildSubagentOptions(options: {
-    readonly workspace?: WorkspaceContext | undefined;
-    readonly extraTools?: readonly PipelineTool[] | undefined;
-    readonly canUseTool?: Options["canUseTool"];
-    readonly planGate?:
-    | {
-      readonly state: PlanGateState;
-      readonly store: PlanGateStore;
-    }
-    | undefined;
-    /** 主代理装配时已解析并冻结的 tool-model binding。 */
-    readonly model: ModelBinding;
-    readonly temperature?: number | undefined;
-    /** 子代理的 system prompt(角色的)。 */
-    readonly systemPrompt: string;
-    readonly role: SubagentRole;
-    readonly maxTurns: number;
-  }): Options {
-    const baseTools = buildBaseTools(
-      {
-        skills: this.infra.skills,
-        ...defined("workspace", options.workspace),
-        ...defined("extraTools", options.extraTools),
-      },
-    );
-
-    // 角色要的工具在这个会话里压根不存在 → 早爆,不给残废工具集。
-    // (文件工具挂在工作区守卫内:没绑工作区时 explorer 只剩 read_skill,
-    //  那样的子代理"没有手却被要求读代码",实测会编造目录树。)
-    const missing = missingRoleTools(baseTools, options.role);
-    if (missing.length > 0) {
-      throw new AgentUnavailableError(
-        `子代理 ${options.role.type} 缺少必需工具:${missing.join("、")}。` +
-        "这些是工作区工具 —— 请先给该会话绑定一个工作区,再派子代理。",
-      );
-    }
-
-    const tools = [...filterToolsForRole(baseTools, options.role)];
-
-    return {
-      model: this.binding(options.model),
-      tools,
-      systemPrompt: options.systemPrompt,
-      maxTurns: options.maxTurns,
-      ...defined("canUseTool", options.canUseTool),
-      callSettings: {
-        ...defined("temperature", options.temperature),
-      },
-      limits: { toolTimeoutMs: TOOL_TIMEOUT },
     };
   }
 

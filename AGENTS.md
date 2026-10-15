@@ -94,10 +94,14 @@ Server 拥有 HTTP、SQLite、run 生命周期与能力装配；harness 拥有�
 - **工具发现**：工具集大到挤占 prompt 时暴露核心工具 + `tool_search`。
 - **Skill**：只暴露 `name` 与 `description`；`read_skill` 加载完整指令。没有 LLM skill
   选择、选择表或角色自动分配。
-- **子代理是 awaited 工具**：角色经 `options.agents` 传入（harness 内置 `subagent` 工具
-  递归调 `query()`，消息带 `parent_tool_use_id`）；server 侧 `SubagentRunner` 同样调
-  `query()` 并加消息落库与 SSE 帧。隔离的 transcript、继承取消与审批处理；最终文本经
-  tool result 返回；没有后台启动、report 工具或 notice 注入。
+- **子代理是 awaited 工具**（Claude Code Agent 工具同款）：server 把角色转成 `options.agents`
+  （`modules/subagents/roles.ts` 的 `subagentDefinitions`，工具槽位模型；核心工具缺席的角色不列出），
+  harness 内置 `subagent` 工具跑子代理：全新上下文（定义的 prompt + 一条任务）、父工具经白名单/
+  `disallowedTools` 过滤且恒不含 `subagent`、父 abort 单向传入、`agentID`（= task_id）进
+  `canUseTool` 与 hooks 的 `agent_id`。子代理消息并在父 `query()` 流里：`task_started` →
+  子代理消息（`parent_tool_use_id` = 派发调用）→ `task_notification`；server 的
+  `SubagentProjection` 按 `parent_tool_use_id` 分拣（任务行、子代理消息落库、`subagent_update`、
+  agent=taskId 的轨迹）。最终文本经 tool result 返回，失败/中断是 isError 结果；没有后台启动。
 - **Plan 模式**用 workspace plan 文件 + 用户 review。plan gate 是 server `canUseTool`
   放行链的第一级，只拦普通 write/edit 路径；它是护栏，不是沙箱。**Plan Weave 已移除。**
 - `web_fetch` 返回分页 Markdown，不再二次调模型做摘要；SDK 工具校验错误不再由隐藏模型修复。
@@ -244,11 +248,11 @@ DB 的 `mcp_servers` 是**运行时唯一事实源**，`~/.eva/mcp.json` 只在�
   崩溃未闭合操作由启动清扫补 `operation_abandoned`，retention 按
   `observability.retentionDays` / `maxDatabaseBytes` 整 Run 粒度删
   （`usage_records` 独立存活 —— 0030 起它没有 runs FK）。
-- **事件路径**：harness `AgentTelemetryEvent` → server `createObserverBridge(recorder).forAgent(agent)`
-  （`agent: "main" | taskId`，**没有隐式 current run** —— runId 属于绑定不属于事件）→
-  `fanout` 合并 Pino 第二订阅者。`AgentBuildOptions.observer` / `buildSubagent.observer` 必填。
-- **三段计时**:`withApproval`（审批等待）/ `withConcurrencyCap`（排队等待）/ `withExecTiming`
-  （真实执行）汇入 run-scoped `ToolTimingState`，mapper 在 tool-result 时取快照；
+- **事件路径**：harness 只产一条 `HarnessMessage` 流 → server `createRunTrajectory(recorder)`
+  从消息推 run_events（`agent: "main" | taskId`，**没有隐式 current run** —— runId 属于绑定
+  不属于事件）；Pino 是同一条流的第二订阅者；approval_asked/decided 由权限链直接写。
+- **三段计时**：`runToolCall` 的权限评估（审批等待）/ 只读并发位（排队等待）/ execute（真实执行）
+  汇入 pipeline 的 timings，随 `user.tool_timing` 发出；
   SSE `tool-result` 帧带 `toolExecMs/approvalWaitMs/queueWaitMs`，旧 `durationMs` 不再赋值
   （历史消息徽章隐藏）。abort 补发落 `tool_call_abandoned`（`duration_ms` 未分解墙钟，不伪造三段）。
 - **读取面**:`GET /threads/:id/trajectory`（会话 Run 事件，三元组游标）、
